@@ -1,0 +1,2 @@
+-- REFUSE_NOT_IN_DESIGN (quotient-lang S1): Forks is an X10 name, refused as a binder too.
+def forkless : Unit -> Unit := fun (Forks : Unit) => Forks

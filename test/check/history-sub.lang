@@ -1,0 +1,3 @@
+-- REFUSE_HISTORY_WRITE: a subtraction from the history field earned.
+state State := makeState (held : Nat) history (earned : Nat)
+def take : State -> State := fun (s : State) => makeState (held s) (natSub (earned s) 1)

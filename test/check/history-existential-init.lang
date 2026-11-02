@@ -1,0 +1,6 @@
+-- An existential payload can hide State from a scan of literal family names.
+state State := makeState history (earned : Nat)
+def init : State := makeState 0
+def boxed : Sigma (A : Type 0) A := pack State init
+def bump : State -> Option State := fun (s : State) => bind (natAdd (earned s) 1) (fun (v : Nat) => some (makeState v))
+def reset : State -> Option State := fun (s : State) => some (payload boxed)

@@ -1,0 +1,6 @@
+-- The block case split of S3. windowCode
+-- folds over Window, the second family of the block Signal / Window: the
+-- cases of Window come after the two cases of Signal, and the value is the
+-- last argument. windowCode 0 = 5, windowCode 7 = 7. The gate compares the
+-- `langc --kit ir` text of this file with test/ir/block.ir.
+def windowCode : (n : Nat) -> Nat := fun (n : Nat) => fold Nat Nat 1 (fun (l : Nat) => 2) 5 (fun (s : Nat) => s) (flagIf (natEq n 0) winOpen (winShut n))

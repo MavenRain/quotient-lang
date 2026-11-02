@@ -1,0 +1,2 @@
+-- REFUSE_STATE: a history field must be Nat, not Flag.
+state State := makeState (held : Nat) history (flagMark : Flag)

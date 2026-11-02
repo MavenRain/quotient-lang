@@ -5,14 +5,12 @@
    constructor tag, or a heap address. Locals are numbered from 0. The
    parameters of an entry are locals 0 to param_count - 1. A heap block is a
    run of words. A target sets its own word width in memory (Wasm: 8 bytes,
-   EVM: 32 bytes) and resets its bump allocator at each call.
+   EVM: 32 bytes) and resets its bump allocator at each call. An entry has a
+   static heap bound (heap_words); the lowering refuses an entry without one.
 
-   Traps are lazy (the H3 ruling, see the kit README): no expression traps.
-   The lowering gives each value a word and a trap flag (0 or 1). ADD and MUL
-   wrap; ADD_CARRY and MUL_CARRY give the flag of an overflow. A heap block
-   is word 0 = the tag, then for field K the word at 1 + 2K and its flag at
-   2 + 2K. Only an entry result is a strict position at run time: when its
-   flag is 1, the entry runs TRAP. */
+   Each op is total (S3): no expression traps, and a value has no trap
+   flag. ADD and MUL wrap; ADD_CARRY gives 1 on an overflow. A heap block is
+   word 0 = the tag, then field K at word 1 + K. */
 #ifndef LANG_IR_H
 #define LANG_IR_H
 
@@ -31,8 +29,8 @@ typedef enum {
   IR_OP_EQ,        /* 1 when equal, else 0 */
   IR_OP_LE,        /* 1 when left <= right, else 0 */
   IR_OP_ADD_CARRY, /* 1 when the sum is larger than 2^64 - 1, else 0 */
-  IR_OP_MUL_CARRY, /* 1 when the product is larger than 2^64 - 1, else 0 */
-  IR_OP_OR         /* bitwise or (the lowering gives it flags only) */
+  IR_OP_DIV,       /* the quotient; the right operand is a NonZero (S3) */
+  IR_OP_MOD        /* the remainder; the right operand is a NonZero (S3) */
 } IrOp;
 
 typedef enum {
@@ -64,11 +62,10 @@ typedef enum {
   IR_STMT_SET,    /* local := expr */
   IR_STMT_ALLOC,  /* local := address of a new block; word k := fields[k] */
   IR_STMT_IF,     /* expr != 0: body, else: otherwise */
-  IR_STMT_SWITCH, /* run arms[expr]; a value outside 0 to arm_count - 1 traps */
+  IR_STMT_SWITCH, /* run arms[expr]; a value outside 0 to arm_count - 1 runs the last arm */
   IR_STMT_REPEAT, /* counter := expr, then run body counter times */
   IR_STMT_WHILE,  /* counter := expr; run body while counter > 0 and local != 0,
                      counter decreasing by 1 at each run; body sets local */
-  IR_STMT_TRAP,   /* stop the call: Wasm unreachable, EVM REVERT */
   IR_STMT_RETURN  /* return expr */
 } IrStmtKind;
 
@@ -85,7 +82,11 @@ struct IrStmt {
   size_t arm_count;
 };
 
-/* One exported entry. The body block ends in RETURN or TRAP on each path. */
+/* The largest heap bound: 1 GiB of 8-byte words, the arena limit of langc
+   eval. */
+#define IR_HEAP_WORDS_MAX ((uint64_t)1 << 27)
+
+/* One exported entry. The body block ends in RETURN on each path. */
 typedef struct {
   const char *name;
   const IrScalar *params;
@@ -93,6 +94,7 @@ typedef struct {
   IrScalar result;
   uint32_t local_count; /* includes the parameters */
   IrBlock body;
+  uint64_t heap_words; /* the ALLOC words on the longest path (S3) */
 } IrFunc;
 
 typedef struct {

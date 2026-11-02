@@ -1,0 +1,4 @@
+-- quotient-lang S1, guest mode: a program defines admitted base names of
+-- PLAN section 4 (the design parameters Asset and Key); the design check passes them.
+def Asset : Type 0 := Sum Unit Unit
+def Key : Type 0 := Sum Unit Unit

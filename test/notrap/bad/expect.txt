@@ -1,0 +1,7 @@
+unreachable unreachable
+memory-grow memory.grow
+div-no-guard div_u or rem_u with no guard
+rem-no-guard div_u or rem_u with no guard
+max-above-min memory max is not equal to min
+no-max memory with no max
+outside opcode 0x6A outside the list

@@ -1,0 +1,2 @@
+-- REFUSE_PARTIAL (S3): pred is not a kit word; natSub x 1 is the total form.
+def f : Nat -> Nat := fun (x : Nat) => pred x

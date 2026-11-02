@@ -1,0 +1,4 @@
+-- REFUSE_HISTORY_WRITE: a definition returns init, so earned goes back to its start value.
+state State := makeState (held : Nat) history (earned : Nat)
+def init : State := makeState 0 0
+def restart : State -> State := fun (s : State) => init

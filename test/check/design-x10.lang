@@ -1,0 +1,2 @@
+-- REFUSE_NOT_IN_DESIGN (quotient-lang S1): GenConsensus is a name of the DROP row X10.
+def GenConsensus : Type 0 := Nat

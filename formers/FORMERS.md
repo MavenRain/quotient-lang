@@ -16,6 +16,11 @@ and 3 (commit 279214c) write the same formers in assay forms. Each host file
 host form of each former and its status. Section 5 of this file is the
 realization matrix.
 
+This file is a copy of `formers/FORMERS.md` of lang-template. Its `hosts/`
+paths and the words "this repository" refer to lang-template, not to this
+language. `formers/tcc-wasm.md` gives the status of each former in this
+language.
+
 ## 1. Notation
 
 - `A`, `B`, `C` and `E` are data types. `S` is a seed type. `I` is an index

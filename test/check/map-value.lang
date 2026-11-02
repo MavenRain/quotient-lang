@@ -1,0 +1,2 @@
+-- The value type of a Map must be Nat or Flag.
+def bad : Map Nat (List Nat) := mapEmpty

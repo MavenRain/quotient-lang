@@ -1,0 +1,5 @@
+-- The check accepts this program, but the entry uses a KMap operation at
+-- run time. `langc ir` must refuse it with REFUSE_LOWER: the Wasm host does
+-- not lower a KMap operation.
+def keyed : Map Nat Nat := mapEmpty
+def got : (n : Nat) -> Nat := fun (n : Nat) => mapGet (mapSet keyed n 1) n

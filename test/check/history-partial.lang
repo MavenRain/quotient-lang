@@ -1,0 +1,3 @@
+-- REFUSE_HISTORY_WRITE: the state constructor without all of its arguments.
+state State := makeState (held : Nat) history (earned : Nat)
+def mk : Nat -> Nat -> State := makeState

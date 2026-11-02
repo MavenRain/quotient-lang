@@ -1,0 +1,14 @@
+-- The Nat operations of S3. Each entry gives
+-- a Nat, so `langc ir` lowers it. The gate compares the `langc --kit ir`
+-- text of this file with test/ir/natops.ir, and the writer row runs each
+-- entry on Wasm (S3).
+def addOr : (a b : Nat) -> Nat := fun (a b : Nat) => option 0 (fun (s : Nat) => s) (natAdd a b)
+def divBy : (a k : Nat) -> Nat := fun (a k : Nat) => option 0 (fun (d : NonZero Nat) => natDiv a d) (nonZero k)
+def modBy : (a k : Nat) -> Nat := fun (a k : Nat) => option 0 (fun (d : NonZero Nat) => natMod a d) (nonZero k)
+def unwrap : (k : Nat) -> Nat := fun (k : Nat) => option 0 (fun (d : NonZero Nat) => nonZeroValue d) (nonZero k)
+-- pickSecond (S3): a pair block made at run time; second loads field 1.
+def pickSecond : (x y : Nat) -> Nat := fun (x y : Nat) => second (option (pair 0 y) (fun (s : Nat) => pair s x) (natAdd x y))
+-- flagPick (S3): a Flag parameter. The Wasm entry sets it
+-- to 1 when it is not 0, so `flagPick 2 4 9` gives 4 on Wasm (eval refuses
+-- a Flag of 2).
+def flagPick : (f : Flag) -> (a b : Nat) -> Nat := fun (f : Flag) (a b : Nat) => flagIf f a b

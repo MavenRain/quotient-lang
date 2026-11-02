@@ -1,0 +1,2 @@
+-- REFUSE_PARTIAL (S3): the literal 0 is not a NonZero Nat.
+def q : Nat := natDiv 7 0

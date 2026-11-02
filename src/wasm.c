@@ -2,16 +2,16 @@
 
    Module layout:
    - Function 0 is the internal allocator `alloc (bytes : i32) -> i64`. It
-     bumps the mutable i64 global 0 (the heap pointer) over memory 0. When a
-     block does not fit, it grows the memory. When the memory cannot grow (the
-     maximum is WASM_MAX_PAGES), it traps.
+     bumps the mutable i64 global 0 (the heap pointer) over memory 0, with no
+     check. Memory 0 has a fixed size (minimum = maximum): the pages of the
+     largest heap bound of an entry (IrFunc heap_words), at least 1 page.
    - Function 1 + K is IR entry K, exported as its name. Each parameter and the
      result is an i64. Each entry first resets the heap pointer to 0, and it
-     traps on a Flag argument larger than 1.
+     sets a Flag parameter to 1 when it is not 0.
    - A word is 8 bytes. Word K of the block at address A is at A + 8K.
 
    Each entry has three i64 scratch locals after the IR locals: S and S + 1
-   hold the operands of SUB, ADD_CARRY and MUL_CARRY, and S + 2 holds the
+   hold the operands of SUB and ADD_CARRY, and S + 2 holds the
    address of an ALLOC. An operator reads its operands into S and S + 1 only
    after both operand expressions are done, so a nested operator cannot
    overwrite them.
@@ -23,56 +23,22 @@
 #include <string.h>
 
 #include "target.h"
+#include "wasmop.h"
 
-#define WASM_MAX_PAGES 16384u /* 1 GiB, the arena limit of langc eval */
+#define WASM_PAGE_BYTES 65536u
 #define WASM_DEPTH_MAX 2000u
 
+/* The opcodes: the list of src/wasmop.h. */
+#define WASM_OP_ENUM(name, byte, imm) name = byte,
 enum {
-  OP_UNREACHABLE = 0x00,
-  OP_BLOCK = 0x02,
-  OP_LOOP = 0x03,
-  OP_IF = 0x04,
-  OP_ELSE = 0x05,
-  OP_END = 0x0B,
-  OP_BR = 0x0C,
-  OP_BR_IF = 0x0D,
-  OP_BR_TABLE = 0x0E,
-  OP_RETURN = 0x0F,
-  OP_CALL = 0x10,
-  OP_SELECT = 0x1B,
-  OP_LOCAL_GET = 0x20,
-  OP_LOCAL_SET = 0x21,
-  OP_LOCAL_TEE = 0x22,
-  OP_GLOBAL_GET = 0x23,
-  OP_GLOBAL_SET = 0x24,
-  OP_I64_LOAD = 0x29,
-  OP_I64_STORE = 0x37,
-  OP_MEMORY_SIZE = 0x3F,
-  OP_MEMORY_GROW = 0x40,
-  OP_I32_CONST = 0x41,
-  OP_I64_CONST = 0x42,
-  OP_I32_EQ = 0x46,
-  OP_I64_EQZ = 0x50,
-  OP_I64_EQ = 0x51,
-  OP_I64_LT_U = 0x54,
-  OP_I64_GT_U = 0x56,
-  OP_I64_LE_U = 0x58,
-  OP_I64_GE_U = 0x5A,
-  OP_I64_ADD = 0x7C,
-  OP_I64_SUB = 0x7D,
-  OP_I64_MUL = 0x7E,
-  OP_I64_DIV_U = 0x80,
-  OP_I64_OR = 0x84,
-  OP_I64_SHL = 0x86,
-  OP_I64_SHR_U = 0x88,
-  OP_I32_WRAP_I64 = 0xA7,
-  OP_I64_EXTEND_I32_U = 0xAD,
+  WASM_OPS(WASM_OP_ENUM)
   TYPE_I32 = 0x7F,
   TYPE_I64 = 0x7E,
   TYPE_FUNC = 0x60,
   TYPE_EMPTY = 0x40,
   ALIGN_WORD = 3
 };
+#undef WASM_OP_ENUM
 
 enum {
   SECTION_TYPE = 1,
@@ -161,6 +127,14 @@ static int operands(Sink *s, uint32_t t) {
   return op2(s, OP_LOCAL_SET, t + 1u) && op2(s, OP_LOCAL_SET, t);
 }
 
+/* The operands are on the stack. Leaves a, then b | (b = 0): the divisor is
+   never 0, so div_u and rem_u can not trap. The lowering gives a NonZero b
+   (S3); the guard stays for notraptool. */
+static int divisor(Sink *s, uint32_t t) {
+  return operands(s, t) && op2(s, OP_LOCAL_GET, t) && op2(s, OP_LOCAL_GET, t + 1u) && op2(s, OP_LOCAL_GET, t + 1u) &&
+         put_byte(s, OP_I64_EQZ) && put_byte(s, OP_I64_EXTEND_I32_U) && put_byte(s, OP_I64_OR);
+}
+
 static int emit_op(Sink *s, IrOp op, uint32_t t) {
   switch (op) {
     case IR_OP_ADD:
@@ -178,14 +152,10 @@ static int emit_op(Sink *s, IrOp op, uint32_t t) {
     case IR_OP_ADD_CARRY: /* a + b < a, modulo 2^64 */
       return operands(s, t) && op2(s, OP_LOCAL_GET, t) && op2(s, OP_LOCAL_GET, t + 1u) && put_byte(s, OP_I64_ADD) &&
              op2(s, OP_LOCAL_GET, t) && put_byte(s, OP_I64_LT_U) && put_byte(s, OP_I64_EXTEND_I32_U);
-    case IR_OP_MUL_CARRY:
-      /* Exact: a * b > 2^64 - 1 if and only if b > floor((2^64 - 1) / a), for
-         a > 0. For a = 0 the divisor is 1, and no b is larger than 2^64 - 1. */
-      return operands(s, t) && op2(s, OP_LOCAL_GET, t + 1u) && i64_const(s, ~(uint64_t)0) && i64_const(s, 1) &&
-             op2(s, OP_LOCAL_GET, t) && op2(s, OP_LOCAL_GET, t) && put_byte(s, OP_I64_EQZ) && put_byte(s, OP_SELECT) &&
-             put_byte(s, OP_I64_DIV_U) && put_byte(s, OP_I64_GT_U) && put_byte(s, OP_I64_EXTEND_I32_U);
-    case IR_OP_OR:
-      return put_byte(s, OP_I64_OR);
+    case IR_OP_DIV:
+      return divisor(s, t) && put_byte(s, OP_I64_DIV_U);
+    case IR_OP_MOD:
+      return divisor(s, t) && put_byte(s, OP_I64_REM_U);
   }
   return 0;
 }
@@ -218,23 +188,26 @@ static int emit_alloc(Sink *s, const IrStmt *st, uint32_t t, unsigned depth) {
   return ok && op2(s, OP_LOCAL_GET, t + 2u) && op2(s, OP_LOCAL_SET, st->local);
 }
 
-/* Blocks: exit, trap, then arm n - 1 down to arm 0 (the innermost). br_table
-   label k ends the block of arm k, so the code of arm k follows. A value of
-   n or more takes label n, the trap block. After arm k, label n - k is the
-   exit block. */
+/* Blocks: exit, then arm n - 1 down to arm 0 (the innermost). br_table
+   label k ends the block of arm k, so the code of arm k follows. The last
+   arm is the default label n - 1, so a value of n - 1 or more runs it. After
+   arm k, label n - 1 - k is the exit block. With no arm, nothing runs: a
+   value of a family with no constructor does not exist. */
 static int emit_switch(Sink *s, const IrStmt *st, uint32_t t, unsigned depth) {
   size_t k;
   size_t n = st->arm_count;
-  int ok = put_byte(s, OP_BLOCK) && put_byte(s, TYPE_EMPTY) && put_byte(s, OP_BLOCK) && put_byte(s, TYPE_EMPTY);
-  for (k = 0; k < n && ok; k++) ok = put_byte(s, OP_BLOCK) && put_byte(s, TYPE_EMPTY);
+  int ok = 1;
+  if (n == 0)
+    return 1;
+  for (k = 0; k <= n && ok; k++) ok = put_byte(s, OP_BLOCK) && put_byte(s, TYPE_EMPTY);
   ok = ok && emit_expr(s, st->expr, t, depth + 1u) && op2(s, OP_LOCAL_TEE, t) && put_byte(s, OP_I32_WRAP_I64) &&
        i32_const(s, n) && op2(s, OP_LOCAL_GET, t) && i64_const(s, n) && put_byte(s, OP_I64_LT_U) &&
-       put_byte(s, OP_SELECT) && op2(s, OP_BR_TABLE, n);
-  for (k = 0; k <= n && ok; k++) ok = put_uleb(s, k);
+       put_byte(s, OP_SELECT) && op2(s, OP_BR_TABLE, n - 1u);
+  for (k = 0; k < n && ok; k++) ok = put_uleb(s, k);
   for (k = 0; k < n && ok; k++) {
-    ok = put_byte(s, OP_END) && emit_block(s, &st->arms[k], t, depth + 1u) && op2(s, OP_BR, n - k);
+    ok = put_byte(s, OP_END) && emit_block(s, &st->arms[k], t, depth + 1u) && op2(s, OP_BR, n - 1u - k);
   }
-  return ok && put_byte(s, OP_END) && put_byte(s, OP_UNREACHABLE) && put_byte(s, OP_END);
+  return ok && put_byte(s, OP_END);
 }
 
 /* counter := expr; then, at the top of each run, leave when counter = 0 or
@@ -266,8 +239,6 @@ static int emit_stmt(Sink *s, const IrStmt *st, uint32_t t, unsigned depth) {
       return emit_loop(s, st, 0, t, depth);
     case IR_STMT_WHILE:
       return emit_loop(s, st, 1, t, depth);
-    case IR_STMT_TRAP:
-      return put_byte(s, OP_UNREACHABLE);
     case IR_STMT_RETURN:
       return emit_expr(s, st->expr, t, depth + 1u) && put_byte(s, OP_RETURN);
   }
@@ -281,28 +252,19 @@ static int emit_block(Sink *s, const IrBlock *b, uint32_t t, unsigned depth) {
   return ok;
 }
 
-/* alloc (bytes : i32) -> i64, local 1 = the new end:
-   old := heap; end := old + bytes; if end > memory bytes { grow by
-   ceil(end / 65536) - pages; trap on -1 }; heap := end; return old. */
+/* alloc (bytes : i32) -> i64: old := heap; heap := old + bytes; return old.
+   No check: memory 0 holds the heap bound of each entry. */
 static int part_alloc(Sink *s, const void *arg) {
   (void)arg;
-  return put_uleb(s, 1) && put_uleb(s, 1) && put_byte(s, TYPE_I64) && op2(s, OP_GLOBAL_GET, 0) &&
-         op2(s, OP_GLOBAL_GET, 0) && op2(s, OP_LOCAL_GET, 0) && put_byte(s, OP_I64_EXTEND_I32_U) &&
-         put_byte(s, OP_I64_ADD) && op2(s, OP_LOCAL_TEE, 1) && op2(s, OP_MEMORY_SIZE, 0) &&
-         put_byte(s, OP_I64_EXTEND_I32_U) && i64_const(s, 16) && put_byte(s, OP_I64_SHL) && put_byte(s, OP_I64_GT_U) &&
-         put_byte(s, OP_IF) && put_byte(s, TYPE_EMPTY) && op2(s, OP_LOCAL_GET, 1) && i64_const(s, 65535) &&
-         put_byte(s, OP_I64_ADD) && i64_const(s, 16) && put_byte(s, OP_I64_SHR_U) && op2(s, OP_MEMORY_SIZE, 0) &&
-         put_byte(s, OP_I64_EXTEND_I32_U) && put_byte(s, OP_I64_SUB) && put_byte(s, OP_I32_WRAP_I64) &&
-         op2(s, OP_MEMORY_GROW, 0) && i32_const(s, ~(uint64_t)0) && put_byte(s, OP_I32_EQ) && put_byte(s, OP_IF) &&
-         put_byte(s, TYPE_EMPTY) && put_byte(s, OP_UNREACHABLE) && put_byte(s, OP_END) && put_byte(s, OP_END) &&
-         op2(s, OP_LOCAL_GET, 1) && op2(s, OP_GLOBAL_SET, 0) && put_byte(s, OP_END);
+  return put_uleb(s, 0) && op2(s, OP_GLOBAL_GET, 0) && op2(s, OP_GLOBAL_GET, 0) && op2(s, OP_LOCAL_GET, 0) &&
+         put_byte(s, OP_I64_EXTEND_I32_U) && put_byte(s, OP_I64_ADD) && op2(s, OP_GLOBAL_SET, 0) && put_byte(s, OP_END);
 }
 
-/* Traps when the Flag parameter K is larger than 1. */
-static int flag_guard(Sink *s, const IrFunc *fn, size_t k) {
+/* A Flag parameter K is true when it is not 0: K := K = 0 ? 0 : 1. */
+static int flag_norm(Sink *s, const IrFunc *fn, size_t k) {
   return fn->params[k] == IR_SCALAR_NAT ||
-         (op2(s, OP_LOCAL_GET, k) && i64_const(s, 1) && put_byte(s, OP_I64_GT_U) && put_byte(s, OP_IF) &&
-          put_byte(s, TYPE_EMPTY) && put_byte(s, OP_UNREACHABLE) && put_byte(s, OP_END));
+         (i64_const(s, 0) && i64_const(s, 1) && op2(s, OP_LOCAL_GET, k) && put_byte(s, OP_I64_EQZ) &&
+          put_byte(s, OP_SELECT) && op2(s, OP_LOCAL_SET, k));
 }
 
 static int part_entry(Sink *s, const void *arg) {
@@ -311,8 +273,9 @@ static int part_entry(Sink *s, const void *arg) {
   size_t k;
   int ok = put_uleb(s, 1) && put_uleb(s, (uint64_t)(fn->local_count - fn->param_count) + 3u) &&
            put_byte(s, TYPE_I64) && i64_const(s, 0) && op2(s, OP_GLOBAL_SET, 0);
-  for (k = 0; k < fn->param_count && ok; k++) ok = flag_guard(s, fn, k);
-  return ok && emit_block(s, &fn->body, t, 0) && put_byte(s, OP_UNREACHABLE) && put_byte(s, OP_END);
+  for (k = 0; k < fn->param_count && ok; k++) ok = flag_norm(s, fn, k);
+  /* The body ends in RETURN (lower_entry), so no code follows it. */
+  return ok && emit_block(s, &fn->body, t, 0) && put_byte(s, OP_END);
 }
 
 static int part_types(Sink *s, const void *arg) {
@@ -337,9 +300,17 @@ static int part_functions(Sink *s, const void *arg) {
   return ok;
 }
 
+/* One memory: minimum = maximum = the pages of the largest heap bound of an
+   entry, at least 1. */
 static int part_memory(Sink *s, const void *arg) {
-  (void)arg;
-  return put_uleb(s, 1) && put_byte(s, 1) && put_uleb(s, 1) && put_uleb(s, WASM_MAX_PAGES);
+  const IrProgram *prog = arg;
+  uint64_t words = 0;
+  uint64_t pages;
+  size_t i;
+  for (i = 0; i < prog->func_count; i++) words = prog->funcs[i].heap_words > words ? prog->funcs[i].heap_words : words;
+  pages = (8u * words + WASM_PAGE_BYTES - 1u) / WASM_PAGE_BYTES;
+  pages = pages == 0 ? 1u : pages;
+  return put_uleb(s, 1) && put_byte(s, 1) && put_uleb(s, pages) && put_uleb(s, pages);
 }
 
 static int part_global(Sink *s, const void *arg) {
@@ -380,7 +351,7 @@ int target_write(const IrProgram *prog, TargetPart part, FILE *out, FILE *err) {
   (void)part;
   for (i = 0; i < sizeof header && ok; i++) ok = put_byte(&s, header[i]);
   ok = ok && section(&s, SECTION_TYPE, part_types, prog) && section(&s, SECTION_FUNCTION, part_functions, prog) &&
-       section(&s, SECTION_MEMORY, part_memory, NULL) && section(&s, SECTION_GLOBAL, part_global, NULL) &&
+       section(&s, SECTION_MEMORY, part_memory, prog) && section(&s, SECTION_GLOBAL, part_global, NULL) &&
        section(&s, SECTION_EXPORT, part_exports, prog) && section(&s, SECTION_CODE, part_code, prog);
   if (!ok && ferror(out)) fputs("langc: IO: -: cannot write the wasm module\n", err);
   return ok;

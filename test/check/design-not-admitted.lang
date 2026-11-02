@@ -1,0 +1,2 @@
+-- REFUSE_NOT_IN_DESIGN (quotient-lang S1): Coin is not a base sort of PLAN section 4.
+axiom Coin : Type 0

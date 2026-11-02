@@ -7,8 +7,9 @@ and so it derives that two independent transactions commute. Histories that
 differ only in the order of independent transactions are one value. No
 program that compiles can trap: an abort is the value `nothing`.
 
-Status: S0, the seed. The language is a plan: `docs/PLAN.md`. The code is
-the lang-template tcc-wasm kit (5265a2a) with its sample domain.
+Status: S1 DONE. The code is the permit-lang 18deea2 kernel with R0 and
+REFUSE_NOT_IN_DESIGN, and its sample domain. The quotient-lang types are a
+plan: `docs/PLAN.md`. Next: S2 (section 12).
 
 ## When to reach for quotient-lang
 

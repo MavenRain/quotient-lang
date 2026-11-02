@@ -1,0 +1,2 @@
+-- REFUSE_PARTIAL (S3): natEq wants a Nat, natAdd gives an Option Nat.
+def f : Nat -> Flag := fun (x : Nat) => natEq (natAdd x 1) 2

@@ -1,0 +1,2 @@
+-- REFUSE_NOT_IN_DESIGN (quotient-lang S1): absorb is a name of the DROP row X4.
+def absorb : Nat := 0

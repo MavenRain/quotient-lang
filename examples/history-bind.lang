@@ -1,0 +1,4 @@
+-- Rule D-9 (S3): natAdd gives an Option Nat, so a history
+-- field takes the variable of bind (natAdd (F t) e) (fun v => ...).
+state State := makeState (held : Nat) history (earned : Nat)
+def bump : State -> Option State := fun (s : State) => bind (natAdd (earned s) 1) (fun (e : Nat) => some (makeState (held s) e))

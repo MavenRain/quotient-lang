@@ -1,0 +1,2 @@
+-- NAME_UNKNOWN (slice S2, R19): natMul is not in the base span.
+def wrong : Nat := natMul 1 2

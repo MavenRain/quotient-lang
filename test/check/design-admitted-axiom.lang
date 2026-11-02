@@ -1,0 +1,3 @@
+-- REFUSE_AXIOM (quotient-lang S1): Asset is an admitted base sort, so the
+-- design check passes it; an axiom has no proof.
+axiom Asset : Type 0

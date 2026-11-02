@@ -1,0 +1,4 @@
+-- The block refusal of S3. hopDepth folds
+-- over Hop. Hop and Echo each have one recursive field of the other family,
+-- so the lowering refuses it: a recursive fold over a block of families.
+def hopDepth : (n : Nat) -> Nat := fun (n : Nat) => fold Nat Nat 0 (fun (e : Nat) => e) (fun (h : Nat) => h) (flagIf (natEq n 0) hopEnd (hopNext (echoBack hopEnd)))

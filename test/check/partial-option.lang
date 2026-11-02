@@ -1,0 +1,2 @@
+-- REFUSE_PARTIAL (S3): natAdd gives an Option Nat; take it apart with option or bind.
+def f : Nat -> Nat := fun (x : Nat) => natAdd x 1

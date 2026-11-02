@@ -1,0 +1,2 @@
+-- REFUSE_STATE: a state field of type State is not first order.
+state State := makeState (held : Nat) (nextState : State)

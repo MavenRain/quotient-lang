@@ -17,9 +17,9 @@ file gives the readings of that request, the route, the slices and the open
 items. The USER ruled Q-R1 to Q-R8 before S0 (section 14). So sections 2 to
 5 are RULED, not proposals.
 
-Status: S0 (this seed): the tcc-wasm kit from lang-template 5265a2a,
-`design/DESIGN.md`, this plan, the README table and AGENTS.md. Next: S1, the
-first build slice (section 12).
+Status: S1 DONE (2026-11-02): the permit-lang 18deea2 kernel with
+R0 (section 8.1), REFUSE_NOT_IN_DESIGN (section 7) and the footprint
+checker survey (section 5.5). Next: S2 (section 12).
 
 ## 1. Rulings
 
@@ -176,6 +176,67 @@ compile time:
 T3 prints this matrix. The node uses it to put a trace in Foata normal
 form (X9).
 
+### 5.5 S1 survey (2026-11-02, committed trees only)
+
+**1. Key-pattern syntax (proposal for S5).** The body type is a one-constructor `family` (permit-lang 18deea2 `parse_family`). Its fields are projections (`proj_app`, src/front/check.c 2472). The footprint clause follows the family, in the way that the `sealed` and `law` modifiers attach (src/front/parser.c 591 to 600).
+```
+keyspace  ::= 'keyspace' Space ':' Type '->' 'Key'
+decl      ::= 'family' Name ':=' ctor 'footprint' Binder reads writes
+reads     ::= 'reads' '[' pats ']'        writes ::= 'writes' '[' pats ']'
+pats      ::= (pat (',' pat)*)?
+pat       ::= Space '(' arg (',' arg)* ')'
+arg       ::= Binder '.' Field | Nat | Name     -- Name: a closed def
+item      ::= 'get' Name ':=' pat | 'let' Name ':=' term | 'set' pat ':=' term
+```
+Reused tokens: `[`, `,`, `]`, `:=`, `(`, `)`. New tokens: `.` (today an identifier char in internal mode only, src/front/lexer.c 135), and `keyspace`, `footprint`, `reads`, `writes`, `get`, `set`. A `get` or `set` names a pattern by its text. The checker compares it with the declared list after it renames the binder.
+
+**2. Three-phase step.** The step body is one flat list of items. `get` and `set` are items, not terms, so a pure term cannot hold them. The checker makes one pass and keeps a phase: read, decide or write. The phase starts at read.
+- `REFUSE_FOOTPRINT_READ`: the pattern of a `get` is not in `reads`.
+- `REFUSE_FOOTPRINT_WRITE`: the pattern of a `set` is not in `writes`. A `set` moves the phase to write.
+- `REFUSE_FOOTPRINT_PHASE`: a `get`, or a `let` that can give `nothing`, when the phase is write.
+- `REFUSE_FOOTPRINT_DYNAMIC`: an `arg` that is not `b.field`, a numeral or a closed def. An example is a name bound by a `get`. The checker tests this at the declaration and at each `get` and `set`.
+
+**3. The `Ind` matrix (C99 sketch).**
+```c
+typedef enum { ARG_FIELD, ARG_CONST } ArgKind;
+typedef struct { ArgKind kind; uint32_t index; } PatArg;
+typedef struct { uint32_t space; const PatArg *args; uint32_t arg_count; } KeyPat;
+typedef struct { uint32_t family; const KeyPat *reads, *writes; uint32_t read_count, write_count; } Footprint;
+typedef enum { IND_ALWAYS, IND_DEP, IND_IF } IndVerdict;          /* ind, dep, ind-if */
+typedef enum { OPD_FIELD_A, OPD_FIELD_B, OPD_CONST } OpdKind;
+typedef struct { OpdKind kind; uint32_t index; } Operand;         /* field, or constant pool index */
+typedef struct { Operand left, right; } IndLit;                   /* left != right; not both OPD_CONST */
+typedef struct { const IndLit *lits; uint32_t lit_count; } IndClause;   /* OR */
+typedef struct { uint32_t a, b; IndVerdict verdict; const IndClause *clauses; uint32_t clause_count, dep_space; } IndRow; /* AND */
+typedef struct { const IndRow *rows; uint32_t row_count, body_count; } IndMatrix;
+```
+There is one row for each unordered pair `a <= b` in declaration order, `a = b` included. The rows grow in an arena, as merge-lang `machine_row` does. Each conflict pair is a pattern pair from `writes a` x (`reads b` + `writes b`), or from `reads a` x `writes b`:
+- Different spaces, or two different constants at one position: the pair does not conflict, so the checker skips it.
+- Otherwise the checker makes one clause. The clause has one literal for each position that holds a field.
+- An empty clause means `dep`.
+- No clauses means `ind`. Some clauses means `ind-if`.
+
+T3 (S11) prints one JSON row for each pair, as merge-lang `row_json` does. The node (S7, S10) looks up the row by the two body tags. It swaps the sides when the tag of `a` is larger. Then it tests each clause on the two body values with `Key` equality. Foata normal form uses this test.
+
+**4. Sources to port**
+
+| Repo | SHA | Path(s) | Take | Slice |
+|---|---|---|---|---|
+| merge-lang | 7bbcd58 | src/front/core.h 226 to 251 (`RowClass`, `RowMark`, `PairRow`) | the per-pair row shape | S5 |
+| merge-lang | 7bbcd58 | src/front/check.c 3693 to 3700 (`OpWrites`), 4260 (`machine_row`), 4421 to 4470 (`pair_cover`, `form_row`) | per-op write flags, arena rows, pairs O1 <= O2, first-match class map | S5 |
+| merge-lang | 7bbcd58 | src/front/json.c 116 (`CLASS_NAME`), 185 (`row_json`) | JSON pair rows | S11 |
+| merge-lang | 7bbcd58 | domain/domain.lang (`orIdem`, `natMaxIdem`, comm, assoc) | semilattice law proofs, the model for L2 | S3 |
+| quorum-lang | 4537d57 | examples/bag.lang 49 to 75 (`FMSet` generator form, `module Bag` union laws) | the HIT; `Pfin` = this plus an idempotence 1-cell | S2 (`Bag`), S3 |
+| quorum-lang | 4537d57 | src/front/check.c 1711 to 1725 (`bag_shaped`), src/front/basenames.c 50, test/check/cell-fmset-cons.lang | CM shape check; `REFUSE_CELL` for the cons form | S3 |
+| quorum-lang | 4537d57 | examples/agent/05-replica-merge.lang | join merge (comm, assoc, idem) | S3 (`Mempool` union) |
+| permit-lang | 18deea2 (HEAD 505ca37) | src/front/parser.c 591 to 600, `parse_family`; src/front/check.c 2472 (`proj_app`); src/front/lexer.c 135 | modifier and family forms, projections | S5 |
+
+Notes:
+- merge-lang moved from ff5720b to 7bbcd58 (S8 agent kit, MCP). core.h did not change. check.c has 22 changed lines.
+- The quorum surface uses an Agda-like Unicode syntax. The port must rewrite it into the permit-lang `family` syntax.
+- Other repos: no checker. The committed trees of all ~/Documents/*-lang repos have no `footprint|bernstein|frame law|read set|write set|trace swap|foata` checker. This includes relay 9109e2a, cairn a56e602, orbit 2162fb2, tranche 9aafbf8 and accrue 20852a1. merge-lang 7bbcd58 is the best match: it has pair classes, but it writes flags for each part, not key patterns. charter-lang dff5802 docs/PLAN.md 373 (Q-S2d-1) has an independence relation over footprints for tests only. It has no checker.
+
+
 ## 6. Laws and assumptions
 
 | Law | Statement | Discharge |
@@ -204,8 +265,8 @@ assumptions (A2).
 | Code | Refuses | Slice |
 |---|---|---|
 | `REFUSE_CELL` | A type constructor other than the cell monad and its dual (kernel) | S1 |
-| `REFUSE_PARTIAL` | A partial operation or general recursion (kernel R0) | S1 |
-| `REFUSE_NOT_IN_DESIGN` | A base name that section 4 does not admit, X4 and X10 too | S1 |
+| `REFUSE_PARTIAL` | A partial operation or general recursion (kernel R0) | S1, DONE (port). Two sites give this code for a partial name in a spine head: `unknown_name` and `var_core`. A mutant that removes the `unknown_name` refusal is equivalent: `var_core` then refuses the same name with the same code and text. The S1 mutant PARTIAL-CODE changes the code at `unknown_name`, and the row partial-name.lang kills it. |
+| `REFUSE_NOT_IN_DESIGN` | A name of the DROP rows X4 and X10 in any declaration form or binder (path 1); an axiom of a universe type whose name is not an admitted base sort (path 2, Q-S1-2 (a)) | S1, DONE |
 | `REFUSE_OVERFLOW` | `Amount` arithmetic used outside `Maybe` | S2 |
 | `REFUSE_BAG_NONCOMM` | An eliminator out of `Bag` or `Pfin` without its path clauses; a non-commutative `agg` (E5) | S2, S4 |
 | `REFUSE_WITNESS_READ` | A step or txid that reads a `Witness` (L5) | S4 |
@@ -224,6 +285,16 @@ Wasm writer, `test/notraptool.c`). Candidates: permit-lang (the relay-lang
 05dd63b kernel plus R0 from relay-lang 5c386bb, at S3 of permit), and
 relay-lang itself. The affine layer of permit-lang S4 is not needed. S1
 surveys the candidates, records the SHA and the tree, and the cut list.
+
+S1 result (2026-11-02, W/S1-survey.md): permit-lang 18deea2 "Port R0 and
+the no-trap Wasm writer from relay-lang (S3)", tree fc4f8475. S1 took 230
+of its 233 paths (185 A, 41 M, 2 D, 1 R100). It did not take the permit
+text of docs/PLAN.md, AGENTS.md and README.md. Not taken: permit-lang
+505ca37 (the S4 affine layer) and relay-lang 9109e2a (the relay domain).
+The cut list (crypto, the ZK prelude, the chain words, the relay domain)
+is at relay 05dd63b and permit S3. The kernel keeps REFUSE_TIME and the
+other codes of 18deea2. The orbit-lang sample signature of REFUSE_SIG
+stays until a later slice (Q-S1-3).
 
 ### 8.2 The three targets
 
@@ -261,15 +332,15 @@ surveys the candidates, records the SHA and the tree, and the cut list.
 | E5 | ECDSA signatures concatenated into a `Bag Sig` | Refused: `REFUSE_BAG_NONCOMM` |
 | E6 | A witness encoded again | The txid does not change (L5) |
 
-## 11. Port pins (2026-11-02, `git -C <repo> log -1`)
+## 11. Port pins (2026-11-02, `git -C <repo> log -1`; S1 repin: merge-lang moved)
 
 | Repo | HEAD | Use |
 |---|---|---|
 | lang-template | 5265a2a | the seed kit (tcc-wasm) |
-| permit-lang | 505ca37 | kernel with R0 (S1 candidate), R0 and R1 table, A1 to A6 shape |
+| permit-lang | 505ca37 | kernel with R0 (S1 took 18deea2, tree fc4f8475), R0 and R1 table, A1 to A6 shape |
 | relay-lang | 9109e2a | kernel and R0 source (S1 candidate) |
 | quorum-lang | 4537d57 | `Pfin` (FMSet), CRDT merge, IVC compose |
-| merge-lang | ff5720b | semilattice merge laws (S1b induction port), Wasm merge engine (S7) |
+| merge-lang | 7bbcd58 | semilattice merge laws (S1b induction port), Wasm merge engine (S7) |
 | zkml-lang | 968dce4 | Circuit IR (T2) |
 | zkpolicy-lang | 1d263fb | ZK verifier |
 | leaf-lang | 5ccc494 | gate dash-check skip for design/DESIGN.md |
@@ -284,8 +355,8 @@ One session for each slice: scope, gate, mutants, docs, close.
 | Slice | Work | Status |
 |---|---|---|
 | S0 | Seed from tcc-wasm, DESIGN.md, this plan, README table, AGENTS.md; serial gate EXIT 0 (9 parse refusals, 19 check refusals, 32 evals, 10 lowered, 13 Wasm modules valid, 813 differential cases, 0 mismatches, review and domain regressions passed); seed commit; private repo | DONE |
-| S1 | First build slice. Survey and port the Cubical TT kernel with R0 (8.1): `REFUSE_CELL`, `REFUSE_PARTIAL`, the no-trap Wasm writer, `test/notraptool.c`. Add `REFUSE_NOT_IN_DESIGN` with the section 4 name list. Survey the footprint checker (section 5): the key-pattern syntax, the three-phase step, the sources to port. | NEXT |
-| S2 | `Amount` (u64, `Maybe` arithmetic), `Asset`, `Bag`, `Value`, `Balance`, `[[ ]]v`, `Delta`, `neg`, `Balanced`; `REFUSE_OVERFLOW`; L1, L8. | |
+| S1 | First build slice. Survey and port the Cubical TT kernel with R0 (8.1): `REFUSE_CELL`, `REFUSE_PARTIAL`, the no-trap Wasm writer, `test/notraptool.c`. Add `REFUSE_NOT_IN_DESIGN` with the section 4 name list. Survey the footprint checker (section 5): the key-pattern syntax, the three-phase step, the sources to port. | DONE: serial gate EXIT 0 (31 examples, 16 parse refusals, 160 check refusals, 10 kit-only refusals, 86 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 0 failures; review, domain and path regressions passed). Review restored 33 valid Wasm modules and 1088 differential cases with 0 mismatches; 7 of 8 mutants KILLED, PARTIAL equivalent (section 7) |
+| S2 | `Amount` (u64, `Maybe` arithmetic), `Asset`, `Bag`, `Value`, `Balance`, `[[ ]]v`, `Delta`, `neg`, `Balanced`; `REFUSE_OVERFLOW`; L1, L8. | NEXT |
 | S3 | `Pfin`, `in`, `union`, `Key`, `Footprint`; L2. | |
 | S4 | `Body`, `Witness`, `Authorized`, `AuthTx`, `Digest` (abstract), `Sig`, `agg`, `QC`; `REFUSE_WITNESS_READ`, `REFUSE_BAG_NONCOMM` at `Bag Sig`; L5. | |
 | S5 | `State`, `Eff`, `step`, `reads`, `writes`, the frame-law checker, `Ind`, the `Ind` matrix; `REFUSE_FOOTPRINT_*`; L3. | |
@@ -320,7 +391,9 @@ One session for each slice: scope, gate, mutants, docs, close.
   MVP subset that `langc` emits (permit-lang Q-S0-1 precedent), or the
   merge-lang Wasm engine (merge-lang S7). S10 surveys.
 - K5 SPEC.md is the kit text. It changes at each slice and is final at S19.
-- K6 The kit sample domain in `domain/` stays until S1 or S2 replaces it.
+- K6 The kit sample domain in `domain/` stays until S2 replaces it. S1
+  keeps the permit-lang 18deea2 domain and the orbit-lang sample
+  signature of REFUSE_SIG (Q-S1-3).
 
 ## 14. Questions for the USER
 
@@ -352,3 +425,35 @@ recommendation (a).
 - Q-R8: Seed kit. (a) tcc-wasm (Wasm STF + C node + langc mcp); ZK circuit
   IR as a later slice that ports zkml-lang Circuit IR.
   RULED: (a), USER 11-02 (pre-S0).
+- Q-S1-1: Node rows. Review on 2026-11-02 restored the Wasm execution
+  and differential checks in S1: 33 modules, 1088 cases, 0 mismatches.
+  The gate covers every example and both scalar IR fixtures. Node is a
+  gate dependency. The three targets still come at S9 (T1 part 1).
+- Q-S1-2: The scope of REFUSE_NOT_IN_DESIGN. A program has one opaque
+  declaration form, `axiom`, and families come from domain/domain.lang
+  only. (a) path 1: an X4 or X10 name is refused in each declaration form
+  and binder; path 2: an axiom of a universe type whose name is not an
+  admitted base sort is refused; each other axiom keeps REFUSE_AXIOM, so
+  the ported fixtures keep their codes; (b) refuse each axiom and each
+  program type definition whose name section 4 does not admit.
+  Recommendation: (a).
+- Q-S1-3: The REFUSE_SIG table of the kernel is the orbit-lang sample
+  signature (`Member`, `Choice`, `Outcome`, `Group`, `Orbit`, `act`,
+  `menu` and others), not a section 4 name. Fixtures of the port use it.
+  (a) keep it until the slice that gives the first section 4 slot (S2
+  or S4), which replaces it with section 4 rows; (b) cut it in S1.
+  Recommendation: (a).
+- Q-S1-4: The section 5.4 "list of field inequalities" for a key space
+  with more than one argument. For `allow(a.o, a.s)` against
+  `allow(b.o, b.s)` the test is `a.o != b.o` OR `a.s != b.s`. (a) store
+  an AND of OR-clauses (`IndClause`); a one-argument space gives clauses
+  with one literal each; (b) allow only one-argument key spaces.
+  Recommendation: (a).
+- Q-S1-5: The `Pfin` idempotence cell. (a) `midem : (s : Pfin A) -> m s s
+  = s`, which uses only recursive fields and passes the quorum cell rule;
+  (b) the singleton form `m (eta x) (eta x) = eta x`, which can hit
+  REFUSE_CELL. Recommendation: (a).
+- Q-S1-6: Field access in a pattern. Section 5.1 writes `b.input`, but the
+  kernel has no `.` token. (a) add `.` only inside a pattern and lower it
+  to `proj_app`; (b) write `utxo (input b)` and change the 5.1 example.
+  Recommendation: (a).

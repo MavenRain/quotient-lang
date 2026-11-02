@@ -1,7 +1,7 @@
 # Reads a `langc ir` dump and prints one `NAME [ARGS...]` line for each case of
 # the differential grid. A Flag parameter takes 0 and 1. A Nat parameter takes
 # small values, and, when the entry has no loop, also the values at the 2^32
-# and 2^64 limits (ADD_CARRY and MUL_CARRY cases). An entry with a loop gets
+# and 2^64 limits (the ADD_CARRY cases). An entry with a loop gets
 # only small values, because a large count runs past the evaluator fuel.
 BEGIN {
   small = "0 1 2 3 5 7"

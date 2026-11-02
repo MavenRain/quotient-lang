@@ -1,5 +1,6 @@
 /* The langc command line. SHARED by the tcc kits.
    Exit 0: ok. Exit 1: the program is refused. Exit 2: usage or IO. */
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -15,7 +16,7 @@ typedef enum {
   CMD_EVAL,
   CMD_IR,
   CMD_ABI,
-  CMD_BUILD
+  CMD_BUILD,
 } Command;
 
 typedef struct {
@@ -26,6 +27,8 @@ typedef struct {
   int arg_count;
   const char *out_path;
   int runtime;
+  int json;
+  CheckMode mode; /* orbit-lang S3: --kit selects the kit mode */
 } Options;
 
 static const struct {
@@ -40,11 +43,12 @@ static const struct {
 };
 
 static int usage(FILE *err) {
-  fputs("usage: langc check PROG\n"
-        "       langc eval PROG NAME [ARGS...]\n"
-        "       langc ir PROG\n"
-        "       langc abi PROG\n"
-        "       langc build PROG -o OUT [--runtime]\n", err);
+  fputs("usage: langc [--kit] check PROG\n"
+        "       langc [--kit] eval PROG NAME [ARGS...]\n"
+        "       langc [--kit] ir PROG\n"
+        "       langc [--kit] abi PROG [--text]\n"
+        "       langc [--kit] build PROG -o OUT [--runtime]\n"
+        "--kit: the kit mode, the trusted test scope of the kit gate\n", err);
   return 2;
 }
 
@@ -79,8 +83,12 @@ static int parse_options(int argc, char **argv, Options *opt, Diag *diag) {
   switch (opt->command) {
     case CMD_CHECK:
     case CMD_IR:
-    case CMD_ABI:
       return argc == 3 ? 1 : diag_fail(diag, "USAGE", NULL, "too many arguments");
+    case CMD_ABI:
+      /* The JSON ABI is the default; --text gives the C-K4-16 lines (C-c7-1). */
+      opt->json = argc == 3;
+      return argc == 3 || (argc == 4 && strcmp(argv[3], "--text") == 0) ? 1
+        : diag_fail(diag, "USAGE", NULL, "abi takes only --text after the program");
     case CMD_EVAL:
       if (argc < 4) return diag_fail(diag, "USAGE", NULL, "eval needs a definition name");
       opt->entry = argv[3];
@@ -140,7 +148,7 @@ static int run(const Options *opt, Arena *arena, Diag *diag) {
   DeclList decls;
   if (!front_load(arena, opt->prog_path, text, len, &decls, diag)) return 1;
   Machine machine;
-  if (!check_program(arena, &decls, &machine, diag)) return 1;
+  if (!check_program(arena, &decls, &machine, diag, opt->mode)) return 1;
   switch (opt->command) {
     case CMD_CHECK:
       puts("ok");
@@ -159,14 +167,16 @@ int main(int argc, char **argv) {
   Diag diag;
   diag_init(&diag);
   Options opt;
-  if (!parse_options(argc, argv, &opt, &diag)) {
+  int kit = argc > 1 && strcmp(argv[1], "--kit") == 0;
+  if (!parse_options(argc - kit, argv + kit, &opt, &diag)) {
     diag_print(&diag, stderr);
     return usage(stderr);
   }
+  opt.mode = kit ? CHECK_KIT : CHECK_GUEST;
   Arena arena;
   arena_init(&arena, ARENA_LIMIT_BYTES);
   int status = run(&opt, &arena, &diag);
   arena_release(&arena);
-  if (status != 0 && diag.set) diag_print(&diag, stderr);
+  if (status != 0) diag_print(&diag, stderr);
   return status;
 }

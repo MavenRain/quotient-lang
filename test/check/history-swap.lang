@@ -1,0 +1,3 @@
+-- REFUSE_HISTORY_WRITE: an add with the operands in the other order (the rule is strict).
+state State := makeState (held : Nat) history (earned : Nat)
+def bump : State -> Option State := fun (s : State) => bind (natAdd 1 (earned s)) (fun (e : Nat) => some (makeState (held s) e))

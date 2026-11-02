@@ -1,0 +1,3 @@
+-- REFUSE_HISTORY_WRITE: the history field earned is set to a literal.
+state State := makeState (held : Nat) history (earned : Nat)
+def reset : State -> State := fun (s : State) => makeState (held s) 0
