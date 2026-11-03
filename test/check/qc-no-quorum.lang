@@ -1,0 +1,16 @@
+-- A QC with no quorum def (S4, USER ruling Q-S4-5 (a)): the front end puts
+-- QC after the program defs Node, Body, Sig, nodeEq, quorum and signs.
+-- This program does not define quorum, so there is no QC, and the name QC
+-- is NAME_UNKNOWN.
+def Node : Type 0 := Sum Unit Unit
+def Body : Type 0 := Unit
+def Sig : Type 0 := Sum Unit Unit
+def sigIsSet : isSet Sig := bitIsSet
+def sigOne : Sig := bfalse
+def sigMul : Sig -> Sig -> Sig := or
+def sigAssoc : (x : Sig) -> (y : Sig) -> (z : Sig) -> Path Sig (sigMul (sigMul x y) z) (sigMul x (sigMul y z)) := orAssoc
+def sigComm : (x : Sig) -> (y : Sig) -> Path Sig (sigMul x y) (sigMul y x) := orComm
+def sigUnitL : (x : Sig) -> Path Sig (sigMul sigOne x) x := orUnitL
+def nodeEq : Node -> Node -> Sum Unit Unit := eqBit
+def signs : Node -> Body -> Sig -> Sum Unit Unit := fun (v : Node) (b : Body) (s : Sig) => s
+def qcType : Type 0 := QC unit

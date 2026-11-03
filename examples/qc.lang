@@ -1,0 +1,25 @@
+-- The QC prelude (S4, USER ruling Q-S4-5 (a)): after the program defs
+-- Node, Body, Sig, nodeEq, quorum and signs, the front end puts QC, a
+-- quorum certificate on a body. Here a node is a bit, so there are two
+-- nodes, and a quorum is a set that has both of them. A signature is a
+-- bit, and a node signs a body with the signature btrue.
+def Node : Type 0 := Sum Unit Unit
+def Body : Type 0 := Unit
+def Sig : Type 0 := Sum Unit Unit
+def sigIsSet : isSet Sig := bitIsSet
+def sigOne : Sig := bfalse
+def sigMul : Sig -> Sig -> Sig := or
+def sigAssoc : (x : Sig) -> (y : Sig) -> (z : Sig) -> Path Sig (sigMul (sigMul x y) z) (sigMul x (sigMul y z)) := orAssoc
+def sigComm : (x : Sig) -> (y : Sig) -> Path Sig (sigMul x y) (sigMul y x) := orComm
+def sigUnitL : (x : Sig) -> Path Sig (sigMul sigOne x) x := orUnitL
+def nodeEq : Node -> Node -> Sum Unit Unit := eqBit
+def quorum : Pfin Node -> Sum Unit Unit := fun (q : Pfin Node) =>
+  elim (fun (s : Sum Unit Unit) => Sum Unit Unit) (fun (u : Unit) => bfalse) (fun (u : Unit) => pfinIn Node nodeEq btrue q) (pfinIn Node nodeEq bfalse q)
+def signs : Node -> Body -> Sig -> Sum Unit Unit := fun (v : Node) (b : Body) (s : Sig) => s
+def qcSet : Pfin Node := union Node (pfinOf Node bfalse) (pfinOf Node btrue)
+def qcHas : Sum Unit Unit := quorum qcSet
+def qcOne : Sum Unit Unit := quorum (pfinOf Node btrue)
+def qcAll : (v : Node) -> Path (Sum Unit Unit) (pfinIn Node nodeEq v qcSet) btrue -> Sigma (s : Sig) (Path (Sum Unit Unit) (signs v unit s) btrue) :=
+  fun (v : Node) (p : Path (Sum Unit Unit) (pfinIn Node nodeEq v qcSet) btrue) => pack btrue (fun (i : I) => btrue)
+def qcUnit : QC unit :=
+  pack qcSet (pack (fun (i : I) => btrue) (trunc1 ((v : Node) -> Path (Sum Unit Unit) (pfinIn Node nodeEq v qcSet) btrue -> Sigma (s : Sig) (Path (Sum Unit Unit) (signs v unit s) btrue)) qcAll))

@@ -1,0 +1,9 @@
+-- txid must have the type Body -> Digest (S4, law L5, USER rulings Q-S4-2
+-- (a) and Q-S4-8 (a)): a txid of an AuthTx can read the witness.
+def Body : Type 0 := Size
+def Witness : Type 0 := Size
+def witnessOk : Body -> Witness -> Sum Unit Unit :=
+  fun (b : Body) (w : Witness) => btrue
+def Digest : Type 0 := Size
+def txid : AuthTx -> Digest :=
+  fun (x : AuthTx) => witness x

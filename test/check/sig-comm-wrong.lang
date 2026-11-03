@@ -1,0 +1,10 @@
+-- A sigComm that is not the comm law (S4, USER ruling Q-S4-4 (a)): its
+-- type is sigMul x y = sigMul x y, so sigComm is REFUSE_BAG_NONCOMM.
+def Sig : Type 0 := Sum Unit Unit
+def sigIsSet : isSet Sig := bitIsSet
+def sigOne : Sig := bfalse
+def sigMul : Sig -> Sig -> Sig := or
+def sigAssoc : (x : Sig) -> (y : Sig) -> (z : Sig) -> Path Sig (sigMul (sigMul x y) z) (sigMul x (sigMul y z)) := orAssoc
+def sigComm : (x : Sig) -> (y : Sig) -> Path Sig (sigMul x y) (sigMul x y) :=
+  fun (x : Sig) (y : Sig) => fun (i : I) => sigMul x y
+def sigUnitL : (x : Sig) -> Path Sig (sigMul sigOne x) x := orUnitL

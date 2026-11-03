@@ -1,0 +1,3 @@
+-- The Digest slot must be first-order data (S4, USER ruling Q-S4-3 (a)):
+-- a function type is not first-order data.
+def Digest : Type 0 := Size -> Size

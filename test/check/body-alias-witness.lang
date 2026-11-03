@@ -1,0 +1,5 @@
+-- An alias does not hide Witness from the slot Body (S4, law L5, USER
+-- ruling Q-S4-2 (a)): Body names Seal, and Seal names Witness.
+def Witness : Type 0 := Size
+def Seal : Type 0 := Witness
+def Body : Type 0 := Seal

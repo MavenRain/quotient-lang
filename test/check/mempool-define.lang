@@ -1,0 +1,3 @@
+-- Mempool is a prelude name (S4, Q-S4-1 (a)): a program must not define
+-- it.
+def Mempool : Type 0 := Pfin Size

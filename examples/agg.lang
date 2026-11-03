@@ -1,0 +1,14 @@
+-- The agg prelude (S4, USER rulings Q-S4-4 (a) and Q-S4-6 (a)): after the
+-- program defs Sig and the six bagFold arguments, the front end puts agg
+-- and the law L1 lemma aggOp. Here a signature is a bit, and agg of a
+-- bag of bits is their or.
+def Sig : Type 0 := Sum Unit Unit
+def sigIsSet : isSet Sig := bitIsSet
+def sigOne : Sig := bfalse
+def sigMul : Sig -> Sig -> Sig := or
+def sigAssoc : (x : Sig) -> (y : Sig) -> (z : Sig) -> Path Sig (sigMul (sigMul x y) z) (sigMul x (sigMul y z)) := orAssoc
+def sigComm : (x : Sig) -> (y : Sig) -> Path Sig (sigMul x y) (sigMul y x) := orComm
+def sigUnitL : (x : Sig) -> Path Sig (sigMul sigOne x) x := orUnitL
+def sigs : Bag Sig := bagOp Sig (bagOf Sig bfalse) (bagOf Sig btrue)
+def aggSigs : Sig := agg sigs
+def aggNone : Sig := agg (bagUnit Sig)

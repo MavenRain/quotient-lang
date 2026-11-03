@@ -1,0 +1,4 @@
+-- The Witness slot must be first-order data (S4, USER ruling Q-S4-1 (a)):
+-- a function type is not first-order data.
+def Body : Type 0 := Size
+def Witness : Type 0 := Size -> Size

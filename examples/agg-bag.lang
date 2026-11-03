@@ -1,0 +1,14 @@
+-- Sig can be a quotient set with the six commutative monoid proofs.
+def Sig : Type 0 := Bag Unit
+def sigIsSet : isSet Sig := bagIsSet Unit
+def sigOne : Sig := bagUnit Unit
+def sigMul : Sig -> Sig -> Sig := bagOp Unit
+def sigAssoc : (x : Sig) -> (y : Sig) -> (z : Sig) -> Path Sig (sigMul (sigMul x y) z) (sigMul x (sigMul y z)) :=
+  fun (x : Sig) (y : Sig) (z : Sig) => fun (i : I) => bagAssoc Unit x y z i
+def sigComm : (x : Sig) -> (y : Sig) -> Path Sig (sigMul x y) (sigMul y x) :=
+  fun (x : Sig) (y : Sig) => fun (i : I) => bagComm Unit x y i
+def sigUnitL : (x : Sig) -> Path Sig (sigMul sigOne x) x :=
+  fun (x : Sig) => fun (i : I) => bagUnitL Unit x i
+def aggEmpty : Path Sig (agg (bagUnit Sig)) sigOne := refl
+def aggOne : Path Sig (agg (bagOf Sig (bagOf Unit unit))) (bagOf Unit unit) := refl
+def aggUnion : (xs : Bag Sig) -> (ys : Bag Sig) -> Path Sig (agg (bagOp Sig xs ys)) (sigMul (agg xs) (agg ys)) := aggOp

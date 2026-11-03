@@ -1,0 +1,40 @@
+-- The auth prelude (S4, USER rulings Q-S4-1 (a), Q-S4-6 (a) and Q-S4-7
+-- (a)): after the program defs Body, Witness and witnessOk, the front end
+-- puts Authorized, AuthTx, Mempool and the law L5 lemma authTxEq. Two
+-- AuthTx with one body and two witnesses are one transaction, so a
+-- mempool keeps one of them. txEq compares the bodies only, and pfinIn
+-- tests a member of a mempool.
+def Body : Type 0 := Size
+def Witness : Type 0 := Size
+def witnessOk : Body -> Witness -> Sum Unit Unit :=
+  fun (b : Body) (w : Witness) => btrue
+def txA : AuthTx :=
+  pack sz0 (trunc1 (Sigma (w : Witness) (Path (Sum Unit Unit) (witnessOk sz0 w) btrue)) (pack sz0 refl))
+def txB : AuthTx :=
+  pack sz0 (trunc1 (Sigma (w : Witness) (Path (Sum Unit Unit) (witnessOk sz0 w) btrue)) (pack (szS sz0) refl))
+def txC : AuthTx :=
+  pack (szS sz0) (trunc1 (Sigma (w : Witness) (Path (Sum Unit Unit) (witnessOk (szS sz0) w) btrue)) (pack sz0 refl))
+def txSame : Path AuthTx txA txB := authTxEq txA txB refl
+def bodyEq : Body -> Body -> Sum Unit Unit :=
+  fun (m : Body) (n : Body) => elim (fun (t : Size) => Size -> Sum Unit Unit)
+    (fun (j : Size) => elim (fun (t : Size) => Sum Unit Unit) btrue (fun (k : Size) (r : Sum Unit Unit) => bfalse) j)
+    (fun (k : Size) (ih : Size -> Sum Unit Unit) (j : Size) => elim (fun (t : Size) => Sum Unit Unit) bfalse (fun (i : Size) (r : Sum Unit Unit) => ih i) j) m n
+def txEq : AuthTx -> AuthTx -> Sum Unit Unit :=
+  fun (x : AuthTx) (y : AuthTx) => bodyEq (witness x) (witness y)
+def poolAB : Mempool := union AuthTx (pfinOf AuthTx txA) (pfinOf AuthTx txB)
+def poolSame : Path Mempool (pfinOf AuthTx txA) (pfinOf AuthTx txB) :=
+  fun (i : I) => pfinOf AuthTx (txSame @ i)
+def poolHasA : Sum Unit Unit := pfinIn AuthTx txEq txA poolAB
+def poolHasC : Sum Unit Unit := pfinIn AuthTx txEq txC poolAB
+def poolHasATrue : Path (Sum Unit Unit) poolHasA btrue := refl
+def poolHasCFalse : Path (Sum Unit Unit) poolHasC bfalse := refl
+-- The union of a mempool with itself is the same mempool (pfinIdem, law
+-- L2), and witness gives the body of an AuthTx.
+def poolIdem : Path Mempool (union AuthTx poolAB poolAB) poolAB :=
+  fun (i : I) => pfinIdem AuthTx poolAB i
+def bodyB : Body := witness txB
+-- The slot Digest and the program name txid (S4, USER rulings Q-S4-3 (a)
+-- and Q-S4-8 (a)): txid reads the body only (law L5).
+def Digest : Type 0 := Size
+def txid : Body -> Digest := fun (b : Body) => b
+def txidB : Digest := txid (witness txB)

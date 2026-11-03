@@ -1,0 +1,6 @@
+-- witnessOk must have the type Body -> Witness -> Sum Unit Unit (S4, USER
+-- ruling Q-S4-6 (a)): a check of the body alone does not read the witness.
+def Body : Type 0 := Size
+def Witness : Type 0 := Size
+def witnessOk : Body -> Sum Unit Unit :=
+  fun (b : Body) => btrue

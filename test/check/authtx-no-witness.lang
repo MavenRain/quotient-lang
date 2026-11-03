@@ -1,0 +1,4 @@
+-- The auth prelude follows the program defs Body, Witness and witnessOk
+-- (S4, Q-S4-1 (a)). With no Body, Witness and witnessOk, AuthTx is not a
+-- name.
+def txNone : Type 0 := AuthTx

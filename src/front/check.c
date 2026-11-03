@@ -3957,7 +3957,10 @@ static int history_ok(Checker *c, const Core *t, int typed, uint32_t depth, cons
    12). The word `in` is not a row: programs use it as a name. */
 typedef enum {
   SIG_SLOT,
-  SIG_DEFINED
+  SIG_DEFINED,
+  /* A program name with a kernel-fixed type (USER ruling Q-S4-6 (a)): the
+     program defines it, and check_sig checks its type. */
+  SIG_PROGRAM
 } SigKind;
 
 typedef struct {
@@ -3990,13 +3993,29 @@ static const SigRow SIGNATURE[] = {
   {"Mempool", SIG_DEFINED},
   {"union", SIG_DEFINED},
   {"Footprint", SIG_DEFINED},
-  /* The kernel gives these names at slice S4 (PLAN section 12). */
-  {"Body", SIG_DEFINED},
-  {"Witness", SIG_DEFINED},
+  /* Slice S4 (PLAN section 12). Body, Witness, Digest and Sig are slots,
+     and witnessOk, txid, the six bagFold arguments sigIsSet .. sigUnitL
+     and the node names nodeEq, quorum and signs are program names with a
+     kernel-fixed type (USER rulings Q-S4-1 (a), Q-S4-3 (a), Q-S4-4 (a),
+     Q-S4-5 (a), Q-S4-6 (a) and Q-S4-8 (a)). The kernel gives the other
+     names. */
+  {"Body", SIG_SLOT},
+  {"Witness", SIG_SLOT},
+  {"Digest", SIG_SLOT},
+  {"witnessOk", SIG_PROGRAM},
+  {"txid", SIG_PROGRAM},
   {"Authorized", SIG_DEFINED},
   {"AuthTx", SIG_DEFINED},
-  {"Digest", SIG_DEFINED},
-  {"Sig", SIG_DEFINED},
+  {"Sig", SIG_SLOT},
+  {"sigIsSet", SIG_PROGRAM},
+  {"sigOne", SIG_PROGRAM},
+  {"sigMul", SIG_PROGRAM},
+  {"sigAssoc", SIG_PROGRAM},
+  {"sigComm", SIG_PROGRAM},
+  {"sigUnitL", SIG_PROGRAM},
+  {"nodeEq", SIG_PROGRAM},
+  {"quorum", SIG_PROGRAM},
+  {"signs", SIG_PROGRAM},
   {"QC", SIG_DEFINED},
   {"agg", SIG_DEFINED},
   /* The kernel gives these names at slice S5 (PLAN section 12). */
@@ -4031,16 +4050,203 @@ static uint32_t sig_row(const char *name) {
 }
 
 /* The slots that must be first-order data: Asset (valueCount counts with
-   the conversion check, USER ruling Q-S2-5 (a)) and Key (Footprint is
-   Pfin Key, USER ruling Q-S3-2 (a)). */
+   the conversion check, USER ruling Q-S2-5 (a)), Key (Footprint is Pfin
+   Key, USER ruling Q-S3-2 (a)), Body and Witness (USER ruling Q-S4-1
+   (a)), and Digest (USER ruling Q-S4-3 (a)). */
 static int first_order_slot(const char *name) {
-  return strcmp(name, "Asset") == 0 || strcmp(name, "Key") == 0;
+  return strcmp(name, "Asset") == 0 || strcmp(name, "Key") == 0 || strcmp(name, "Body") == 0 || strcmp(name, "Witness") == 0 || strcmp(name, "Digest") == 0;
+}
+
+/* The names that a Body must not mention: txid reads the body only (law
+   L5, PLAN section 6, USER ruling Q-S4-2 (a)). */
+static int witness_name(const char *name) {
+  return strcmp(name, "Witness") == 0 || strcmp(name, "Authorized") == 0 || strcmp(name, "AuthTx") == 0;
+}
+
+/* Law L5 (S4, USER ruling Q-S4-2 (a)). 1 if the core term T mentions
+   Witness, Authorized or AuthTx, also through the body of a program def. */
+static int mentions_witness(const Machine *m, const Core *t) {
+  uint32_t i;
+  if (t == NULL)
+    return 0;
+  switch (t->kind) {
+  case CORE_VAR:
+  case CORE_NAT:
+  case CORE_UNIV:
+  case CORE_IZERO:
+  case CORE_IONE:
+    return 0;
+  case CORE_GLOBAL:
+    return witness_name(m->defs[t->index].name) || (m->defs[t->index].origin == ORIGIN_PROGRAM && mentions_witness(m, m->defs[t->index].body));
+  case CORE_LAM:
+  case CORE_PI:
+  case CORE_SIGMA:
+  case CORE_APP:
+  case CORE_PLAM:
+  case CORE_INEG:
+  case CORE_IMEET:
+  case CORE_IJOIN:
+    return mentions_witness(m, t->a) || mentions_witness(m, t->b);
+  case CORE_PATHP:
+  case CORE_PAPP:
+    return mentions_witness(m, t->a) || mentions_witness(m, t->b) || mentions_witness(m, t->args[0]) || mentions_witness(m, t->args[1]);
+  case CORE_OP:
+    break;
+  }
+  for (i = 0; i < t->argc; i++) {
+    if (mentions_witness(m, t->args[i]))
+      return 1;
+  }
+  return 0;
+}
+
+/* The index of the def NAME in M, or the def count. */
+static uint32_t sig_def_index(const Machine *m, const char *name) {
+  uint32_t k;
+  for (k = 0; k < m->def_count && strcmp(m->defs[k].name, name) != 0; k++)
+    ;
+  return k;
+}
+
+/* The value of the def K, as the evaluator gives a CORE_GLOBAL. */
+static const Value *sig_global_value(Machine *m, uint32_t k) {
+  Core g;
+  memset(&g, 0, sizeof g);
+  g.kind = CORE_GLOBAL;
+  g.index = k;
+  return eval_core(m, NULL, &g);
+}
+
+/* The codomain of the function type TV at the level LEVEL, if the domain
+   of TV converts with the def NAME; NULL if not. */
+static const Value *sig_arrow(Checker *c, const Value *tv, uint32_t level, const char *name) {
+  Machine *m = c->m;
+  uint32_t k = sig_def_index(m, name);
+  if (k == m->def_count || tv == NULL || tv->kind != VAL_PI || !conv_values(m, level, tv->dom, sig_global_value(m, k)))
+    return NULL;
+  return closure_apply(m, tv, val_var(m, level));
+}
+
+/* The bagFold arguments after A and M, in the bagFold order (USER
+   rulings Q-S4-4 (a) and Q-S4-6 (a)). A program with the slot Sig gives
+   each of them, and the front end gives agg after the last of them. */
+static const char *const SIG_ARGS[] = {"sigIsSet", "sigOne", "sigMul", "sigAssoc", "sigComm", "sigUnitL"};
+
+#define SIG_ARG_COUNT (sizeof SIG_ARGS / sizeof SIG_ARGS[0])
+
+/* 1 if NAME is a bagFold argument at Sig. */
+static int sig_arg_name(const char *name) {
+  size_t i;
+  for (i = 0; i < SIG_ARG_COUNT && strcmp(SIG_ARGS[i], name) != 0; i++)
+    ;
+  return i < SIG_ARG_COUNT;
+}
+
+/* The codomain of the function type TV at ARG; NULL if TV is not a
+   function type. */
+static const Value *sig_apply(Machine *m, const Value *tv, const Value *arg) {
+  return (tv == NULL || tv->kind != VAL_PI) ? NULL : closure_apply(m, tv, arg);
+}
+
+/* 1 if TV converts with the type of the bagFold argument NAME at Sig: the
+   domain of the bagFold type at A := Sig, M := Sig and the earlier
+   arguments. An earlier argument is its def. If the program does not
+   define it before NAME, it is the fresh variable at the level of C,
+   which TV cannot name, so a type that needs it does not convert. */
+static int sig_arg_ok(Checker *c, const char *name, const Value *tv) {
+  Machine *m = c->m;
+  uint32_t fold = sig_def_index(m, "bagFold");
+  uint32_t sig = sig_def_index(m, "Sig");
+  const Value *want;
+  size_t i;
+  if (fold == m->def_count || sig == m->def_count)
+    return 0;
+  want = sig_apply(m, sig_apply(m, m->defs[fold].type, sig_global_value(m, sig)), sig_global_value(m, sig));
+  for (i = 0; i < SIG_ARG_COUNT && want != NULL && strcmp(SIG_ARGS[i], name) != 0; i++) {
+    uint32_t k = sig_def_index(m, SIG_ARGS[i]);
+    want = sig_apply(m, want, k == m->def_count ? val_var(m, c->level) : sig_global_value(m, k));
+  }
+  return i < SIG_ARG_COUNT && want != NULL && want->kind == VAL_PI && conv_values(m, c->level + 1u, tv, want->dom);
+}
+
+/* 1 if a program declaration of the checked list has the name NAME. */
+static int program_defines(const Checker *c, const char *name) {
+  size_t i;
+  for (i = 0; i < c->decls->count && !(c->decls->items[i].origin == ORIGIN_PROGRAM && strcmp(c->decls->items[i].name, name) == 0); i++)
+    ;
+  return i < c->decls->count;
+}
+
+/* The domains of the node names nodeEq and signs (USER ruling Q-S4-5
+   (a)). Each one is a def of the program. */
+static const char *const NODE_EQ_DOMS[] = {"Node", "Node"};
+static const char *const SIGNS_DOMS[] = {"Node", "Body", "Sig"};
+
+/* 1 if TV is the function type from the defs NAMES, in this order, to the
+   type of btrue. Each domain converts with the def of its name, at one
+   level more than the domain before it. */
+static int sig_bit_arrows(Checker *c, const Value *tv, const char *const *names, uint32_t count) {
+  Machine *m = c->m;
+  uint32_t bit = sig_def_index(m, "btrue");
+  const Value *cod = tv;
+  uint32_t i;
+  for (i = 0; i < count && cod != NULL; i++)
+    cod = sig_arrow(c, cod, c->level + i, names[i]);
+  return bit != m->def_count && cod != NULL && conv_values(m, c->level + count, cod, m->defs[bit].type);
+}
+
+/* 1 if TV converts with Pfin Node -> Sum Unit Unit (USER ruling Q-S4-5
+   (a)): the type of pfinIn at A := Node after the equality and the
+   element. That type does not contain them, so each one is the fresh
+   variable at the level of C. */
+static int quorum_ok(Checker *c, const Value *tv) {
+  Machine *m = c->m;
+  uint32_t in = sig_def_index(m, "pfinIn");
+  uint32_t node = sig_def_index(m, "Node");
+  const Value *want;
+  if (in == m->def_count || node == m->def_count)
+    return 0;
+  want = sig_apply(m, sig_apply(m, sig_apply(m, m->defs[in].type, sig_global_value(m, node)), val_var(m, c->level)), val_var(m, c->level));
+  return want != NULL && conv_values(m, c->level + 1u, tv, want);
+}
+
+/* The kernel-fixed type of a program name of the kind SIG_PROGRAM. USER
+   ruling Q-S4-6 (a): witnessOk must have the type Body -> Witness -> Sum
+   Unit Unit (the codomain converts with the type of btrue). USER rulings
+   Q-S4-2 (a) and Q-S4-8 (a): txid must have the type Body -> Digest (the
+   codomain converts with the def Digest). The domains convert with the
+   defs Body and Witness. USER rulings Q-S4-4 (a) and Q-S4-6 (a): the six
+   bagFold arguments must have their bagFold types at Sig. USER ruling
+   Q-S4-5 (a): nodeEq, quorum and signs must have the types Node -> Node
+   -> Sum Unit Unit, Pfin Node -> Sum Unit Unit and Node -> Body -> Sig ->
+   Sum Unit Unit. */
+static int program_type(Checker *c, const char *name, const Value *tv) {
+  Machine *m = c->m;
+  uint32_t bit = sig_def_index(m, "btrue");
+  uint32_t digest = sig_def_index(m, "Digest");
+  const Value *cod = sig_arrow(c, tv, c->level, "Body");
+  if (sig_arg_name(name))
+    return sig_arg_ok(c, name, tv);
+  if (strcmp(name, "nodeEq") == 0)
+    return sig_bit_arrows(c, tv, NODE_EQ_DOMS, 2u);
+  if (strcmp(name, "quorum") == 0)
+    return quorum_ok(c, tv);
+  if (strcmp(name, "signs") == 0)
+    return sig_bit_arrows(c, tv, SIGNS_DOMS, 3u);
+  if (strcmp(name, "txid") == 0)
+    return digest != m->def_count && cod != NULL && conv_values(m, c->level + 1u, cod, sig_global_value(m, digest));
+  cod = sig_arrow(c, cod, c->level + 1u, "Witness");
+  return bit != m->def_count && cod != NULL && conv_values(m, c->level + 2u, cod, m->defs[bit].type);
 }
 
 /* A program definition of a slot must have the type Type 0, and a
-   first-order slot must be first-order data. A program declaration of a
-   defined name does not get here: kernel_sig refuses it before the name
-   check. */
+   first-order slot must be first-order data. The slot Body must not
+   mention a witness name (law L5). A program name with a kernel-fixed
+   type must have that type: another type of txid is REFUSE_WITNESS_READ
+   (law L5). Another type of sigComm, or a slot Sig with no sigComm, is
+   REFUSE_BAG_NONCOMM (law L1). A program declaration of a defined name
+   does not get here:
+   kernel_sig refuses it before the name check. */
 static int check_sig(Checker *c, const Decl *d, const Value *tv, const Core *body) {
   uint32_t i = sig_row(d->name);
   if (d->origin != ORIGIN_PROGRAM || i == SIG_COUNT)
@@ -4049,7 +4255,25 @@ static int check_sig(Checker *c, const Decl *d, const Value *tv, const Core *bod
   case SIG_SLOT:
     if (!conv_values(c->m, c->level, tv, val_univ(c->m, 0u)))
       return FAIL(c, "REFUSE_SIG", "the slot %s must have the type Type 0 (PLAN section 4)", d->name);
+    if (strcmp(d->name, "Sig") == 0 && !program_defines(c, "sigComm"))
+      return FAIL(c, "REFUSE_BAG_NONCOMM", "agg at Bag Sig needs sigComm, the commutative clause (law L1, O2): the program does not define sigComm (PLAN section 4, USER ruling Q-S4-4 (a))");
+    if (strcmp(d->name, "Body") == 0 && mentions_witness(c->m, body))
+      return FAIL(c, "REFUSE_WITNESS_READ", "the slot Body must not mention Witness, Authorized or AuthTx: txid reads the body only (law L5, PLAN section 6, USER ruling Q-S4-2 (a))");
     return (!first_order_slot(d->name) || asset_first_order(c->m, here(c, body), 0u)) ? 1 : FAIL(c, "REFUSE_SIG", "the slot %s must be first-order data: no path constructor and no function (PLAN section 4, USER rulings Q-S2-5 (a) and Q-S3-2 (a))", d->name);
+  case SIG_PROGRAM:
+    if (strcmp(d->name, "txid") == 0)
+      return program_type(c, d->name, tv) ? 1 : FAIL(c, "REFUSE_WITNESS_READ", "txid must have the type Body -> Digest: txid reads the body only (law L5, PLAN section 6, USER rulings Q-S4-2 (a) and Q-S4-8 (a))");
+    if (strcmp(d->name, "sigComm") == 0)
+      return program_type(c, d->name, tv) ? 1 : FAIL(c, "REFUSE_BAG_NONCOMM", "agg at Bag Sig needs sigComm, the commutative clause (law L1, O2): sigComm must have the type (x : Sig) -> (y : Sig) -> Path Sig (sigMul x y) (sigMul y x) (PLAN section 4, USER rulings Q-S4-4 (a) and Q-S4-6 (a))");
+    if (strcmp(d->name, "nodeEq") == 0)
+      return program_type(c, d->name, tv) ? 1 : FAIL(c, "REFUSE_SIG", "nodeEq must have the type Node -> Node -> Sum Unit Unit (PLAN section 4, USER rulings Q-S4-5 (a) and Q-S4-6 (a))");
+    if (strcmp(d->name, "quorum") == 0)
+      return program_type(c, d->name, tv) ? 1 : FAIL(c, "REFUSE_SIG", "quorum must have the type Pfin Node -> Sum Unit Unit (PLAN section 4, USER rulings Q-S4-5 (a) and Q-S4-6 (a))");
+    if (strcmp(d->name, "signs") == 0)
+      return program_type(c, d->name, tv) ? 1 : FAIL(c, "REFUSE_SIG", "signs must have the type Node -> Body -> Sig -> Sum Unit Unit (PLAN section 4, USER rulings Q-S4-5 (a) and Q-S4-6 (a))");
+    if (sig_arg_name(d->name))
+      return program_type(c, d->name, tv) ? 1 : FAIL(c, "REFUSE_SIG", "%s must have the type of its bagFold argument at Sig, after the earlier bagFold arguments (PLAN section 4, USER rulings Q-S4-4 (a) and Q-S4-6 (a))", d->name);
+    return program_type(c, d->name, tv) ? 1 : FAIL(c, "REFUSE_SIG", "witnessOk must have the type Body -> Witness -> Sum Unit Unit (PLAN section 4, USER ruling Q-S4-6 (a))");
   case SIG_DEFINED:
     break;
   }
@@ -4067,6 +4291,7 @@ static int kernel_sig(Checker *c, const Decl *d) {
   case SIG_DEFINED:
     return FAIL(c, "REFUSE_SIG", "%s is a defined name of the design signature (PLAN section 4); the kernel gives it at its slice (PLAN section 12)", d->name);
   case SIG_SLOT:
+  case SIG_PROGRAM:
     break;
   }
   return 1;

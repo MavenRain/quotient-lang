@@ -150,6 +150,80 @@ static int key_after_key(Arena *arena, size_t first, DeclList *out, Diag *diag) 
   return splice_after(arena, first, KEY_AFTER, 1u, KEY_SOURCE_NAME, key_source, sizeof key_source - 1u, out, diag);
 }
 
+/* The auth prelude (quotient-lang S4, USER rulings Q-S4-1 (a) and Q-S4-7
+   (a); PLAN sections 4 and 6). Body and Witness are program slots and
+   witnessOk is a program def with a kernel-fixed type (check.c,
+   check_sig). After the last of them, the front end puts the defs
+   Authorized, AuthTx, Mempool and the law L5 lemma authTxEq: two
+   authorized transactions with one body are one transaction, so the
+   witness does not count. */
+#define AUTH_SOURCE_NAME "kernel/auth.lang"
+
+static const char auth_source[] =
+  "def Authorized : Body -> Type 0 := fun (b : Body) =>\n"
+  "  Trunc1 (Sigma (w : Witness) (Path (Sum Unit Unit) (witnessOk b w) btrue))\n"
+  "def AuthTx : Type 0 := Sigma (b : Body) (Authorized b)\n"
+  "def Mempool : Type 0 := Pfin AuthTx\n"
+  "def authTxEq : (x : AuthTx) -> (y : AuthTx) -> Path Body (witness x) (witness y) -> Path AuthTx x y :=\n"
+  "  fun (x : AuthTx) (y : AuthTx) (p : Path Body (witness x) (witness y)) =>\n"
+  "    J Body (witness x)\n"
+  "      (fun (c : Body) (q : Path Body (witness x) c) => (v : Authorized c) -> Path AuthTx x (pack c v))\n"
+  "      (fun (v : Authorized (witness x)) => fun (i : I) => pack (witness x) (squash1 (Sigma (w : Witness) (Path (Sum Unit Unit) (witnessOk (witness x) w) btrue)) (payload x) v i))\n"
+  "      (witness y) p (payload y)\n";
+
+static const char *const AUTH_AFTER[] = {"Body", "Witness", "witnessOk"};
+
+/* The auth prelude goes directly after the last of the program defs Body,
+   Witness and witnessOk. */
+static int auth_after_witness(Arena *arena, size_t first, DeclList *out, Diag *diag) {
+  return splice_after(arena, first, AUTH_AFTER, 3u, AUTH_SOURCE_NAME, auth_source, sizeof auth_source - 1u, out, diag);
+}
+
+/* The agg prelude (quotient-lang S4, USER rulings Q-S4-4 (a) and Q-S4-6
+   (a); PLAN section 4, law L1). Sig is a program slot, and sigIsSet,
+   sigOne, sigMul, sigAssoc, sigComm and sigUnitL are program defs with
+   the types of the bagFold arguments at Sig (check.c, check_sig). After
+   the last of them, the front end puts agg, the fold of a bag of
+   signatures into one signature, and the law L1 lemma aggOp: agg takes
+   the bag union to sigMul. */
+#define AGG_SOURCE_NAME "kernel/agg.lang"
+
+static const char agg_source[] =
+  "def agg : Bag Sig -> Sig := fun (s : Bag Sig) =>\n"
+  "  bagFold Sig Sig sigIsSet sigOne sigMul sigAssoc sigComm sigUnitL (fun (x : Sig) => x) s\n"
+  "def aggOp : (xs : Bag Sig) -> (ys : Bag Sig) -> Path Sig (agg (bagOp Sig xs ys)) (sigMul (agg xs) (agg ys)) :=\n"
+  "  fun (xs : Bag Sig) (ys : Bag Sig) => fun (i : I) => sigMul (agg xs) (agg ys)\n";
+
+static const char *const AGG_AFTER[] = {"Sig", "sigIsSet", "sigOne", "sigMul", "sigAssoc", "sigComm", "sigUnitL"};
+
+/* The agg prelude goes directly after the last of the program defs Sig
+   and the six bagFold arguments. */
+static int agg_after_sig(Arena *arena, size_t first, DeclList *out, Diag *diag) {
+  return splice_after(arena, first, AGG_AFTER, 7u, AGG_SOURCE_NAME, agg_source, sizeof agg_source - 1u, out, diag);
+}
+
+/* The QC prelude (quotient-lang S4, USER ruling Q-S4-5 (a); PLAN section
+   4, X15). Node, Body and Sig are program slots, and nodeEq, quorum and
+   signs are program defs with kernel-fixed types (check.c, check_sig).
+   After the last of them, the front end puts QC: a quorum certificate on
+   a body is a set of nodes that is a quorum, and a proof that each node
+   of the set signs the body. The C node checks 2f+1 at S10. */
+#define QC_SOURCE_NAME "kernel/qc.lang"
+
+static const char qc_source[] =
+  "def QC : Body -> Type 0 := fun (b : Body) =>\n"
+  "  Sigma (q : Pfin Node) (Sigma (h : Path (Sum Unit Unit) (quorum q) btrue)\n"
+  "    (Trunc1 ((v : Node) -> Path (Sum Unit Unit) (pfinIn Node nodeEq v q) btrue ->\n"
+  "      Sigma (s : Sig) (Path (Sum Unit Unit) (signs v b s) btrue))))\n";
+
+static const char *const QC_AFTER[] = {"Node", "Body", "Sig", "nodeEq", "quorum", "signs"};
+
+/* The QC prelude goes directly after the last of the program defs Node,
+   Body, Sig, nodeEq, quorum and signs. */
+static int qc_after_signs(Arena *arena, size_t first, DeclList *out, Diag *diag) {
+  return splice_after(arena, first, QC_AFTER, 6u, QC_SOURCE_NAME, qc_source, sizeof qc_source - 1u, out, diag);
+}
+
 int front_load(Arena *arena, const char *source, const char *text, size_t len, DeclList *out, Diag *diag) {
   size_t first;
   out->items = NULL;
@@ -160,7 +234,10 @@ int front_load(Arena *arena, const char *source, const char *text, size_t len, D
   first = out->count;
   return load_one(arena, source, ORIGIN_PROGRAM, text, len, out, diag)
       && value_after_asset(arena, first, out, diag)
-      && key_after_key(arena, first, out, diag);
+      && key_after_key(arena, first, out, diag)
+      && auth_after_witness(arena, first, out, diag)
+      && agg_after_sig(arena, first, out, diag)
+      && qc_after_signs(arena, first, out, diag);
 }
 
 int front_load_domain(Arena *arena, const char *source, const char *domain, const char *text, size_t len, DeclList *out, Diag *diag) {
@@ -174,5 +251,8 @@ int front_load_domain(Arena *arena, const char *source, const char *domain, cons
   first = out->count;
   return load_one(arena, source, ORIGIN_PROGRAM, text, len, out, diag)
       && value_after_asset(arena, first, out, diag)
-      && key_after_key(arena, first, out, diag);
+      && key_after_key(arena, first, out, diag)
+      && auth_after_witness(arena, first, out, diag)
+      && agg_after_sig(arena, first, out, diag)
+      && qc_after_signs(arena, first, out, diag);
 }

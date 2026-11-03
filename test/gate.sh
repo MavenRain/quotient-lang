@@ -88,6 +88,61 @@ if ! rg -q -F 'Key: the slot Key must be first-order data' "$tmp/err"; then
   echo "FAIL sig-key-higher.lang: the message does not name the Key slot"
   fail=$((fail + 1))
 fi
+# The auth slots (S4, USER rulings Q-S4-1 (a), Q-S4-2 (a) and Q-S4-6 (a)):
+# Witness is first-order data, Body does not mention Witness, and
+# witnessOk has the kernel-fixed type.
+build/langc check test/check/witness-higher.lang 2>"$tmp/err" >/dev/null || true
+if ! rg -q -F 'Witness: the slot Witness must be first-order data' "$tmp/err"; then
+  echo "FAIL witness-higher.lang: the message does not name the Witness slot"
+  fail=$((fail + 1))
+fi
+build/langc check test/check/body-has-witness.lang 2>"$tmp/err" >/dev/null || true
+if ! rg -q -F 'Body: the slot Body must not mention Witness' "$tmp/err"; then
+  echo "FAIL body-has-witness.lang: the message does not name the Body slot"
+  fail=$((fail + 1))
+fi
+build/langc check test/check/witnessok-type.lang 2>"$tmp/err" >/dev/null || true
+if ! rg -q -F 'witnessOk: witnessOk must have the type Body -> Witness -> Sum Unit Unit' "$tmp/err"; then
+  echo "FAIL witnessok-type.lang: the message does not name the witnessOk type"
+  fail=$((fail + 1))
+fi
+# The Digest slot and txid (S4, USER rulings Q-S4-2 (a), Q-S4-3 (a) and
+# Q-S4-8 (a)): Digest is first-order data, and txid has the type Body ->
+# Digest.
+build/langc check test/check/digest-higher.lang 2>"$tmp/err" >/dev/null || true
+if ! rg -q -F 'Digest: the slot Digest must be first-order data' "$tmp/err"; then
+  echo "FAIL digest-higher.lang: the message does not name the Digest slot"
+  fail=$((fail + 1))
+fi
+build/langc check test/check/txid-reads-witness.lang 2>"$tmp/err" >/dev/null || true
+if ! rg -q -F 'txid: txid must have the type Body -> Digest' "$tmp/err"; then
+  echo "FAIL txid-reads-witness.lang: the message does not name the txid type"
+  fail=$((fail + 1))
+fi
+build/langc check test/check/txid-authtx.lang 2>"$tmp/err" >/dev/null || true
+if ! rg -q -F 'txid: txid must have the type Body -> Digest' "$tmp/err"; then
+  echo "FAIL txid-authtx.lang: the message does not name the txid type"
+  fail=$((fail + 1))
+fi
+# The Sig slot and agg (S4, USER rulings Q-S4-4 (a) and Q-S4-6 (a)): agg
+# at Bag Sig needs sigComm, the commutative clause (law L1).
+build/langc check test/check/sig-no-comm.lang 2>"$tmp/err" >/dev/null || true
+if ! rg -q -F 'Sig: agg at Bag Sig needs sigComm, the commutative clause (law L1, O2)' "$tmp/err"; then
+  echo "FAIL sig-no-comm.lang: the message does not name the sigComm clause"
+  fail=$((fail + 1))
+fi
+build/langc check test/check/sig-comm-wrong.lang 2>"$tmp/err" >/dev/null || true
+if ! rg -q -F 'sigComm: agg at Bag Sig needs sigComm, the commutative clause (law L1, O2)' "$tmp/err"; then
+  echo "FAIL sig-comm-wrong.lang: the message does not name the sigComm clause"
+  fail=$((fail + 1))
+fi
+# The QC prelude (S4, USER ruling Q-S4-5 (a)): quorum must have the type
+# Pfin Node -> Sum Unit Unit.
+build/langc check test/check/qc-quorum-wrong.lang 2>"$tmp/err" >/dev/null || true
+if ! rg -q -F 'quorum: quorum must have the type Pfin Node -> Sum Unit Unit' "$tmp/err"; then
+  echo "FAIL qc-quorum-wrong.lang: the message does not name the quorum type"
+  fail=$((fail + 1))
+fi
 # A fold out of Pfin without the idem case names the pfinIdem case (S3,
 # law L2, USER ruling Q-S2-4 (a)).
 build/langc check test/check/pfin-no-idem.lang 2>"$tmp/err" >/dev/null || true

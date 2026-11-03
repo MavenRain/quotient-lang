@@ -1,0 +1,4 @@
+-- The slot Body must not mention Witness (S4, law L5, USER ruling Q-S4-2
+-- (a)): txid reads the body only.
+def Witness : Type 0 := Size
+def Body : Type 0 := Sigma (s : Size) (Witness)

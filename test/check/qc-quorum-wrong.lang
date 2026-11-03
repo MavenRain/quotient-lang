@@ -1,0 +1,5 @@
+-- A quorum of the wrong type (S4, USER ruling Q-S4-5 (a)): quorum must
+-- have the type Pfin Node -> Sum Unit Unit, so a quorum on one node is
+-- REFUSE_SIG.
+def Node : Type 0 := Sum Unit Unit
+def quorum : Node -> Sum Unit Unit := fun (n : Node) => n

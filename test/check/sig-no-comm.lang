@@ -1,0 +1,7 @@
+-- A slot Sig with no sigComm (S4, USER ruling Q-S4-4 (a)): agg at Bag Sig
+-- needs the commutative clause (law L1), so the slot is
+-- REFUSE_BAG_NONCOMM.
+def Sig : Type 0 := Sum Unit Unit
+def sigIsSet : isSet Sig := bitIsSet
+def sigOne : Sig := bfalse
+def sigMul : Sig -> Sig -> Sig := or

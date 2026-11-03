@@ -156,3 +156,16 @@ sig-asset-higher.lang REFUSE_SIG
 sig-key-higher.lang REFUSE_SIG
 footprint-no-key.lang NAME_UNKNOWN
 value-count-hit.lang REFUSE_SIG
+witness-higher.lang REFUSE_SIG
+authtx-no-witness.lang NAME_UNKNOWN
+mempool-define.lang REFUSE_SIG
+body-has-witness.lang REFUSE_WITNESS_READ
+body-alias-witness.lang REFUSE_WITNESS_READ
+witnessok-type.lang REFUSE_SIG
+digest-higher.lang REFUSE_SIG
+txid-reads-witness.lang REFUSE_WITNESS_READ
+txid-authtx.lang REFUSE_WITNESS_READ
+sig-no-comm.lang REFUSE_BAG_NONCOMM
+sig-comm-wrong.lang REFUSE_BAG_NONCOMM
+qc-no-quorum.lang NAME_UNKNOWN
+qc-quorum-wrong.lang REFUSE_SIG

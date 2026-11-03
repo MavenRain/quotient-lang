@@ -17,12 +17,14 @@ file gives the readings of that request, the route, the slices and the open
 items. The USER ruled Q-R1 to Q-R8 before S0 (section 14). So sections 2 to
 5 are RULED, not proposals.
 
-Status: S3 DONE (2026-11-03): `Pfin`, `in`, `union`, the slot `Key`
-and `Footprint = Pfin Key` (section 4), REFUSE_BAG_NONCOMM at `Pfin`
-(section 7) and L2 (section 6). S2 (2026-11-02) gave `Amount`, `Bag`,
-`Value`, `Balance`, `[[ ]]v`, `Delta`, `neg`, `Balanced`,
-REFUSE_OVERFLOW and REFUSE_BAG_NONCOMM at `Bag`, with L1 and L8, on the
-S1 kernel (section 8.1). `Mempool` moves to S4 (X16). Next: S4
+Status: S4 DONE (2026-11-03): the slots `Body`, `Witness`, `Digest`
+and `Sig`, the auth, agg and QC preludes (section 4),
+REFUSE_WITNESS_READ, REFUSE_BAG_NONCOMM at `Bag Sig` (section 7) and
+L5 (section 6). S3 (2026-11-03) gave `Pfin`, `in`, `union`, the slot
+`Key`, `Footprint = Pfin Key`, REFUSE_BAG_NONCOMM at `Pfin` and L2. S2
+(2026-11-02) gave `Amount`, `Bag`, `Value`, `Balance`, `[[ ]]v`,
+`Delta`, `neg`, `Balanced`, REFUSE_OVERFLOW and REFUSE_BAG_NONCOMM at
+`Bag`, with L1 and L8, on the S1 kernel (section 8.1). Next: S5
 (section 12).
 
 ## 1. Rulings
@@ -100,7 +102,7 @@ name: a program that uses it gets a refusal (section 7).
 
 | # | Admitted name(s) | D1 | D2 | Verdict | Slice |
 |---|---|---|---|---|---|
-| X1 | `Body`, `Witness`, `Authorized b`, `AuthTx` | sec 4 | Semantic domain (Tx) | CORRECT: D2 Tx is `Body` with a truncated witness; txid and effect read `Body` only | S4 |
+| X1 | `Body`, `Witness`, `Authorized b`, `AuthTx` | sec 4 | Semantic domain (Tx) | CORRECT: D2 Tx is `Body` with a truncated witness; txid and effect read `Body` only. S4 DONE: the slots `Body` and `Witness`, `witnessOk`, `Authorized b` and `AuthTx` (auth prelude, Q-S4-1 (a)); `txid : Body -> Digest` (Q-S4-2 (a)) | S4 |
 | X2 | `Ind a b` (Bernstein) | sec 7 | Semantic domain (t1 perp t2) | CORRECT: shared reads are allowed; D2 "etc." is not a definition | S5 |
 | X3 | `Trace` (`eps`, `<|`, `swap` on `Ind`, trunc) | sec 8 | CTT realisation (generators) | KEEP: the only generator is commutation | S6 |
 | X4 | (absorption path) | sec 6 note | CTT realisation ("absorption of invalid or no-op transactions") | DROP, refused: "invalid" depends on the state, so it is no path on histories; replay counts | S6 |
@@ -113,9 +115,9 @@ name: a program that uses it gets a refusal (section 7).
 | X11 | `Bag A` (comm, trunc), `Value = Bag Asset`, `Balance`, `[[ ]]v` | sec 2 | Consensus (List Output / perm) | KEEP: the free commutative monoid | S2 |
 | X12 | `UTxO = FinMap OutRef Output` | secs 2, 12 | Consensus (List Output / perm) | CORRECT: outputs have unique refs, so a finite map, not a bag | S8 |
 | X13 | `Delta M`, `neg`, `Balanced`, mint and burn policy | sec 3 | (none) | KEEP: subtraction is total | S2 |
-| X14 | `agg : Bag Sig -> Sig` (commutative `Sig`) | sec 5 | (none) | KEEP: a non-commutative scheme is refused at `Bag Sig` | S4 |
-| X15 | `QC b` (signer set outside, signatures inside the truncation) | sec 4 | (none) | KEEP, v1 (Q-R6 (a)) | S4 |
-| X16 | `Pfin A`, `in`, `union`, `Mempool = Pfin AuthTx` | sec 6 | (none) | KEEP: gossip merge is union. S3 DONE: `Pfin A`, `in` and `union`. `Mempool` moves to S4, because it needs `AuthTx` (S4) | S3, S4 |
+| X14 | `agg : Bag Sig -> Sig` (commutative `Sig`) | sec 5 | (none) | KEEP: a non-commutative scheme is refused at `Bag Sig`. S4 DONE: the slot `Sig` and its six program names; the agg prelude gives `agg` (`bagFold`) and `aggOp`; no `sigComm`, or a wrong one, gives `REFUSE_BAG_NONCOMM` (Q-S4-4 (a)) | S4 |
+| X15 | `QC b` (signer set outside, signatures inside the truncation) | sec 4 | (none) | KEEP, v1 (Q-R6 (a)). S4 DONE: the QC prelude; the program bit `quorum : Pfin Node -> bit` is in the `Sigma`, outside the truncation (Q-S4-5 (a)) | S4 |
+| X16 | `Pfin A`, `in`, `union`, `Mempool = Pfin AuthTx` | sec 6 | (none) | KEEP: gossip merge is union. S3 DONE: `Pfin A`, `in` and `union`. `Mempool` moves to S4, because it needs `AuthTx` (S4). S4 DONE: `Mempool = Pfin AuthTx` in the auth prelude | S3, S4 |
 | X17 | `reads`, `writes : Body -> Pfin Key`; frame law gives commute | sec 7 | (none) | KEEP: the core checker feature (section 5) | S5 |
 | X18 | `FinMap Key Val`, `canon`, `root`, inclusion proof, `Digest` | sec 12 | (none) | KEEP: binding is assumption O1; policy normal forms later (Q-R7 (a)) | S8 |
 | X19 | `Valid r r'`, `compose` | sec 13 | (none) | KEEP: the T2 circuit emits `Valid`; `compose` uses L4 and O1 once | S8, S17 |
@@ -140,6 +142,40 @@ program definition of `Key`, the front end splices the key prelude
 `Footprint` and does not define `Key` gets NAME_UNKNOWN
 (footprint-no-key.lang). `reads`, `writes` and the key patterns stay at
 S5. `Mempool = Pfin AuthTx` moves to S4 (X16).
+
+S4 (Q-S4-1 to Q-S4-8 (a)) adds four program slots: `Body`, `Witness`,
+`Digest` and `Sig`. `Node` was a slot before S4. The slots `Body`,
+`Witness` and `Digest` must be first-order data (`REFUSE_SIG`, section
+7). The `Body` slot must not mention `Witness`, `Authorized` or
+`AuthTx` (`REFUSE_WITNESS_READ`, Q-S4-2 (a)). `Digest` is abstract, and
+O3 stays a named assumption (Q-S4-3 (a)). The kernel fixes the type of
+these program names, with one `SIG_PROGRAM` row each (Q-S4-6 (a)):
+`witnessOk : Body -> Witness -> bit`, `txid : Body -> Digest`, the six
+monoid names of `Sig` (`sigIsSet`, `sigOne`, `sigMul`, `sigAssoc`,
+`sigComm`, `sigUnitL`), `nodeEq`, `quorum : Pfin Node -> bit` and
+`signs`. Here `bit` is `Sum Unit Unit`. A wrong type gives
+`REFUSE_SIG`, with two exceptions: a `txid` type that mentions
+`Witness` or `AuthTx` gives `REFUSE_WITNESS_READ`, and a wrong `sigComm`
+gives `REFUSE_BAG_NONCOMM` (section 7). The front end
+(src/front/front.c) splices three preludes:
+
+- auth (`auth_after_witness`): `Authorized b`, the truncation of the
+  witnesses `w` with `witnessOk b w = btrue` (Q-S4-1 (a)), `AuthTx`,
+  `Mempool = Pfin AuthTx` (X16) and the L5 lemma `authTxEq`: two
+  `AuthTx` values with equal bodies are equal (Q-S4-7 (a)). Example:
+  examples/authtx.lang.
+- agg: `agg : Bag Sig -> Sig` by `bagFold`, and `aggOp` (Q-S4-4 (a)).
+  A program with the slot `Sig` and no `sigComm` gets
+  `REFUSE_BAG_NONCOMM`. Example: examples/agg.lang.
+  The six monoid names admit any set with the required proofs, including
+  quotient sets. examples/agg-bag.lang checks `Sig = Bag Unit`, the empty
+  and singleton aggregation rules, and `aggOp`.
+
+- QC (`qc_after_signs`, the source `qc_source`): in `QC b`, the signer
+  set and the bit `quorum q` are outside the truncation, and the
+  signatures are inside it (X15, Q-S4-5 (a)). The inner `Sigma` has the
+  binder `h`. A program that uses `QC` and does not define the QC names
+  gets NAME_UNKNOWN (qc-no-quorum.lang). Example: examples/qc.lang.
 
 `Amount` (S2, Q-S2-2 (a)) is a nominal builtin type that a guest can
 use. `amountAdd` and `amountSub` give `Maybe Amount`: `none` at
@@ -293,11 +329,11 @@ Notes:
 
 | Law | Statement | Discharge |
 |---|---|---|
-| L1 | `Bag` is commutative: an eliminator out of `Bag A` gives the `comm` clause. `agg (xs ++ ys) = agg xs (x) agg ys`. | kernel, per eliminator. S2 DONE at `Bag`: a fold or elim out of `Bag` with a wrong count of cases gives `REFUSE_BAG_NONCOMM` (Q-S2-4 (a)); `examples/bag.lang`. `agg` needs O2 (S4) |
-| L2 | `Pfin` union laws: unit, assoc, comm, idem. Mempool merge is order-free. | prelude (merge-lang S1b, quorum-lang FMSet port), S3 DONE at `Pfin`: `unionUnitL`, `unionUnitR`, `unionAssoc`, `unionComm` and `unionIdem` (domain/domain.lang); `examples/pfin.lang`. The `Mempool` instance comes with `AuthTx` (S4) |
+| L1 | `Bag` is commutative: an eliminator out of `Bag A` gives the `comm` clause. `agg (xs ++ ys) = agg xs (x) agg ys`. | kernel, per eliminator. S2 DONE at `Bag`: a fold or elim out of `Bag` with a wrong count of cases gives `REFUSE_BAG_NONCOMM` (Q-S2-4 (a)). S4 DONE at `Bag Sig`: the agg prelude gives `agg` and `aggOp`; a program with the slot `Sig` and no `sigComm`, or a wrong `sigComm`, gets `REFUSE_BAG_NONCOMM` (Q-S4-4 (a)); examples/agg.lang; `examples/bag.lang`. `agg` needs O2 (S4) |
+| L2 | `Pfin` union laws: unit, assoc, comm, idem. Mempool merge is order-free. S4: `Mempool = Pfin AuthTx` (auth prelude), so these laws hold at `Mempool` (examples/authtx.lang). | prelude (merge-lang S1b, quorum-lang FMSet port), S3 DONE at `Pfin`: `unionUnitL`, `unionUnitR`, `unionAssoc`, `unionComm` and `unionIdem` (domain/domain.lang); `examples/pfin.lang`. The `Mempool` instance comes with `AuthTx` (S4) |
 | L3 | Trace swap: if `Ind a b`, `[[a <| b <| t]] = [[b <| a <| t]]`. | checker, from the frame law (section 5) |
 | L4 | `[[t ++ u]] = [[t]] ; [[u]]`, and `[[ ]]` is the unique monoid map that extends `step` (D1 sec 8). | prelude |
-| L5 | No-malleability: equal bodies give equal `AuthTx`; txid reads `Body` only. | checker: a step or txid that reads a `Witness` is refused |
+| L5 | No-malleability: equal bodies give equal `AuthTx`; txid reads `Body` only. | checker: a step or txid that reads a `Witness` is refused. S4 DONE for `txid` and the `Body` slot: `REFUSE_WITNESS_READ` (Q-S4-2 (a)), and the prelude lemma `authTxEq` (Q-S4-7 (a)); examples/authtx.lang. The `step` check is S5 |
 | L6 | Nerode right congruence: `t ~N u` gives `t ++ k ~N u ++ k`. | prelude |
 | L7 | `Valid` compose: `Valid r r'` and `Valid r' r''` give `Valid r r''`. Uses L4 and O1 once. | prelude; T2 emits it |
 | L8 | `Delta`: `a - a = 0`; `Balanced` is closed under `+`. | prelude, S2 DONE: `deltaSelf` (`a - a = 0`), `balancedAdd` (Q-S2-6 (a)) and `balancedNeg` (section 4); `examples/value.lang` |
@@ -319,10 +355,10 @@ assumptions (A2).
 | `REFUSE_CELL` | A type constructor other than the cell monad and its dual (kernel) | S1 |
 | `REFUSE_PARTIAL` | A partial operation or general recursion (kernel R0) | S1, DONE (port). Two sites give this code for a partial name in a spine head: `unknown_name` and `var_core`. A mutant that removes the `unknown_name` refusal is equivalent: `var_core` then refuses the same name with the same code and text. The S1 mutant PARTIAL-CODE changes the code at `unknown_name`, and the row partial-name.lang kills it. |
 | `REFUSE_NOT_IN_DESIGN` | A name of the DROP rows X4 and X10 in any declaration form or binder (path 1); an axiom of a universe type whose name is not an admitted base sort (path 2, Q-S1-2 (a)) | S1, DONE |
-| `REFUSE_SIG` | A program that does not keep to the base signature of section 4: a base sort that is not a slot of `Type 0`, a program definition of a kernel name of S2 to S8, or an `Asset` slot that is not first-order data (Q-S2-5 (a)) | S1 (port: the orbit-lang sample table). S2, DONE: the table is now the section 4 names (Q-S1-3 (a)). The 9 base sorts other than `Amount` are slots of `Type 0`, and the kernel names of S2 to S8 are defined rows. A mutant that makes the `SIG_DEFINED` case of `check_sig` give 1 is equivalent: `kernel_sig` refuses the same program first. The S2 mutant SLOT-FIRST-ORDER lived in round 1: the prelude `valueBal` then refuses the same program by `rule_value_count` with the same code. The message row of sig-asset-higher.lang ("Asset: the slot Asset must be first-order data") kills it. S3, DONE at `Key` (Q-S3-2 (a)): the `Key` slot must be first-order data. Row: sig-key-higher.lang, with a message row that names the slot `Key`. A mutant that removes the key splice from `front_load_domain` (KEY-SPLICE-2) is equivalent: `langc` has no caller of `front_load_domain`, and the guest mode and `--kit` both use `front_load` (Q-S3-6 (a)). |
+| `REFUSE_SIG` | A program that does not keep to the base signature of section 4: a base sort that is not a slot of `Type 0`, a program definition of a kernel name of S2 to S8, or an `Asset` slot that is not first-order data (Q-S2-5 (a)) | S1 (port: the orbit-lang sample table). S2, DONE: the table is now the section 4 names (Q-S1-3 (a)). The 9 base sorts other than `Amount` are slots of `Type 0`, and the kernel names of S2 to S8 are defined rows. A mutant that makes the `SIG_DEFINED` case of `check_sig` give 1 is equivalent: `kernel_sig` refuses the same program first. The S2 mutant SLOT-FIRST-ORDER lived in round 1: the prelude `valueBal` then refuses the same program by `rule_value_count` with the same code. The message row of sig-asset-higher.lang ("Asset: the slot Asset must be first-order data") kills it. S3, DONE at `Key` (Q-S3-2 (a)): the `Key` slot must be first-order data. Row: sig-key-higher.lang, with a message row that names the slot `Key`. A mutant that removes the key splice from `front_load_domain` (KEY-SPLICE-2) is equivalent: `langc` has no caller of `front_load_domain`, and the guest mode and `--kit` both use `front_load` (Q-S3-6 (a)). S4, DONE (Q-S4-3, Q-S4-6 (a)): the slots `Witness` and `Digest` must be first-order data (witness-higher.lang, digest-higher.lang); a program definition of `Mempool` is refused (mempool-define.lang); a wrong type of a program name that the kernel fixes, for example `witnessOk` or `quorum`, is refused (witnessok-type.lang, qc-quorum-wrong.lang). |
 | `REFUSE_OVERFLOW` | `Amount` arithmetic used outside `Maybe` | S2, DONE: an `amountAdd` or `amountSub` result where an `Amount` is wanted (`overflow_result_ok`). Rows: amount-overflow.lang, amount-underflow.lang. |
-| `REFUSE_BAG_NONCOMM` | An eliminator out of `Bag` or `Pfin` without its path clauses; a non-commutative `agg` (E5) | S2, DONE at `Bag` (Q-S2-4 (a)): a fold or elim out of `Bag` with a wrong count of cases. Rows: bag-no-squash.lang, bag-no-comm.lang, bag-elim-no-comm.lang. S3, DONE at `Pfin`: a fold or elim out of `Pfin` with a wrong count of cases (no `pfinIdem` case). Rows: pfin-no-idem.lang (the message names the `pfinIdem` case), pfin-elim-no-idem.lang. Open: the non-commutative `agg` at `Bag Sig` (S4). |
-| `REFUSE_WITNESS_READ` | A step or txid that reads a `Witness` (L5) | S4 |
+| `REFUSE_BAG_NONCOMM` | An eliminator out of `Bag` or `Pfin` without its path clauses; a non-commutative `agg` (E5) | S2, DONE at `Bag` (Q-S2-4 (a)): a fold or elim out of `Bag` with a wrong count of cases. Rows: bag-no-squash.lang, bag-no-comm.lang, bag-elim-no-comm.lang. S3, DONE at `Pfin`: a fold or elim out of `Pfin` with a wrong count of cases (no `pfinIdem` case). Rows: pfin-no-idem.lang (the message names the `pfinIdem` case), pfin-elim-no-idem.lang. S4, DONE at `Bag Sig` (Q-S4-4 (a)): a program with the slot `Sig` and no `sigComm`, or a `sigComm` of a wrong type. Rows: sig-no-comm.lang, sig-comm-wrong.lang. |
+| `REFUSE_WITNESS_READ` | A step or txid that reads a `Witness` (L5) | S4, DONE for `txid` and the `Body` slot (Q-S4-2 (a), by type): a `Body` slot that mentions `Witness`, also by an alias (body-has-witness.lang, body-alias-witness.lang), or a `txid` whose type mentions `Witness` or `AuthTx` (txid-reads-witness.lang, txid-authtx.lang). The `step` check is S5. |
 | `REFUSE_FOOTPRINT_READ` | A `get` outside `reads` | S5 |
 | `REFUSE_FOOTPRINT_WRITE` | A `set` outside `writes` | S5 |
 | `REFUSE_FOOTPRINT_PHASE` | A `get` after a `set`, or `nothing` after a `set` | S5 |
@@ -412,8 +448,8 @@ One session for each slice: scope, gate, mutants, docs, close.
 | S1 | First build slice. Survey and port the Cubical TT kernel with R0 (8.1): `REFUSE_CELL`, `REFUSE_PARTIAL`, the no-trap Wasm writer, `test/notraptool.c`. Add `REFUSE_NOT_IN_DESIGN` with the section 4 name list. Survey the footprint checker (section 5): the key-pattern syntax, the three-phase step, the sources to port. | DONE: serial gate EXIT 0 (31 examples, 16 parse refusals, 160 check refusals, 10 kit-only refusals, 86 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 0 failures; review, domain and path regressions passed). Review restored 33 valid Wasm modules and 1088 differential cases with 0 mismatches; 7 of 8 mutants KILLED, PARTIAL equivalent (section 7) |
 | S2 | `Amount` (u64, `Maybe` arithmetic), `Asset`, `Bag`, `Value`, `Balance`, `[[ ]]v`, `Delta`, `neg`, `Balanced`; `REFUSE_OVERFLOW`; L1, L8. | DONE: serial gate EXIT 0 (31 examples, 16 parse refusals, 154 check refusals, 10 kit-only refusals, 90 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 33 valid Wasm modules, 2293 differential cases with 0 mismatches, 0 failures; review, domain and path regressions passed). 20 of 20 mutants KILLED (SLOT-FIRST-ORDER by the message row sig-asset-higher.lang); the `SIG_DEFINED` mutant is equivalent (section 7) |
 | S3 | `Pfin`, `in`, `union`, `Key`, `Footprint`; L2. | DONE: serial gate EXIT 0 (33 examples, 16 parse refusals, 158 check refusals, 10 kit-only refusals, 98 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 35 valid Wasm modules, 2293 differential cases with 0 mismatches, 0 failures; review, domain and path regressions passed). 11 of 12 mutants KILLED; KEY-SPLICE-2 is equivalent (section 7, Q-S3-6 (a)). `Mempool` moves to S4 (X16) |
-| S4 | `Body`, `Witness`, `Authorized`, `AuthTx`, `Mempool = Pfin AuthTx`, `Digest` (abstract), `Sig`, `agg`, `QC`; `REFUSE_WITNESS_READ`, `REFUSE_BAG_NONCOMM` at `Bag Sig`; L5. | NEXT |
-| S5 | `State`, `Eff`, `step`, `reads`, `writes`, the frame-law checker, `Ind`, the `Ind` matrix; `REFUSE_FOOTPRINT_*`; L3. | |
+| S4 | `Body`, `Witness`, `Authorized`, `AuthTx`, `Mempool = Pfin AuthTx`, `Digest` (abstract), `Sig`, `agg`, `QC`; `REFUSE_WITNESS_READ`, `REFUSE_BAG_NONCOMM` at `Bag Sig`; L5. | DONE: serial gate EXIT 0 (37 examples, 16 parse refusals, 171 check refusals, 10 kit-only refusals, 106 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 39 valid Wasm modules, 2293 differential cases with 0 mismatches, 0 failures; review, domain and path regressions passed). Mutants: 14 of 15 KILLED; AUTH-SPLICE-2 is EQUIVALENT (the S4 mutants table below). |
+| S5 | `State`, `Eff`, `step`, `reads`, `writes`, the frame-law checker, `Ind`, the `Ind` matrix; `REFUSE_FOOTPRINT_*`; L3. | NEXT |
 | S6 | `Trace`, `swap`, `++`, `[t]`, `[[ ]]`, `Blockchain`, `D`; X4 and X10 refused; `REFUSE_EQ_UNDECIDABLE`; L4, L9. | |
 | S7 | `Ledger`, `apply`, `query`, `[[ ]]N`, `<=`, `Compatible`, Foata normal form; L6. | |
 | S8 | `FinMap`, `canon`, `root`, inclusion proof, `UTxO`, `Valid`, `compose`; O1, O3; L7. | |
@@ -446,6 +482,27 @@ restore check and a serial gate): 11 KILLED, 1 EQUIVALENT.
 | KEY-FIRST-ORDER | `first_order_slot` admits `Asset` only | KILLED: 2 FAIL rows (sig-key-higher.lang gives exit 0, and its message row) |
 | KEY-SPLICE-1 | no `key_after_key` call in `front_load` | KILLED: 4 FAIL rows (the footprint example and evals give NAME_UNKNOWN `Footprint`) |
 | KEY-SPLICE-2 | no `key_after_key` call in `front_load_domain` | EQUIVALENT: exit 0, 0 FAIL rows; `langc` has no caller of `front_load_domain` (section 7, Q-S3-6 (a)) |
+
+S4 mutants (15 rows; a serial `make -B check` for each mutant, then a
+restore check and a serial gate): 14 KILLED, 1 EQUIVALENT.
+
+| Mutant | Change | Result |
+|---|---|---|
+| AUTH-TRUNC | no `Trunc1` in `Authorized` | KILLED: 8 FAIL rows (TYPE_MISMATCH at the L5 lemma `authTxEq` in each program with the auth prelude) |
+| AUTH-SPLICE-1 | no `auth_after_witness` call in `front_load` | KILLED: 8 FAIL rows (examples/authtx.lang and txid-authtx.lang give NAME_UNKNOWN `AuthTx`) |
+| AUTH-SPLICE-2 | no `auth_after_witness` call in `front_load_domain` | EQUIVALENT: exit 0, 0 FAIL rows; `langc` has no caller of `front_load_domain` (section 7, as KEY-SPLICE-2, Q-S3-6 (a)) |
+| L5-PATH | `authTxEq` applies `J` along the constant path at `witness x`, not along `p` | KILLED: 8 FAIL rows (TYPE_MISMATCH at `authTxEq`) |
+| WITNESS-FIRST-ORDER | `first_order_slot` does not admit `Witness` | KILLED: 2 FAIL rows (witness-higher.lang gives exit 0, and its message row) |
+| BODY-WITNESS | the `Body` check of law L5 is off | KILLED: 3 FAIL rows (body-has-witness.lang gives REFUSE_SIG, body-alias-witness.lang gives exit 0, and a message row) |
+| TXID-TYPE | `program_type` admits each type of `txid` | KILLED: 4 FAIL rows (txid-reads-witness.lang and txid-authtx.lang give exit 0, and their message rows) |
+| DIGEST-FIRST-ORDER | `first_order_slot` does not admit `Digest` | KILLED: 2 FAIL rows (digest-higher.lang gives exit 0, and its message row) |
+| SIG-COMM | the check for a `Sig` slot with no `sigComm` is off | KILLED: 2 FAIL rows (sig-no-comm.lang gives exit 0, and its message row) |
+| SIG-CLAUSE | the message of that check does not name `sigComm` or the commutative clause | KILLED: 1 FAIL row (the message row of sig-no-comm.lang) |
+| AGG-SPLICE | no `agg_after_sig` call in `front_load` | KILLED: 4 FAIL rows (examples/agg.lang and its evals give NAME_UNKNOWN `agg`) |
+| AGG-OP | the `aggOp` path is `sigMul (agg ys) (agg xs)` | KILLED: 9 FAIL rows (PATH_END at `aggOp` in each program with the agg prelude) |
+| QC-QUORUM | `QC` has no quorum field | KILLED: 4 FAIL rows (examples/qc.lang and its evals give TYPE_INFER) |
+| QC-SPLICE | no `qc_after_signs` call in `front_load` | KILLED: 4 FAIL rows (examples/qc.lang and its evals give NAME_UNKNOWN `QC`) |
+| MEMPOOL-IN | the `AuthTx` equality of examples/authtx.lang compares the body of `x` with itself | KILLED: 6 FAIL rows (examples/authtx.lang and its `mempoolIn` rows) |
 
 ## 13. Open items
 
@@ -617,3 +674,33 @@ recommendation (a).
   2026-11-03: keep the splice in `front_load_domain`, record
   KEY-SPLICE-2 as an equivalent mutant (no caller), no source change
   (section 7).
+- Q-S4-1: the form of the witness truncation. RULED (a) by the USER,
+  2026-11-03 (S4): `Authorized b = Trunc1 (Sigma Witness (fun w => Path
+  bit (witnessOk b w) btrue))`. `Body` and `Witness` are first-order
+  program slots, and `witnessOk : Body -> Witness -> bit` is a program
+  def. DONE (S4): the auth prelude, examples/authtx.lang.
+- Q-S4-2: how REFUSE_WITNESS_READ finds a read. RULED (a): by type. The
+  `Body` slot must not mention `Witness`, `Authorized` or `AuthTx`;
+  `txid` has the kernel type `Body -> Digest` (S5: `step : Body ->
+  Eff`). DONE (S4): four REFUSE_WITNESS_READ rows (section 7).
+- Q-S4-3: `Digest`. RULED (a): a first-order program slot, as `Key` is
+  (REFUSE_SIG). O3 stays a named assumption. DONE (S4):
+  digest-higher.lang.
+- Q-S4-4: `agg` and the commutative `Sig`. RULED (a): `Sig` is a slot,
+  the program gives the six monoid names, and the front end splices
+  `agg` (`bagFold`) and `aggOp`. No `sigComm`, or a wrong one, gives
+  REFUSE_BAG_NONCOMM. DONE (S4): examples/agg.lang, sig-no-comm.lang,
+  sig-comm-wrong.lang.
+- Q-S4-5: the threshold of `QC b`. RULED (a): a program bit `quorum :
+  Pfin Node -> bit` in the `Sigma`, outside the truncation. DONE (S4):
+  the QC prelude, examples/qc.lang.
+- Q-S4-6: the program names of the splices. RULED (a): one SIG row
+  each, of a new kind (`SIG_PROGRAM`) with a type that the kernel fixes.
+  A wrong type gives a named refusal. DONE (S4): section 4.
+- Q-S4-7: the L5 law. RULED (a): the prelude lemma `authTxEq : (x y :
+  AuthTx) -> Path Body (witness x) (witness y) -> Path AuthTx x y`; (b)
+  `authSame` if the kernel has no Sigma eta. DONE (S4) as (a).
+- Q-S4-8: the order of the build units. RULED (a): u2 the auth prelude,
+  L5, REFUSE_WITNESS_READ and `Mempool`; u3 `Digest` and `txid`; u4
+  `Sig` and `agg`; u5 `QC`; u6 this plan, the docs and the mutants; u7
+  the close.
