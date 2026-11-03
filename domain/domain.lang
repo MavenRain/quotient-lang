@@ -112,6 +112,136 @@ def bagMap : (A : Type 0) -> (B : Type 0) -> (A -> B) -> Bag A -> Bag B :=
     (fun (x : Bag B) (y : Bag B) => fun (i : I) => bagComm B x y i)
     (fun (x : Bag B) => fun (i : I) => bagUnitL B x i)
     (fun (a : A) => bagOf B (f a))
+-- The finite subset (S3, law L2, USER ruling Q-S1-5 (a)): the free
+-- commutative idempotent monoid on A. It is Bag with the idem path
+-- pfinIdem (the union of s with s is s). A fold or elim out of Pfin
+-- without the comm case or the idem case gives REFUSE_BAG_NONCOMM (USER
+-- ruling Q-S2-4 (a)).
+family Pfin (A : Type 0) := pfinOf (pfinGen : A)
+  | pfinUnit
+  | pfinOp (pOpLeft : Pfin A) (pOpRight : Pfin A)
+  | pfinAssoc (pAssocX : Pfin A) (pAssocY : Pfin A) (pAssocZ : Pfin A) (i : I)
+    [ ~i -> pfinOp A (pfinOp A pAssocX pAssocY) pAssocZ, i -> pfinOp A pAssocX (pfinOp A pAssocY pAssocZ) ]
+  | pfinComm (pCommX : Pfin A) (pCommY : Pfin A) (i : I)
+    [ ~i -> pfinOp A pCommX pCommY, i -> pfinOp A pCommY pCommX ]
+  | pfinUnitL (pUnitX : Pfin A) (i : I)
+    [ ~i -> pfinOp A (pfinUnit A) pUnitX, i -> pUnitX ]
+  | pfinIdem (pIdemX : Pfin A) (i : I)
+    [ ~i -> pfinOp A pIdemX pIdemX, i -> pIdemX ]
+  | pfinSquash (pfinFrom : Pfin A) (pfinTo : Pfin A) (pfinLeft : Path (Pfin A) pfinFrom pfinTo) (pfinRight : Path (Pfin A) pfinFrom pfinTo) (i : I) (j : I)
+    [ ~i -> pfinLeft @ j, i -> pfinRight @ j, ~j -> pfinFrom, j -> pfinTo ]
+def pfinIsSet : (A : Type 0) -> isSet (Pfin A) :=
+  fun (A : Type 0) (x : Pfin A) (y : Pfin A) (p : Path (Pfin A) x y) (q : Path (Pfin A) x y) => fun (i : I) => fun (j : I) => pfinSquash A x y p q i j
+-- The fold out of Pfin (S3, law L2): a map from A into a commutative
+-- idempotent monoid M that is a set extends to Pfin A. The cases are the
+-- laws of M, in the order of the constructors. The idem case is the L2
+-- clause.
+def pfinFold : (A : Type 0) -> (M : Type 0) -> isSet M -> (e : M) -> (op : M -> M -> M) -> ((x : M) -> (y : M) -> (z : M) -> Path M (op (op x y) z) (op x (op y z))) -> ((x : M) -> (y : M) -> Path M (op x y) (op y x)) -> ((x : M) -> Path M (op e x) x) -> ((x : M) -> Path M (op x x) x) -> (A -> M) -> Pfin A -> M :=
+  fun (A : Type 0) (M : Type 0) (s : isSet M) (e : M) (op : M -> M -> M) (assoc : (x : M) -> (y : M) -> (z : M) -> Path M (op (op x y) z) (op x (op y z))) (comm : (x : M) -> (y : M) -> Path M (op x y) (op y x)) (unitL : (x : M) -> Path M (op e x) x) (idem : (x : M) -> Path M (op x x) x) (f : A -> M) (b : Pfin A) =>
+    fold (fun (a : A) => f a) e (fun (x : M) (y : M) => op x y)
+      (fun (x : M) (y : M) (z : M) => fun (i : I) => assoc x y z @ i)
+      (fun (x : M) (y : M) => fun (i : I) => comm x y @ i)
+      (fun (x : M) => fun (i : I) => unitL x @ i)
+      (fun (x : M) => fun (i : I) => idem x @ i)
+      (fun (x : M) (y : M) (p : Path M x y) (q : Path M x y) => fun (i : I) => fun (j : I) => (s x y p q @ i) @ j) b
+-- The map of Pfin is the fold into Pfin B: its idem case is pfinIdem of B.
+def pfinMap : (A : Type 0) -> (B : Type 0) -> (A -> B) -> Pfin A -> Pfin B :=
+  fun (A : Type 0) (B : Type 0) (f : A -> B) => pfinFold A (Pfin B) (pfinIsSet B) (pfinUnit B) (pfinOp B)
+    (fun (x : Pfin B) (y : Pfin B) (z : Pfin B) => fun (i : I) => pfinAssoc B x y z i)
+    (fun (x : Pfin B) (y : Pfin B) => fun (i : I) => pfinComm B x y i)
+    (fun (x : Pfin B) => fun (i : I) => pfinUnitL B x i)
+    (fun (x : Pfin B) => fun (i : I) => pfinIdem B x i)
+    (fun (a : A) => pfinOf B (f a))
+-- union is the operation of Pfin. The L2 paths (S3): union is a
+-- commutative idempotent monoid with the unit pfinUnit. The right unit
+-- is the comm path, then the left unit.
+def union : (A : Type 0) -> Pfin A -> Pfin A -> Pfin A :=
+  fun (A : Type 0) (x : Pfin A) (y : Pfin A) => pfinOp A x y
+def unionUnitL : (A : Type 0) -> (x : Pfin A) -> Path (Pfin A) (union A (pfinUnit A) x) x :=
+  fun (A : Type 0) (x : Pfin A) => fun (i : I) => pfinUnitL A x i
+def unionUnitR : (A : Type 0) -> (x : Pfin A) -> Path (Pfin A) (union A x (pfinUnit A)) x :=
+  fun (A : Type 0) (x : Pfin A) => trans (Pfin A) (union A x (pfinUnit A)) (union A (pfinUnit A) x) x
+    (fun (i : I) => pfinComm A x (pfinUnit A) i) (fun (i : I) => pfinUnitL A x i)
+def unionAssoc : (A : Type 0) -> (x : Pfin A) -> (y : Pfin A) -> (z : Pfin A) -> Path (Pfin A) (union A (union A x y) z) (union A x (union A y z)) :=
+  fun (A : Type 0) (x : Pfin A) (y : Pfin A) (z : Pfin A) => fun (i : I) => pfinAssoc A x y z i
+def unionComm : (A : Type 0) -> (x : Pfin A) -> (y : Pfin A) -> Path (Pfin A) (union A x y) (union A y x) :=
+  fun (A : Type 0) (x : Pfin A) (y : Pfin A) => fun (i : I) => pfinComm A x y i
+def unionIdem : (A : Type 0) -> (x : Pfin A) -> Path (Pfin A) (union A x x) x :=
+  fun (A : Type 0) (x : Pfin A) => fun (i : I) => pfinIdem A x i
+-- The bit (S3, USER ruling Q-S3-3 (a)): Bool is RESERVED, so the carrier
+-- of pfinIn is Sum Unit Unit (the OrbitN bit), with bfalse on the left.
+-- bitInd eliminates the bit at its two closed points: elim on Sum, then
+-- elim on Unit. Thus the cases need no Unit eta.
+def bfalse : Sum Unit Unit := inl unit
+def btrue : Sum Unit Unit := inr unit
+def bitInd : (P : Sum Unit Unit -> Type 0) -> P bfalse -> P btrue -> (b : Sum Unit Unit) -> P b :=
+  fun (P : Sum Unit Unit -> Type 0) (f : P bfalse) (t : P btrue) (b : Sum Unit Unit) =>
+    elim (fun (s : Sum Unit Unit) => P s) (fun (u : Unit) => elim (fun (v : Unit) => P (inl v)) f u)
+      (fun (u : Unit) => elim (fun (v : Unit) => P (inr v)) t u) b
+-- or is the join of the bit. It eliminates the left argument. The or
+-- laws make the bit a commutative idempotent monoid with the unit bfalse.
+def or : Sum Unit Unit -> Sum Unit Unit -> Sum Unit Unit :=
+  fun (a : Sum Unit Unit) (b : Sum Unit Unit) => elim (fun (s : Sum Unit Unit) => Sum Unit Unit) (fun (u : Unit) => b) (fun (u : Unit) => btrue) a
+def orAssoc : (x : Sum Unit Unit) -> (y : Sum Unit Unit) -> (z : Sum Unit Unit) -> Path (Sum Unit Unit) (or (or x y) z) (or x (or y z)) :=
+  fun (x : Sum Unit Unit) (y : Sum Unit Unit) (z : Sum Unit Unit) => bitInd (fun (s : Sum Unit Unit) => Path (Sum Unit Unit) (or (or s y) z) (or s (or y z))) refl refl x
+def orComm : (x : Sum Unit Unit) -> (y : Sum Unit Unit) -> Path (Sum Unit Unit) (or x y) (or y x) :=
+  fun (x : Sum Unit Unit) (y : Sum Unit Unit) => bitInd (fun (s : Sum Unit Unit) => Path (Sum Unit Unit) (or s y) (or y s))
+    (bitInd (fun (t : Sum Unit Unit) => Path (Sum Unit Unit) (or bfalse t) (or t bfalse)) refl refl y)
+    (bitInd (fun (t : Sum Unit Unit) => Path (Sum Unit Unit) (or btrue t) (or t btrue)) refl refl y) x
+def orUnitL : (x : Sum Unit Unit) -> Path (Sum Unit Unit) (or bfalse x) x :=
+  fun (x : Sum Unit Unit) => refl
+def orIdem : (x : Sum Unit Unit) -> Path (Sum Unit Unit) (or x x) x :=
+  fun (x : Sum Unit Unit) => bitInd (fun (s : Sum Unit Unit) => Path (Sum Unit Unit) (or s s) s) refl refl x
+-- bfalse and btrue are not equal: the code family is Unit at bfalse and C
+-- at btrue (elim on Sum into Type 0).
+def bitAbsurd : Path (Sum Unit Unit) bfalse btrue -> (C : Type 0) -> C :=
+  fun (p : Path (Sum Unit Unit) bfalse btrue) (C : Type 0) =>
+    transp (fun (i : I) => elim (fun (s : Sum Unit Unit) => Type 0) (fun (u : Unit) => Unit) (fun (u : Unit) => C) (p @ i)) i0 unit
+-- Hedberg (port of quorum-lang lib/prelude.lang, Q16 (b)): a type with a
+-- sound and reflexive decision into the bit is a set. collapse is a
+-- constant map on paths, and the Hedberg square gives isSet.
+def Sound : (A : Type 0) -> (A -> A -> Sum Unit Unit) -> Type 0 :=
+  fun (A : Type 0) (dec : A -> A -> Sum Unit Unit) => (x : A) -> (y : A) -> Path (Sum Unit Unit) (dec x y) btrue -> Path A x y
+def Reflexive : (A : Type 0) -> (A -> A -> Sum Unit Unit) -> Type 0 :=
+  fun (A : Type 0) (dec : A -> A -> Sum Unit Unit) => (x : A) -> Path (Sum Unit Unit) (dec x x) btrue
+def collapseAt : (A : Type 0) -> (dec : A -> A -> Sum Unit Unit) -> Sound A dec -> Reflexive A dec -> (a : A) -> (x : A) -> Path A a x -> (c : Sum Unit Unit) -> Path (Sum Unit Unit) (dec a x) c -> Path A a x :=
+  fun (A : Type 0) (dec : A -> A -> Sum Unit Unit) (sound : Sound A dec) (rf : Reflexive A dec) (a : A) (x : A) (p : Path A a x) (c : Sum Unit Unit) =>
+    bitInd (fun (d : Sum Unit Unit) => Path (Sum Unit Unit) (dec a x) d -> Path A a x)
+      (fun (g : Path (Sum Unit Unit) (dec a x) bfalse) => p) (fun (g : Path (Sum Unit Unit) (dec a x) btrue) => sound a x g) c
+def collapse : (A : Type 0) -> (dec : A -> A -> Sum Unit Unit) -> Sound A dec -> Reflexive A dec -> (a : A) -> (x : A) -> Path A a x -> Path A a x :=
+  fun (A : Type 0) (dec : A -> A -> Sum Unit Unit) (sound : Sound A dec) (rf : Reflexive A dec) (a : A) (x : A) (p : Path A a x) =>
+    collapseAt A dec sound rf a x p (dec a x) refl
+def collapseConst : (A : Type 0) -> (dec : A -> A -> Sum Unit Unit) -> (sound : Sound A dec) -> (rf : Reflexive A dec) -> (a : A) -> (x : A) -> (p : Path A a x) -> (q : Path A a x) -> Path (Path A a x) (collapse A dec sound rf a x p) (collapse A dec sound rf a x q) :=
+  fun (A : Type 0) (dec : A -> A -> Sum Unit Unit) (sound : Sound A dec) (rf : Reflexive A dec) (a : A) (x : A) (p : Path A a x) (q : Path A a x) =>
+    bitInd (fun (c : Sum Unit Unit) => (h : Path (Sum Unit Unit) (dec a x) c) -> Path (Path A a x) (collapseAt A dec sound rf a x p c h) (collapseAt A dec sound rf a x q c h))
+      (fun (h : Path (Sum Unit Unit) (dec a x) bfalse) => bitAbsurd
+        (trans (Sum Unit Unit) bfalse (dec a x) btrue (fun (i : I) => h @ (~i))
+          (trans (Sum Unit Unit) (dec a x) (dec a a) btrue (fun (i : I) => dec a (p @ (~i))) (rf a)))
+        (Path (Path A a x) p q))
+      (fun (h : Path (Sum Unit Unit) (dec a x) btrue) => refl)
+      (dec a x) refl
+def discreteIsSet : (A : Type 0) -> (dec : A -> A -> Sum Unit Unit) -> Sound A dec -> Reflexive A dec -> isSet A :=
+  fun (A : Type 0) (dec : A -> A -> Sum Unit Unit) (sound : Sound A dec) (rf : Reflexive A dec) (a : A) (b : A) (p : Path A a b) (q : Path A a b) =>
+    fun (j : I) => fun (i : I) => hcomp A (~i \/ i \/ ~j \/ j) (fun (k : I) => [ ~i -> collapse A dec sound rf a a (fun (l : I) => a) @ k, i -> (collapseConst A dec sound rf a b p q @ j) @ k, ~j -> collapse A dec sound rf a (p @ i) (fun (l : I) => p @ (l /\ i)) @ k, j -> collapse A dec sound rf a (q @ i) (fun (l : I) => q @ (l /\ i)) @ k ]) a
+-- eqBit decides the equality of two bits. soundBit and reflBit are its
+-- laws, and bitIsSet is the Hedberg square at the bit.
+def eqBit : Sum Unit Unit -> Sum Unit Unit -> Sum Unit Unit :=
+  fun (a : Sum Unit Unit) (b : Sum Unit Unit) => elim (fun (s : Sum Unit Unit) => Sum Unit Unit)
+    (fun (u : Unit) => elim (fun (t : Sum Unit Unit) => Sum Unit Unit) (fun (v : Unit) => btrue) (fun (v : Unit) => bfalse) b)
+    (fun (u : Unit) => elim (fun (t : Sum Unit Unit) => Sum Unit Unit) (fun (v : Unit) => bfalse) (fun (v : Unit) => btrue) b) a
+def soundBit : Sound (Sum Unit Unit) eqBit :=
+  fun (x : Sum Unit Unit) (y : Sum Unit Unit) => bitInd (fun (s : Sum Unit Unit) => Path (Sum Unit Unit) (eqBit s y) btrue -> Path (Sum Unit Unit) s y)
+    (bitInd (fun (t : Sum Unit Unit) => Path (Sum Unit Unit) (eqBit bfalse t) btrue -> Path (Sum Unit Unit) bfalse t)
+      (fun (h : Path (Sum Unit Unit) btrue btrue) => refl) (fun (h : Path (Sum Unit Unit) bfalse btrue) => h) y)
+    (bitInd (fun (t : Sum Unit Unit) => Path (Sum Unit Unit) (eqBit btrue t) btrue -> Path (Sum Unit Unit) btrue t)
+      (fun (h : Path (Sum Unit Unit) bfalse btrue) => fun (i : I) => h @ (~i)) (fun (h : Path (Sum Unit Unit) btrue btrue) => refl) y) x
+def reflBit : Reflexive (Sum Unit Unit) eqBit :=
+  fun (x : Sum Unit Unit) => bitInd (fun (s : Sum Unit Unit) => Path (Sum Unit Unit) (eqBit s s) btrue) refl refl x
+def bitIsSet : isSet (Sum Unit Unit) := discreteIsSet (Sum Unit Unit) eqBit soundBit reflBit
+-- The member test (S3, USER ruling Q-S3-1 (b)): pfinIn is the fold of Pfin
+-- into the bit by or, with an equality from the program (no C builtin).
+def pfinIn : (A : Type 0) -> (A -> A -> Sum Unit Unit) -> A -> Pfin A -> Sum Unit Unit :=
+  fun (A : Type 0) (dec : A -> A -> Sum Unit Unit) (x : A) => pfinFold A (Sum Unit Unit) bitIsSet bfalse or orAssoc orComm orUnitL orIdem (fun (y : A) => dec x y)
 -- The free monoid (S3, USER ruling Q-S3-5 (a), rule R1): the cell monad
 -- of the monoid signature, with the generator fmEta and a set squash. The
 -- cons list List is kit only (the host ABI); a guest List gives REFUSE_CELL,

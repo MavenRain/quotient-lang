@@ -176,12 +176,12 @@ how to replace the sample domain.
 
 | Line | What the gate does |
 |---|---|
-| `examples: 31 checked, 0 failed` | `langc check` accepts each `examples/*.lang` file |
+| `examples: 33 checked, 0 failed` | `langc check` accepts each `examples/*.lang` file |
 | `parse refusals: 16 checked` | each `test/parse` file fails with the code in `test/parse/expect.txt`; one file has 1100 nested parentheses |
-| `check refusals: 154 checked` | each `test/check` file fails with the code in `test/check/expect.txt`; the `TYPE_REFL` message shows both normal forms |
+| `check refusals: 158 checked` | each `test/check` file fails with the code in `test/check/expect.txt`; the `TYPE_REFL` message shows both normal forms |
 | `kit-only refusals: 10 checked` | each `REFUSE_KIT` row refuses a kit item in guest mode only: `langc --kit check` accepts the file |
 | `time hint: 1 checked` | a `REFUSE_TIME` refusal names the op-count form (`len r`, an `OpPos`) |
-| `evals: 90 checked` | `langc eval` gives each result in `test/eval/expect.txt` |
+| `evals: 98 checked` | `langc eval` gives each result in `test/eval/expect.txt` |
 | `builds: 1 checked` | `langc build examples/functions.lang` writes a module that `wasm-validate` accepts |
 | `ir: 1 lowered` | `langc ir examples/functions.lang` gives one `func` line for each `abi` line |
 | `ir refusals: 5 checked` | `langc --kit ir` refuses `test/ir/closure.lang`, `kmap.lang`, `tree.lang`, `spine.lang` and `hop.lang`, each with its code |
@@ -189,7 +189,7 @@ how to replace the sample domain.
 | `notrap modules: 4 checked` | `langc build` writes the modules of `test/ir/natops.lang`, `test/ir/block.lang` and `examples/state-no-history.lang`, and `wasm-validate` accepts each one. `build/notraptool` (`test/notraptool.c`) accepts these three modules and the module of `examples/functions.lang`: no `unreachable`, no `memory.grow`, only the opcodes of `src/wasmop.h`, a divisor guard before each `i64.div_u` and `i64.rem_u`, and memory 0 with maximum = minimum. `build` lowers the `state` family of `examples/state-no-history.lang` as a plain family (Q-S3-3 (b)) |
 | `notrap bad rows: 7 checked` | `build/notraptool` refuses each module of `test/notrap/bad/` (`wat2wasm` makes it from its `.wat` file): exit 1 and the message of its line in `test/notrap/bad/expect.txt`. The 7 modules have `unreachable`, `memory.grow`, an `i64.div_u` and an `i64.rem_u` with no guard, a memory maximum above the minimum, a memory with no maximum, and `i32.add` (an opcode that is not in `src/wasmop.h`) |
 | `spine evals: 10 checked` | `langc --kit eval` gives each eval of `test/ir/spine.lang` at 4 |
-| `wasm: 33 modules valid` | every example and both scalar IR fixtures build and pass `wasm-validate` |
+| `wasm: 35 modules valid` | every example and both scalar IR fixtures build and pass `wasm-validate` |
 | `differential: 2293 cases, 0 mismatches` | node runs each scalar export on the grid from `test/grid.awk`; each result equals `langc eval` |
 | `gate: 0 failures` | the sum of all failures of `test/gate.sh` |
 | `review regressions: passed` | `test/review.sh` passes |

@@ -17,10 +17,13 @@ file gives the readings of that request, the route, the slices and the open
 items. The USER ruled Q-R1 to Q-R8 before S0 (section 14). So sections 2 to
 5 are RULED, not proposals.
 
-Status: S2 DONE (2026-11-02): `Amount`, `Bag`, `Value`, `Balance`,
-`[[ ]]v`, `Delta`, `neg`, `Balanced`, REFUSE_OVERFLOW and
-REFUSE_BAG_NONCOMM at `Bag` (sections 4 and 7), with L1 and L8
-(section 6), on the S1 kernel (section 8.1). Next: S3 (section 12).
+Status: S3 DONE (2026-11-03): `Pfin`, `in`, `union`, the slot `Key`
+and `Footprint = Pfin Key` (section 4), REFUSE_BAG_NONCOMM at `Pfin`
+(section 7) and L2 (section 6). S2 (2026-11-02) gave `Amount`, `Bag`,
+`Value`, `Balance`, `[[ ]]v`, `Delta`, `neg`, `Balanced`,
+REFUSE_OVERFLOW and REFUSE_BAG_NONCOMM at `Bag`, with L1 and L8, on the
+S1 kernel (section 8.1). `Mempool` moves to S4 (X16). Next: S4
+(section 12).
 
 ## 1. Rulings
 
@@ -112,7 +115,7 @@ name: a program that uses it gets a refusal (section 7).
 | X13 | `Delta M`, `neg`, `Balanced`, mint and burn policy | sec 3 | (none) | KEEP: subtraction is total | S2 |
 | X14 | `agg : Bag Sig -> Sig` (commutative `Sig`) | sec 5 | (none) | KEEP: a non-commutative scheme is refused at `Bag Sig` | S4 |
 | X15 | `QC b` (signer set outside, signatures inside the truncation) | sec 4 | (none) | KEEP, v1 (Q-R6 (a)) | S4 |
-| X16 | `Pfin A`, `in`, `union`, `Mempool = Pfin AuthTx` | sec 6 | (none) | KEEP: gossip merge is union | S3 |
+| X16 | `Pfin A`, `in`, `union`, `Mempool = Pfin AuthTx` | sec 6 | (none) | KEEP: gossip merge is union. S3 DONE: `Pfin A`, `in` and `union`. `Mempool` moves to S4, because it needs `AuthTx` (S4) | S3, S4 |
 | X17 | `reads`, `writes : Body -> Pfin Key`; frame law gives commute | sec 7 | (none) | KEEP: the core checker feature (section 5) | S5 |
 | X18 | `FinMap Key Val`, `canon`, `root`, inclusion proof, `Digest` | sec 12 | (none) | KEEP: binding is assumption O1; policy normal forms later (Q-R7 (a)) | S8 |
 | X19 | `Valid r r'`, `compose` | sec 13 | (none) | KEEP: the T2 circuit emits `Valid`; `compose` uses L4 and O1 once | S8, S17 |
@@ -124,6 +127,19 @@ equality and no other operation unless a row gives one: `Asset`, `Owner`,
 `Key`, `Val`, `Node`, `OutRef`, `Output`, `Query`, `Answer`, `Amount`
 (u64, Q-R3 (a)). `State` is `Key -> Val` (D1 sec 7), held as
 `FinMap Key Val`.
+
+`Pfin A` (S3) is the `Bag` generator form with the idempotence cell
+`pfinIdem` (the union of `s` with `s` is `s`, Q-S1-5 (a)). `union` is
+its operation. `in` is a prelude fold out of `Pfin A` into the bit
+`Sum Unit Unit` by `or`, with an equality from the program (Q-S3-1 (b),
+Q-S3-3 (a)). `Key` (S3, Q-S3-2 (a)) is a program slot, as `Asset` is,
+and it must be first-order data (`REFUSE_SIG`, section 7). After the
+program definition of `Key`, the front end splices the key prelude
+`Footprint = Pfin Key` (`key_after_key` in `front_load` and
+`front_load_domain`, src/front/front.c). A program that uses
+`Footprint` and does not define `Key` gets NAME_UNKNOWN
+(footprint-no-key.lang). `reads`, `writes` and the key patterns stay at
+S5. `Mempool = Pfin AuthTx` moves to S4 (X16).
 
 `Amount` (S2, Q-S2-2 (a)) is a nominal builtin type that a guest can
 use. `amountAdd` and `amountSub` give `Maybe Amount`: `none` at
@@ -278,7 +294,7 @@ Notes:
 | Law | Statement | Discharge |
 |---|---|---|
 | L1 | `Bag` is commutative: an eliminator out of `Bag A` gives the `comm` clause. `agg (xs ++ ys) = agg xs (x) agg ys`. | kernel, per eliminator. S2 DONE at `Bag`: a fold or elim out of `Bag` with a wrong count of cases gives `REFUSE_BAG_NONCOMM` (Q-S2-4 (a)); `examples/bag.lang`. `agg` needs O2 (S4) |
-| L2 | `Pfin` union laws: unit, assoc, comm, idem. Mempool merge is order-free. | prelude (merge-lang S1b, quorum-lang FMSet port) |
+| L2 | `Pfin` union laws: unit, assoc, comm, idem. Mempool merge is order-free. | prelude (merge-lang S1b, quorum-lang FMSet port), S3 DONE at `Pfin`: `unionUnitL`, `unionUnitR`, `unionAssoc`, `unionComm` and `unionIdem` (domain/domain.lang); `examples/pfin.lang`. The `Mempool` instance comes with `AuthTx` (S4) |
 | L3 | Trace swap: if `Ind a b`, `[[a <| b <| t]] = [[b <| a <| t]]`. | checker, from the frame law (section 5) |
 | L4 | `[[t ++ u]] = [[t]] ; [[u]]`, and `[[ ]]` is the unique monoid map that extends `step` (D1 sec 8). | prelude |
 | L5 | No-malleability: equal bodies give equal `AuthTx`; txid reads `Body` only. | checker: a step or txid that reads a `Witness` is refused |
@@ -303,9 +319,9 @@ assumptions (A2).
 | `REFUSE_CELL` | A type constructor other than the cell monad and its dual (kernel) | S1 |
 | `REFUSE_PARTIAL` | A partial operation or general recursion (kernel R0) | S1, DONE (port). Two sites give this code for a partial name in a spine head: `unknown_name` and `var_core`. A mutant that removes the `unknown_name` refusal is equivalent: `var_core` then refuses the same name with the same code and text. The S1 mutant PARTIAL-CODE changes the code at `unknown_name`, and the row partial-name.lang kills it. |
 | `REFUSE_NOT_IN_DESIGN` | A name of the DROP rows X4 and X10 in any declaration form or binder (path 1); an axiom of a universe type whose name is not an admitted base sort (path 2, Q-S1-2 (a)) | S1, DONE |
-| `REFUSE_SIG` | A program that does not keep to the base signature of section 4: a base sort that is not a slot of `Type 0`, a program definition of a kernel name of S2 to S8, or an `Asset` slot that is not first-order data (Q-S2-5 (a)) | S1 (port: the orbit-lang sample table). S2, DONE: the table is now the section 4 names (Q-S1-3 (a)). The 9 base sorts other than `Amount` are slots of `Type 0`, and the kernel names of S2 to S8 are defined rows. A mutant that makes the `SIG_DEFINED` case of `check_sig` give 1 is equivalent: `kernel_sig` refuses the same program first. The S2 mutant SLOT-FIRST-ORDER lived in round 1: the prelude `valueBal` then refuses the same program by `rule_value_count` with the same code. The message row of sig-asset-higher.lang ("Asset: the slot Asset must be first-order data") kills it. |
+| `REFUSE_SIG` | A program that does not keep to the base signature of section 4: a base sort that is not a slot of `Type 0`, a program definition of a kernel name of S2 to S8, or an `Asset` slot that is not first-order data (Q-S2-5 (a)) | S1 (port: the orbit-lang sample table). S2, DONE: the table is now the section 4 names (Q-S1-3 (a)). The 9 base sorts other than `Amount` are slots of `Type 0`, and the kernel names of S2 to S8 are defined rows. A mutant that makes the `SIG_DEFINED` case of `check_sig` give 1 is equivalent: `kernel_sig` refuses the same program first. The S2 mutant SLOT-FIRST-ORDER lived in round 1: the prelude `valueBal` then refuses the same program by `rule_value_count` with the same code. The message row of sig-asset-higher.lang ("Asset: the slot Asset must be first-order data") kills it. S3, DONE at `Key` (Q-S3-2 (a)): the `Key` slot must be first-order data. Row: sig-key-higher.lang, with a message row that names the slot `Key`. A mutant that removes the key splice from `front_load_domain` (KEY-SPLICE-2) is equivalent: `langc` has no caller of `front_load_domain`, and the guest mode and `--kit` both use `front_load` (Q-S3-6 (a)). |
 | `REFUSE_OVERFLOW` | `Amount` arithmetic used outside `Maybe` | S2, DONE: an `amountAdd` or `amountSub` result where an `Amount` is wanted (`overflow_result_ok`). Rows: amount-overflow.lang, amount-underflow.lang. |
-| `REFUSE_BAG_NONCOMM` | An eliminator out of `Bag` or `Pfin` without its path clauses; a non-commutative `agg` (E5) | S2, DONE at `Bag` (Q-S2-4 (a)): a fold or elim out of `Bag` with a wrong count of cases. Rows: bag-no-squash.lang, bag-no-comm.lang, bag-elim-no-comm.lang. Open: `Pfin` (S3) and the non-commutative `agg` at `Bag Sig` (S4). |
+| `REFUSE_BAG_NONCOMM` | An eliminator out of `Bag` or `Pfin` without its path clauses; a non-commutative `agg` (E5) | S2, DONE at `Bag` (Q-S2-4 (a)): a fold or elim out of `Bag` with a wrong count of cases. Rows: bag-no-squash.lang, bag-no-comm.lang, bag-elim-no-comm.lang. S3, DONE at `Pfin`: a fold or elim out of `Pfin` with a wrong count of cases (no `pfinIdem` case). Rows: pfin-no-idem.lang (the message names the `pfinIdem` case), pfin-elim-no-idem.lang. Open: the non-commutative `agg` at `Bag Sig` (S4). |
 | `REFUSE_WITNESS_READ` | A step or txid that reads a `Witness` (L5) | S4 |
 | `REFUSE_FOOTPRINT_READ` | A `get` outside `reads` | S5 |
 | `REFUSE_FOOTPRINT_WRITE` | A `set` outside `writes` | S5 |
@@ -395,8 +411,8 @@ One session for each slice: scope, gate, mutants, docs, close.
 | S0 | Seed from tcc-wasm, DESIGN.md, this plan, README table, AGENTS.md; serial gate EXIT 0 (9 parse refusals, 19 check refusals, 32 evals, 10 lowered, 13 Wasm modules valid, 813 differential cases, 0 mismatches, review and domain regressions passed); seed commit; private repo | DONE |
 | S1 | First build slice. Survey and port the Cubical TT kernel with R0 (8.1): `REFUSE_CELL`, `REFUSE_PARTIAL`, the no-trap Wasm writer, `test/notraptool.c`. Add `REFUSE_NOT_IN_DESIGN` with the section 4 name list. Survey the footprint checker (section 5): the key-pattern syntax, the three-phase step, the sources to port. | DONE: serial gate EXIT 0 (31 examples, 16 parse refusals, 160 check refusals, 10 kit-only refusals, 86 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 0 failures; review, domain and path regressions passed). Review restored 33 valid Wasm modules and 1088 differential cases with 0 mismatches; 7 of 8 mutants KILLED, PARTIAL equivalent (section 7) |
 | S2 | `Amount` (u64, `Maybe` arithmetic), `Asset`, `Bag`, `Value`, `Balance`, `[[ ]]v`, `Delta`, `neg`, `Balanced`; `REFUSE_OVERFLOW`; L1, L8. | DONE: serial gate EXIT 0 (31 examples, 16 parse refusals, 154 check refusals, 10 kit-only refusals, 90 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 33 valid Wasm modules, 2293 differential cases with 0 mismatches, 0 failures; review, domain and path regressions passed). 20 of 20 mutants KILLED (SLOT-FIRST-ORDER by the message row sig-asset-higher.lang); the `SIG_DEFINED` mutant is equivalent (section 7) |
-| S3 | `Pfin`, `in`, `union`, `Key`, `Footprint`; L2. | NEXT |
-| S4 | `Body`, `Witness`, `Authorized`, `AuthTx`, `Digest` (abstract), `Sig`, `agg`, `QC`; `REFUSE_WITNESS_READ`, `REFUSE_BAG_NONCOMM` at `Bag Sig`; L5. | |
+| S3 | `Pfin`, `in`, `union`, `Key`, `Footprint`; L2. | DONE: serial gate EXIT 0 (33 examples, 16 parse refusals, 158 check refusals, 10 kit-only refusals, 98 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 35 valid Wasm modules, 2293 differential cases with 0 mismatches, 0 failures; review, domain and path regressions passed). 11 of 12 mutants KILLED; KEY-SPLICE-2 is equivalent (section 7, Q-S3-6 (a)). `Mempool` moves to S4 (X16) |
+| S4 | `Body`, `Witness`, `Authorized`, `AuthTx`, `Mempool = Pfin AuthTx`, `Digest` (abstract), `Sig`, `agg`, `QC`; `REFUSE_WITNESS_READ`, `REFUSE_BAG_NONCOMM` at `Bag Sig`; L5. | NEXT |
 | S5 | `State`, `Eff`, `step`, `reads`, `writes`, the frame-law checker, `Ind`, the `Ind` matrix; `REFUSE_FOOTPRINT_*`; L3. | |
 | S6 | `Trace`, `swap`, `++`, `[t]`, `[[ ]]`, `Blockchain`, `D`; X4 and X10 refused; `REFUSE_EQ_UNDECIDABLE`; L4, L9. | |
 | S7 | `Ledger`, `apply`, `query`, `[[ ]]N`, `<=`, `Compatible`, Foata normal form; L6. | |
@@ -412,6 +428,24 @@ One session for each slice: scope, gate, mutants, docs, close.
 | S17 | T2: the ZK circuit IR, ported from zkml-lang (Q-R8 (a)). | |
 | S18 | Policy normal forms (D1 sec 12, Q-R7 (a)). | |
 | S19 | Close: SPEC.md, probe/CAPABILITY.md, VALIDATION.md, final gate. | |
+
+S3 mutants (12 rows; a serial `make -B check` for each mutant, then a
+restore check and a serial gate): 11 KILLED, 1 EQUIVALENT.
+
+| Mutant | Change | Result |
+|---|---|---|
+| PFIN-NONCOMM | `Pfin` is not in `bag_family` | KILLED: 3 FAIL rows (pfin-no-idem.lang and pfin-elim-no-idem.lang give TYPE_MISMATCH, and the message row) |
+| PFIN-CLAUSE | `bag_clause` gives the `Bag` text at `Pfin` | KILLED: 1 FAIL row (the message row of pfin-no-idem.lang) |
+| PFIN-IDEM-CELL | the boundary of `pfinIdem` at `~i` changes to `pIdemX` | KILLED: 369 FAIL rows (PATH_END in the domain at `pfinFold`) |
+| IN-FOLD | `or` gives `b` on the right | KILLED: 369 FAIL rows (PATH_END in the domain at `orComm`) |
+| L2-UNITL | one wrong path in `unionUnitL` | KILLED: 369 FAIL rows (PATH_END in the domain at `unionUnitL`) |
+| L2-UNITR | one wrong path in `unionUnitR` | KILLED: 369 FAIL rows (PATH_END in the domain at `unionUnitR`) |
+| L2-ASSOC | one wrong path in `unionAssoc` | KILLED: 369 FAIL rows (PATH_END in the domain at `unionAssoc`) |
+| L2-COMM | one wrong path in `unionComm` | KILLED: 369 FAIL rows (PATH_END in the domain at `unionComm`) |
+| L2-IDEM | one wrong path in `unionIdem` | KILLED: 369 FAIL rows (PATH_END in the domain at `unionIdem`) |
+| KEY-FIRST-ORDER | `first_order_slot` admits `Asset` only | KILLED: 2 FAIL rows (sig-key-higher.lang gives exit 0, and its message row) |
+| KEY-SPLICE-1 | no `key_after_key` call in `front_load` | KILLED: 4 FAIL rows (the footprint example and evals give NAME_UNKNOWN `Footprint`) |
+| KEY-SPLICE-2 | no `key_after_key` call in `front_load_domain` | EQUIVALENT: exit 0, 0 FAIL rows; `langc` has no caller of `front_load_domain` (section 7, Q-S3-6 (a)) |
 
 ## 13. Open items
 
@@ -553,3 +587,33 @@ recommendation (a).
   exponential in the hcomp depth of `deltaExt` and `deltaAdd`. The fast
   path accepts a pair only when the cover test also accepts it.
   `ARENA_LIMIT_BYTES` stays 1 GiB (section 13 K7).
+- Q-S3-1: the form of `in`. A count is not well-defined on `Pfin` (the
+  idem cell gives `m s s = s`). (a) an eval-only C builtin, as S2
+  `valueCount`, with a first-order element type; (b) a prelude fold out
+  of `Pfin A` into a 2-valued semilattice by `or`, with an equality from
+  the program; (c) (a) at `Pfin Key` only.
+  RULED: (b), USER 11-02 (S3). No C builtin. Q-S3-3 gives the carrier.
+- Q-S3-2: `Key` and `Footprint`. (a) after a program defines the slot
+  `Key`, the front end splices `Footprint = Pfin Key`, as the value
+  prelude follows `Asset`; the `Key` slot must be first-order data
+  (REFUSE_SIG, as `Asset`); `reads`, `writes` and key patterns (Q-S1-4,
+  Q-S1-6) stay at S5; (b) defer `Footprint` to S5; (c) a domain def
+  `Footprint (K : Type 0)` with no splice.
+  RULED: (a), USER 11-02 (S3).
+  DONE (S3): `key_after_key` in src/front/front.c, the rows
+  sig-key-higher.lang and footprint-no-key.lang, examples/footprint.lang.
+- Q-S3-3: the carrier of `in`. RULED (a) by the USER, 2026-11-02:
+  `Bool` is a reserved name of the kernel (src/front/check.c), and the
+  repo has no `Bool`, no `or` and no isSet proof of a 2-valued type. So
+  the carrier is the bit `Sum Unit Unit`, with the domain defs `bfalse`,
+  `btrue` and `or` and the `or` laws by elim. `isSet (Sum Unit Unit)`
+  comes from a generic `discreteIsSet` (Hedberg), a port of quorum-lang
+  lib/prelude.lang. No C change. `Bool` stays reserved.
+- Q-S3-4 and Q-S3-5: the S3 records give no question with these ids.
+- Q-S3-6: the mutant KEY-SPLICE-2 (no key splice in `front_load_domain`)
+  lives. `langc` has no caller of `front_load_domain`: the guest mode
+  and `--kit` both call `front_load`, and `--kit` sets only the check
+  mode. `front_load_domain` is shared seed code. RULED (a) by the USER,
+  2026-11-03: keep the splice in `front_load_domain`, record
+  KEY-SPLICE-2 as an equivalent mutant (no caller), no source change
+  (section 7).

@@ -1,0 +1,15 @@
+-- The key prelude (S3, USER ruling Q-S3-2 (a)): after the program def
+-- Key, the front end puts def Footprint : Type 0 := Pfin Key. The Key
+-- slot must be first-order data. A footprint is a finite subset of keys.
+-- keyEq decides the equality of two keys into the bit, and pfinIn tests
+-- a member of a footprint.
+def Key : Type 0 := Size
+def keyEq : Key -> Key -> Sum Unit Unit :=
+  fun (m : Key) (n : Key) => elim (fun (t : Size) => Size -> Sum Unit Unit)
+    (fun (j : Size) => elim (fun (t : Size) => Sum Unit Unit) btrue (fun (k : Size) (r : Sum Unit Unit) => bfalse) j)
+    (fun (k : Size) (ih : Size -> Sum Unit Unit) (j : Size) => elim (fun (t : Size) => Sum Unit Unit) bfalse (fun (i : Size) (r : Sum Unit Unit) => ih i) j) m n
+def footPair : Footprint := union Key (pfinOf Key sz0) (pfinOf Key (szS sz0))
+def footHasZero : Sum Unit Unit := pfinIn Key keyEq sz0 footPair
+def footHasTwo : Sum Unit Unit := pfinIn Key keyEq (szS (szS sz0)) footPair
+def footHasZeroTrue : Path (Sum Unit Unit) footHasZero btrue := refl
+def footHasTwoFalse : Path (Sum Unit Unit) footHasTwo bfalse := refl

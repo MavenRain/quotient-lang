@@ -1428,12 +1428,19 @@ static const Core *fold_family(Call *k, const Core *s, const Value *st) {
 
 static uint32_t find_family(const Machine *m, const char *name);
 
-/* FAM is the family Bag of domain/domain.lang (S2, USER ruling Q-S2-4
-   (a)). A fold or elim out of Bag with a wrong count of cases gives
-   REFUSE_BAG_NONCOMM: the bagComm case is the commutative clause (law
-   L1). Other families keep TYPE_MISMATCH. */
+/* FAM is the family Bag or Pfin of domain/domain.lang (S2 and S3, USER
+   ruling Q-S2-4 (a)). A fold or elim out of Bag or Pfin with a wrong
+   count of cases gives REFUSE_BAG_NONCOMM: the comm case is the
+   commutative clause (law L1) and, at Pfin, the pfinIdem case is the
+   idempotent clause (law L2). Other families keep TYPE_MISMATCH. */
 static int bag_family(const Machine *m, uint32_t fam) {
-  return fam != NO_FAMILY && fam == find_family(m, "Bag");
+  return fam != NO_FAMILY && (fam == find_family(m, "Bag") || fam == find_family(m, "Pfin"));
+}
+
+/* The clause text of REFUSE_BAG_NONCOMM at FAM (S3): Pfin adds the idem
+   case (law L2). */
+static const char *bag_clause(const Machine *m, uint32_t fam) {
+  return fam == find_family(m, "Pfin") ? "the pfinComm case is the commutative clause (law L1) and the pfinIdem case is the idempotent clause (law L2)" : "the bagComm case is the commutative clause (law L1)";
 }
 
 /* elim P c1 .. cn x over the domain family of ST outside a block (S7 B1,
@@ -1461,7 +1468,7 @@ static const Core *elim_on_family(Call *k, const Core *motive, const Value *pt, 
   if (f->index_count != d)
     return nul(FAIL(c, "TYPE_MISMATCH", "elim on %s needs a motive over its %u indices, then a value, found a motive of type %s", f->name, (unsigned)f->index_count, show(c, pt)));
   if (k->argc < want + 2u && bag_family(m, st->inst))
-    return nul(FAIL(c, "REFUSE_BAG_NONCOMM", "elim on Bag needs a motive, %u cases and a scrutinee: the bagComm case is the commutative clause (law L1)", (unsigned)want));
+    return nul(FAIL(c, "REFUSE_BAG_NONCOMM", "elim on %s needs a motive, %u cases and a scrutinee: %s", f->name, (unsigned)want, bag_clause(m, st->inst)));
   if (k->argc < want + 2u)
     return nul(FAIL(c, "TYPE_MISMATCH", "elim on %s needs a motive, %u cases and a scrutinee", f->name, (unsigned)want));
   s = infer(c, k->args[want + 1u], &xt);
@@ -1609,10 +1616,10 @@ static const Core *rule_fold(Call *k) {
     k->hint = k->outer;
     return fold_family(k, s, st);
   }
-  /* REFUSE_BAG_NONCOMM (S2, USER ruling Q-S2-4 (a)): a fold out of Bag
-     with a wrong count of cases. */
+  /* REFUSE_BAG_NONCOMM (S2 and S3, USER ruling Q-S2-4 (a)): a fold out
+     of Bag or Pfin with a wrong count of cases. */
   if (s != NULL && bag_family(c->m, fam))
-    return nul(FAIL(c, "REFUSE_BAG_NONCOMM", "a fold out of Bag needs %u cases, one for each constructor, and found %u: the bagComm case is the commutative clause (law L1)", (unsigned)c->m->families[fam].ctor_count, (unsigned)(k->argc - 1u)));
+    return nul(FAIL(c, "REFUSE_BAG_NONCOMM", "a fold out of %s needs %u cases, one for each constructor, and found %u: %s", c->m->families[fam].name, (unsigned)c->m->families[fam].ctor_count, (unsigned)(k->argc - 1u), bag_clause(c->m, fam)));
   if (s != NULL && k->argc == 3u && simple_scrutinee(st)) {
     k->hint = k->outer;
     return fold_simple(k, s, st);
@@ -3982,6 +3989,7 @@ static const SigRow SIGNATURE[] = {
   {"Pfin", SIG_DEFINED},
   {"Mempool", SIG_DEFINED},
   {"union", SIG_DEFINED},
+  {"Footprint", SIG_DEFINED},
   /* The kernel gives these names at slice S4 (PLAN section 12). */
   {"Body", SIG_DEFINED},
   {"Witness", SIG_DEFINED},
@@ -4022,10 +4030,17 @@ static uint32_t sig_row(const char *name) {
   return i;
 }
 
-/* A program definition of a slot must have the type Type 0, and the
-   Asset slot must be first-order data (USER ruling Q-S2-5 (a)): valueCount
-   counts with the conversion check. A program declaration of a defined
-   name does not get here: kernel_sig refuses it before the name check. */
+/* The slots that must be first-order data: Asset (valueCount counts with
+   the conversion check, USER ruling Q-S2-5 (a)) and Key (Footprint is
+   Pfin Key, USER ruling Q-S3-2 (a)). */
+static int first_order_slot(const char *name) {
+  return strcmp(name, "Asset") == 0 || strcmp(name, "Key") == 0;
+}
+
+/* A program definition of a slot must have the type Type 0, and a
+   first-order slot must be first-order data. A program declaration of a
+   defined name does not get here: kernel_sig refuses it before the name
+   check. */
 static int check_sig(Checker *c, const Decl *d, const Value *tv, const Core *body) {
   uint32_t i = sig_row(d->name);
   if (d->origin != ORIGIN_PROGRAM || i == SIG_COUNT)
@@ -4034,7 +4049,7 @@ static int check_sig(Checker *c, const Decl *d, const Value *tv, const Core *bod
   case SIG_SLOT:
     if (!conv_values(c->m, c->level, tv, val_univ(c->m, 0u)))
       return FAIL(c, "REFUSE_SIG", "the slot %s must have the type Type 0 (PLAN section 4)", d->name);
-    return (strcmp(d->name, "Asset") != 0 || asset_first_order(c->m, here(c, body), 0u)) ? 1 : FAIL(c, "REFUSE_SIG", "the slot Asset must be first-order data: no path constructor and no function (PLAN section 4, USER ruling Q-S2-5 (a))");
+    return (!first_order_slot(d->name) || asset_first_order(c->m, here(c, body), 0u)) ? 1 : FAIL(c, "REFUSE_SIG", "the slot %s must be first-order data: no path constructor and no function (PLAN section 4, USER rulings Q-S2-5 (a) and Q-S3-2 (a))", d->name);
   case SIG_DEFINED:
     break;
   }

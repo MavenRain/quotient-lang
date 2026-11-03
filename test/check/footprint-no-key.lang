@@ -1,0 +1,3 @@
+-- The key prelude follows the program def Key (S3, Q-S3-2 (a)). With no
+-- Key, Footprint is not a name.
+def footNone : Type 0 := Footprint

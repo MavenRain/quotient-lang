@@ -70,6 +70,14 @@ oppos lenOne => 1
 oppos lenTwo => 2
 bag bagMapPair => bagOp Size (bagOf Size (szS sz0)) (bagOf Size (szS (szS sz0)))
 bag bagMapComm => fun i => bagComm Size (bagOf Size (szS sz0)) (bagOf Size (szS (szS sz0))) i
+pfin pfinPair => pfinOp Size (pfinOf Size sz0) (pfinOf Size (szS sz0))
+pfin pfinTwice => pfinOp Size (pfinOf Size sz0) (pfinOf Size sz0)
+pfin pfinMapPair => pfinOp Size (pfinOf Size (szS sz0)) (pfinOf Size (szS (szS sz0)))
+pfin inZero => inr unit
+pfin inTwo => inl unit
+pfin inTwice => inr unit
+footprint footHasZero => inr unit
+footprint footHasTwo => inl unit
 amount amountTen => 10
 amount amountPlus 2 3 => 5
 amount amountPlus 18446744073709551615 1 => none

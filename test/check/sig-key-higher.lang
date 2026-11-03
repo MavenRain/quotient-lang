@@ -1,0 +1,3 @@
+-- The Key slot must be first-order data (USER ruling Q-S3-2 (a)): a
+-- footprint is Pfin Key, and a function type is not first-order data.
+def Key : Type 0 := Size -> Size

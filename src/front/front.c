@@ -134,6 +134,22 @@ static int value_after_asset(Arena *arena, size_t first, DeclList *out, Diag *di
   return splice_after(arena, first, VALUE_AFTER, 1u, VALUE_SOURCE_NAME, value_source, sizeof value_source - 1u, out, diag);
 }
 
+/* The key prelude (quotient-lang S3, USER ruling Q-S3-2 (a); PLAN section
+   4). Key is a program slot, so the front end puts the def Footprint
+   directly after the program def Key. A footprint is a finite subset of
+   keys. The Key slot must be first-order data (check.c, check_sig). */
+#define KEY_SOURCE_NAME "kernel/key.lang"
+
+static const char key_source[] =
+  "def Footprint : Type 0 := Pfin Key\n";
+
+static const char *const KEY_AFTER[] = {"Key"};
+
+/* The key prelude goes directly after the program def Key. */
+static int key_after_key(Arena *arena, size_t first, DeclList *out, Diag *diag) {
+  return splice_after(arena, first, KEY_AFTER, 1u, KEY_SOURCE_NAME, key_source, sizeof key_source - 1u, out, diag);
+}
+
 int front_load(Arena *arena, const char *source, const char *text, size_t len, DeclList *out, Diag *diag) {
   size_t first;
   out->items = NULL;
@@ -143,7 +159,8 @@ int front_load(Arena *arena, const char *source, const char *text, size_t len, D
     return 0;
   first = out->count;
   return load_one(arena, source, ORIGIN_PROGRAM, text, len, out, diag)
-      && value_after_asset(arena, first, out, diag);
+      && value_after_asset(arena, first, out, diag)
+      && key_after_key(arena, first, out, diag);
 }
 
 int front_load_domain(Arena *arena, const char *source, const char *domain, const char *text, size_t len, DeclList *out, Diag *diag) {
@@ -156,5 +173,6 @@ int front_load_domain(Arena *arena, const char *source, const char *domain, cons
     return 0;
   first = out->count;
   return load_one(arena, source, ORIGIN_PROGRAM, text, len, out, diag)
-      && value_after_asset(arena, first, out, diag);
+      && value_after_asset(arena, first, out, diag)
+      && key_after_key(arena, first, out, diag);
 }

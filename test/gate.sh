@@ -83,6 +83,18 @@ if ! rg -q -F 'Asset: the slot Asset must be first-order data' "$tmp/err"; then
   echo "FAIL sig-asset-higher.lang: the message does not name the Asset slot"
   fail=$((fail + 1))
 fi
+build/langc check test/check/sig-key-higher.lang 2>"$tmp/err" >/dev/null || true
+if ! rg -q -F 'Key: the slot Key must be first-order data' "$tmp/err"; then
+  echo "FAIL sig-key-higher.lang: the message does not name the Key slot"
+  fail=$((fail + 1))
+fi
+# A fold out of Pfin without the idem case names the pfinIdem case (S3,
+# law L2, USER ruling Q-S2-4 (a)).
+build/langc check test/check/pfin-no-idem.lang 2>"$tmp/err" >/dev/null || true
+if ! rg -q -F 'the pfinIdem case is the idempotent clause (law L2)' "$tmp/err"; then
+  echo "FAIL pfin-no-idem.lang: the message does not name the pfinIdem case"
+  fail=$((fail + 1))
+fi
 echo "time hint: $time_hint checked"
 
 # Each line of test/eval/expect.txt is `FILE NAME [ARGS] => OUTPUT`. `langc eval`

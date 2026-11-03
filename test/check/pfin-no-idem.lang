@@ -1,0 +1,4 @@
+-- A fold out of Pfin needs the pfinIdem case, the idempotent clause (law
+-- L2). This fold into Pfin Size has seven cases and no pfinIdem case, so
+-- it gives REFUSE_BAG_NONCOMM (S3, USER ruling Q-S2-4 (a)).
+def f : Pfin Size -> Pfin Size := fun (b : Pfin Size) => fold (fun (h : Size) => pfinOf Size h) (pfinUnit Size) (fun (l : Pfin Size) (r : Pfin Size) => pfinOp Size l r) (fun (x : Pfin Size) (y : Pfin Size) (z : Pfin Size) => fun (i : I) => pfinAssoc Size x y z i) (fun (x : Pfin Size) (y : Pfin Size) => fun (i : I) => pfinComm Size x y i) (fun (x : Pfin Size) => fun (i : I) => pfinUnitL Size x i) (fun (x : Pfin Size) (y : Pfin Size) (p : Path (Pfin Size) x y) (q : Path (Pfin Size) x y) => fun (i : I) => fun (j : I) => pfinSquash Size x y p q i j) b

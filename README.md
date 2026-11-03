@@ -7,11 +7,12 @@ and so it derives that two independent transactions commute. Histories that
 differ only in the order of independent transactions are one value. No
 program that compiles can trap: an abort is the value `nothing`.
 
-Status: S2 DONE. The code is the permit-lang 18deea2 kernel with R0 and
-REFUSE_NOT_IN_DESIGN (S1), and the S2 value layer: `Amount` with `Maybe`
+Status: S3 DONE. The code is the permit-lang 18deea2 kernel with R0 and
+REFUSE_NOT_IN_DESIGN (S1), the S2 value layer (`Amount` with `Maybe`
 arithmetic, `Bag`, `Value`, `Balance`, `[[ ]]v`, `Delta`, `neg` and
-`Balanced`. The other quotient-lang types are a plan: `docs/PLAN.md`.
-Next: S3 (section 12).
+`Balanced`), and the S3 set layer: `Pfin` with `in`, `union` and the L2
+laws, the slot `Key` and `Footprint = Pfin Key`. The other quotient-lang
+types are a plan: `docs/PLAN.md`. Next: S4 (section 12).
 
 ## When to reach for quotient-lang
 

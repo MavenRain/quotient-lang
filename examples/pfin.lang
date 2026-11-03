@@ -1,0 +1,33 @@
+-- The finite subset of domain/domain.lang (S3, law L2): the free
+-- commutative idempotent monoid. union is its operation, and the L2
+-- paths unionUnitL, unionUnitR, unionAssoc, unionComm and unionIdem are
+-- domain defs. A fold out of Pfin gives one case for each constructor;
+-- the kernel refuses a fold or elim out of Pfin without the pfinComm
+-- case or the pfinIdem case (REFUSE_BAG_NONCOMM).
+def pfinPair : Pfin Size := union Size (pfinOf Size sz0) (pfinOf Size (szS sz0))
+def pfinTwice : Pfin Size := union Size (pfinOf Size sz0) (pfinOf Size sz0)
+-- pfinMap is the fold into Pfin B; it computes on points.
+def pfinMapPair : Pfin Size := pfinMap Size Size (fun (s : Size) => szS s) pfinPair
+def pfinMapAt : Path (Pfin Size) pfinMapPair (union Size (pfinOf Size (szS sz0)) (pfinOf Size (szS (szS sz0)))) := refl
+-- L2 at Size values.
+def pairComm : Path (Pfin Size) pfinPair (union Size (pfinOf Size (szS sz0)) (pfinOf Size sz0)) := unionComm Size (pfinOf Size sz0) (pfinOf Size (szS sz0))
+def twiceIdem : Path (Pfin Size) pfinTwice (pfinOf Size sz0) := unionIdem Size (pfinOf Size sz0)
+def pairUnitL : Path (Pfin Size) (union Size (pfinUnit Size) pfinPair) pfinPair := unionUnitL Size pfinPair
+def pairUnitR : Path (Pfin Size) (union Size pfinPair (pfinUnit Size)) pfinPair := unionUnitR Size pfinPair
+def pairAssoc : Path (Pfin Size) (union Size pfinPair (pfinOf Size (szS (szS sz0)))) (union Size (pfinOf Size sz0) (union Size (pfinOf Size (szS sz0)) (pfinOf Size (szS (szS sz0))))) := unionAssoc Size (pfinOf Size sz0) (pfinOf Size (szS sz0)) (pfinOf Size (szS (szS sz0)))
+-- L2: the fold sends the idem path of the subset to the idem case, the
+-- idem path of the target.
+def pfinMapIdem : Path (Pfin Size) (pfinMap Size Size (fun (s : Size) => szS s) pfinTwice) (pfinMap Size Size (fun (s : Size) => szS s) (pfinOf Size sz0)) :=
+  fun (i : I) => pfinMap Size Size (fun (s : Size) => szS s) (pfinIdem Size (pfinOf Size sz0) i)
+-- The member test (USER ruling Q-S3-1 (b)): sizeEq decides the equality
+-- of two Size values into the bit, and pfinIn folds the subset by or.
+def sizeEq : Size -> Size -> Sum Unit Unit :=
+  fun (m : Size) (n : Size) => elim (fun (t : Size) => Size -> Sum Unit Unit)
+    (fun (j : Size) => elim (fun (t : Size) => Sum Unit Unit) btrue (fun (k : Size) (r : Sum Unit Unit) => bfalse) j)
+    (fun (k : Size) (ih : Size -> Sum Unit Unit) (j : Size) => elim (fun (t : Size) => Sum Unit Unit) bfalse (fun (i : Size) (r : Sum Unit Unit) => ih i) j) m n
+def inZero : Sum Unit Unit := pfinIn Size sizeEq sz0 pfinPair
+def inTwo : Sum Unit Unit := pfinIn Size sizeEq (szS (szS sz0)) pfinPair
+def inTwice : Sum Unit Unit := pfinIn Size sizeEq sz0 pfinTwice
+def inZeroTrue : Path (Sum Unit Unit) inZero btrue := refl
+def inTwoFalse : Path (Sum Unit Unit) inTwo bfalse := refl
+def inTwiceTrue : Path (Sum Unit Unit) inTwice btrue := refl

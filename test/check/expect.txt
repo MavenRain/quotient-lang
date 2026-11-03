@@ -121,6 +121,8 @@ ua-two-proofs.lang PATH_UIP
 bag-no-squash.lang REFUSE_BAG_NONCOMM
 bag-no-comm.lang REFUSE_BAG_NONCOMM
 bag-elim-no-comm.lang REFUSE_BAG_NONCOMM
+pfin-no-idem.lang REFUSE_BAG_NONCOMM
+pfin-elim-no-idem.lang REFUSE_BAG_NONCOMM
 amount-overflow.lang REFUSE_OVERFLOW
 amount-underflow.lang REFUSE_OVERFLOW
 block-fold-target.lang TYPE_MISMATCH
@@ -151,4 +153,6 @@ design-admitted-axiom.lang REFUSE_AXIOM
 design-x10-binder.lang REFUSE_NOT_IN_DESIGN
 value-no-asset.lang NAME_UNKNOWN
 sig-asset-higher.lang REFUSE_SIG
+sig-key-higher.lang REFUSE_SIG
+footprint-no-key.lang NAME_UNKNOWN
 value-count-hit.lang REFUSE_SIG
