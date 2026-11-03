@@ -1,0 +1,3 @@
+-- valueCount needs a first-order element type (USER ruling Q-S2-5 (a)):
+-- Bag Size has path constructors.
+def countBag : Amount := valueCount (Bag Size) (bagUnit (Bag Size)) (bagUnit Size)

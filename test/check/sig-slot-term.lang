@@ -1,0 +1,2 @@
+-- Query is a slot of the design signature: a term of the type Unit is not a type.
+def Query : Unit := unit

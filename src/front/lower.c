@@ -587,6 +587,7 @@ static int lower_ctor(Low *l, Buf *b, const Value *v, Operand *out) {
 static int lower_canon(Low *l, Buf *b, const Value *v, Operand *out) {
   switch (v->op) {
   case OP_NAT:
+  case OP_AMOUNT:
   case OP_FLAG:
   case OP_UNIT:
   case OP_PROD:
@@ -635,6 +636,8 @@ static int lower_canon(Low *l, Buf *b, const Value *v, Operand *out) {
   case OP_PAYLOAD:
   case OP_NAT_ADD:
   case OP_NAT_SUB:
+  case OP_AMOUNT_ADD:
+  case OP_AMOUNT_SUB:
   case OP_NAT_EQ:
   case OP_NAT_LE:
   case OP_FLAG_IF:
@@ -648,6 +651,8 @@ static int lower_canon(Low *l, Buf *b, const Value *v, Operand *out) {
     return give(l, out, 0);
   case OP_FM_LEN:
     return refuse(l, "len (the op count of a FreeMon trace at run time)");
+  case OP_VALUE_COUNT:
+    return refuse(l, "valueCount (the count of an asset in a Value at run time)");
   case OP_ELIM:
   case OP_KMAP:
   case OP_KMAP_OF:
@@ -693,6 +698,27 @@ static int nat_add(Low *l, Buf *b, const Value *v, Operand *out) {
   return sum.w != NULL && block_ops(l, &carry, 0, NULL, 0, &none) && store(l, &carry, res, none) &&
          block_ops(l, &fits, 1, &sum, 1, &some) && store(l, &fits, res, some) &&
          if_flag(l, b, ex_bin(l, IR_OP_ADD_CARRY, x.w, y.w), &carry, &fits);
+}
+
+/* amountSub X Y (S2, USER ruling Q-S2-2 (a)): an Option block. none when
+   Y is more than X (underflow), else some (X - Y). amountAdd lowers as
+   natAdd. */
+static int amount_sub(Low *l, Buf *b, const Value *v, Operand *out) {
+  Operand x;
+  Operand y;
+  Operand diff;
+  Operand some;
+  Operand none;
+  Slot res = slot_new(l);
+  Buf fits = buf_under(b);
+  Buf borrow = buf_under(b);
+  *out = slot_get(l, res);
+  if (!lower(l, b, v->args[0], &x) || !lower(l, b, v->args[1], &y))
+    return 0;
+  diff = operand(ex_bin(l, IR_OP_SUB, x.w, y.w));
+  return diff.w != NULL && block_ops(l, &borrow, 0, NULL, 0, &none) && store(l, &borrow, res, none) &&
+         block_ops(l, &fits, 1, &diff, 1, &some) && store(l, &fits, res, some) &&
+         if_flag(l, b, ex_bin(l, IR_OP_LE, y.w, x.w), &fits, &borrow);
 }
 
 /* nonZero X: none when X is 0, else some X. */
@@ -1139,6 +1165,7 @@ static int fold_nat(Low *l, Buf *b, const Value *v, Operand *out) {
 static int lower_stuck(Low *l, Buf *b, const Value *v, Operand *out) {
   switch (v->op) {
   case OP_NAT:
+  case OP_AMOUNT:
   case OP_FLAG:
   case OP_UNIT:
   case OP_PROD:
@@ -1200,7 +1227,10 @@ static int lower_stuck(Low *l, Buf *b, const Value *v, Operand *out) {
   case OP_FLAG_IF:
     return flag_if(l, b, v, out);
   case OP_NAT_ADD:
+  case OP_AMOUNT_ADD:
     return nat_add(l, b, v, out);
+  case OP_AMOUNT_SUB:
+    return amount_sub(l, b, v, out);
   case OP_NAT_DIV:
     return nat_bin(l, b, v, IR_OP_DIV, out);
   case OP_NAT_MOD:
@@ -1213,6 +1243,8 @@ static int lower_stuck(Low *l, Buf *b, const Value *v, Operand *out) {
     return internal(l, "a stuck canonical value");
   case OP_FM_LEN:
     return refuse(l, "len (the op count of a FreeMon trace at run time)");
+  case OP_VALUE_COUNT:
+    return refuse(l, "valueCount (the count of an asset in a Value at run time)");
   case OP_ELIM:
   case OP_KMAP:
   case OP_KMAP_OF:

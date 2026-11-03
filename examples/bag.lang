@@ -1,0 +1,13 @@
+-- The bag of domain/domain.lang (S2, law L1): the free commutative
+-- monoid. A fold out of Bag gives one case for each constructor, and the
+-- bagComm case is the commutative clause. bagFold takes the comm law of
+-- the target monoid; the kernel refuses a fold or elim out of Bag without
+-- that case (REFUSE_BAG_NONCOMM).
+def bagPair : Bag Size := bagOp Size (bagOf Size sz0) (bagOf Size (szS sz0))
+-- bagMap is the fold into Bag B; it computes on points.
+def bagMapPair : Bag Size := bagMap Size Size (fun (s : Size) => szS s) bagPair
+def bagMapAt : Path (Bag Size) bagMapPair (bagOp Size (bagOf Size (szS sz0)) (bagOf Size (szS (szS sz0)))) := refl
+-- L1: the fold sends the swap path of the bag to the comm case, the swap
+-- path of the target.
+def bagMapComm : Path (Bag Size) (bagMap Size Size (fun (s : Size) => szS s) bagPair) (bagMap Size Size (fun (s : Size) => szS s) (bagOp Size (bagOf Size (szS sz0)) (bagOf Size sz0))) :=
+  fun (i : I) => bagMap Size Size (fun (s : Size) => szS s) (bagComm Size (bagOf Size sz0) (bagOf Size (szS sz0)) i)

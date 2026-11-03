@@ -17,6 +17,9 @@
 /* The core names: type formers, constructors and operations. */
 typedef enum {
   OP_NAT,
+  OP_AMOUNT,     /* Amount (S2, Q-S2-2 (a)): a nominal u64; a value is a VAL_NAT */
+  OP_AMOUNT_ADD, /* amountAdd: Maybe Amount, none at overflow */
+  OP_AMOUNT_SUB, /* amountSub: Maybe Amount, none at underflow */
   OP_FLAG,
   OP_UNIT,
   OP_PROD,
@@ -60,6 +63,7 @@ typedef enum {
   OP_NAT_DIV,
   OP_NAT_MOD,
   OP_FM_LEN, /* S3: len A r, the op count of a FreeMon trace (survey section 7) */
+  OP_VALUE_COUNT, /* S2 (Q-S2-5 (a)): valueCount A v a, the count of a in the Bag v, an Amount */
   OP_PROJ,
   /* Slice K4a0: Map K V, the map value (k0 v0 k1 v1 ... with the keys in
      order and no zero value), mapGet V m k and mapSet V m k v. */

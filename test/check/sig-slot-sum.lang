@@ -1,0 +1,2 @@
+-- Answer is a slot of the design signature: a term of the type Sum Unit Unit is not a type.
+def Answer : Sum Unit Unit := inl unit

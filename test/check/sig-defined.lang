@@ -1,1 +1,2 @@
-def Orbit : Type 0 := Unit
+-- Trace is a defined name of the design signature (slice S6): a program def is refused.
+def Trace : Type 0 := Unit

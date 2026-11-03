@@ -1,0 +1,2 @@
+-- Bag is a domain family and a defined name of slice S2: the program def is REFUSE_SIG before the name check.
+def Bag : Type 0 := Unit

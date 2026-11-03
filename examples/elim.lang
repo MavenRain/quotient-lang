@@ -57,7 +57,7 @@ def add0 : Trunc0 Size -> Trunc0 Size -> Trunc0 Size :=
     (fun (a : Trunc0 Size) (b : Trunc0 Size) (p : Path (Trunc0 Size) a b) (q : Path (Trunc0 Size) a b) => fun (i : I) => fun (j : I) => squash0 Size a b p q i j) x
 def isSetT0 : isSet (Trunc0 Size) :=
   fun (a : Trunc0 Size) (b : Trunc0 Size) (p : Path (Trunc0 Size) a b) (q : Path (Trunc0 Size) a b) => fun (i : I) => fun (j : I) => squash0 Size a b p q i j
--- A family of propositions over a square has each PathP square (copied from bagorbit.lang).
+-- A family of propositions over a square has each PathP square.
 def propSquare : (X : Type 0) -> (P : X -> Type 0) -> ((x : X) -> isProp (P x)) -> (x : X) -> (y : X) -> (p : Path X x y) -> (q : Path X x y) -> (s : Path (Path X x y) p q) ->
   (ihx : P x) -> (ihy : P y) -> (ihp : PathP (fun (j : I) => P (p @ j)) ihx ihy) -> (ihq : PathP (fun (j : I) => P (q @ j)) ihx ihy) ->
   PathP (fun (i : I) => PathP (fun (j : I) => P ((s @ i) @ j)) ihx ihy) ihp ihq :=
@@ -70,7 +70,7 @@ def propSquare : (X : Type 0) -> (P : X -> Type 0) -> ((x : X) -> isProp (P x)) 
       j -> hP ((s @ i) @ j) (transp (fun (m : I) => P ((s @ (i /\ m)) @ (j /\ m))) i0 ihx) ihy @ k ])
       (transp (fun (m : I) => P ((s @ (i /\ m)) @ (j /\ m))) i0 ihx)
 -- Two maps from Trunc0 Size into a set agree when they agree at each
--- trunc0 s (the orbitNExt shape of bagorbit.lang).
+-- trunc0 s.
 def truncExt : (T : Type 0) -> isSet T -> (L : Trunc0 Size -> T) -> (M : Trunc0 Size -> T) ->
   ((s : Size) -> Path T (L (trunc0 Size s)) (M (trunc0 Size s))) -> (x : Trunc0 Size) -> Path T (L x) (M x) :=
   fun (T : Type 0) (sT : isSet T) (L : Trunc0 Size -> T) (M : Trunc0 Size -> T)

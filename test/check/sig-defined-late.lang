@@ -1,0 +1,2 @@
+-- agg is a defined operation of slice S4: a program def is refused now and after S4.
+def agg : Unit := unit

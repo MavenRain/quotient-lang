@@ -1,0 +1,4 @@
+-- An elim out of Bag needs a motive, one case for each constructor and a
+-- scrutinee. This elim has no bagComm case, the commutative clause (law
+-- L1), so it gives REFUSE_BAG_NONCOMM (S2, USER ruling Q-S2-4 (a)).
+def f : Bag Size -> Bag Size := fun (b : Bag Size) => elim (fun (t : Bag Size) => Bag Size) (fun (h : Size) => bagOf Size h) (bagUnit Size) (fun (l : Bag Size) (ihl : Bag Size) (r : Bag Size) (ihr : Bag Size) => bagOp Size ihl ihr) (fun (x : Bag Size) (ihx : Bag Size) (y : Bag Size) (ihy : Bag Size) (z : Bag Size) (ihz : Bag Size) => fun (i : I) => bagAssoc Size ihx ihy ihz i) (fun (x : Bag Size) (ihx : Bag Size) => fun (i : I) => bagUnitL Size ihx i) (fun (x : Bag Size) (ihx : Bag Size) (y : Bag Size) (ihy : Bag Size) (p : Path (Bag Size) x y) (ihp : Path (Bag Size) ihx ihy) (q : Path (Bag Size) x y) (ihq : Path (Bag Size) ihx ihy) => fun (i : I) => fun (j : I) => bagSquash Size ihx ihy ihp ihq i j) b

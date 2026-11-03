@@ -1,0 +1,3 @@
+-- A slot passes at Type 0; Value is a defined name of slice S2, so its program def is refused.
+def Asset : Type 0 := Unit
+def Value : Type 0 := Unit

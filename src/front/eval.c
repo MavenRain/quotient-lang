@@ -20,9 +20,10 @@ static const char *const OP_NAMES[] = {
   [OP_FOLD_LIST] = "fold", [OP_FOLD_FAMILY] = "fold", [OP_UNFOLD] = "unfold",
   [OP_FILTER] = "filter", [OP_WITNESS] = "witness", [OP_PAYLOAD] = "payload",
   [OP_NAT_ADD] = "natAdd", [OP_NAT_SUB] = "natSub",
+  [OP_AMOUNT] = "Amount", [OP_AMOUNT_ADD] = "amountAdd", [OP_AMOUNT_SUB] = "amountSub",
   [OP_NAT_EQ] = "natEq", [OP_NAT_LE] = "natLe",
   [OP_FLAG_IF] = "flagIf",
-  [OP_NAT_DIV] = "natDiv", [OP_NAT_MOD] = "natMod", [OP_FM_LEN] = "len",
+  [OP_NAT_DIV] = "natDiv", [OP_NAT_MOD] = "natMod", [OP_FM_LEN] = "len", [OP_VALUE_COUNT] = "valueCount",
   [OP_PROJ] = "?", [OP_KMAP] = "Map", [OP_KMAP_OF] = "mapOf",
   [OP_KMAP_GET] = "mapGet", [OP_KMAP_SET] = "mapSet",
   [OP_INTERVAL] = "I", [OP_TRANSP] = "transp",
@@ -44,8 +45,9 @@ static const unsigned char OP_ARITY[] = {
   [OP_MAP] = 2, [OP_BIND] = 2, [OP_FOLD_NAT] = 3, [OP_FOLD_LIST] = 3,
   [OP_FOLD_FAMILY] = VARIES, [OP_UNFOLD] = 3, [OP_FILTER] = 2, [OP_WITNESS] = 1,
   [OP_PAYLOAD] = 1, [OP_NAT_ADD] = 2, [OP_NAT_SUB] = 2,
+  [OP_AMOUNT] = 0, [OP_AMOUNT_ADD] = 2, [OP_AMOUNT_SUB] = 2,
   [OP_NAT_EQ] = 2, [OP_NAT_LE] = 2, [OP_FLAG_IF] = 3,
-  [OP_NAT_DIV] = 2, [OP_NAT_MOD] = 2, [OP_FM_LEN] = 2,
+  [OP_NAT_DIV] = 2, [OP_NAT_MOD] = 2, [OP_FM_LEN] = 2, [OP_VALUE_COUNT] = 3,
   [OP_PROJ] = 1, [OP_KMAP] = 2, [OP_KMAP_OF] = VARIES, [OP_KMAP_GET] = 3, [OP_KMAP_SET] = 4,
   [OP_INTERVAL] = 0, [OP_TRANSP] = 3,
   [OP_SYSTEM] = VARIES, [OP_HCOMP] = 4, [OP_FIN] = 1, [OP_FIN_ADD] = 3,
@@ -1286,6 +1288,114 @@ static const Value *fm_len(Machine *m, const Value *const *a, uint32_t n) {
   return internal(m, "a len of a constructor of another family");
 }
 
+/* valueCount A v a (S2, USER ruling Q-S2-5 (a)): the count of the element
+   a = A[2] in the bag v = A[1], an Amount. bagOf counts 1 when its element
+   converts to a, else 0; bagUnit counts 0; bagOp, bagAssoc, bagComm and
+   bagUnitL sum their Bag fields (each path keeps the count, so the count
+   respects it). An open bagSquash, an hcomp with active faces, and an
+   element that is not closed data stay stuck. The rule refuses an A that
+   is not first-order data. */
+static const Value *value_count(Machine *m, const Value *const *a, uint32_t n);
+static int closed_data(const Machine *m, const Value *v, uint32_t depth);
+
+static int closed_fields(const Machine *m, const Value *v, uint32_t first, uint32_t depth) {
+  uint32_t i;
+  for (i = first; i < v->argc; i++)
+    if (!closed_data(m, v->args[i], depth + 1u))
+      return 0;
+  return 1;
+}
+
+/* 1 when V is closed data: a Nat, or a point constructor (of a family,
+   pair, inl, inr, some, none, unit, flagYes or flagNo) whose fields are
+   closed data. The parameters of a family constructor are skipped. A
+   neutral, a function and a path point are not closed data: for them the
+   conversion check cannot decide the count yet. */
+static int closed_data(const Machine *m, const Value *v, uint32_t depth) {
+  if (v == NULL || depth > 4096u)
+    return 0;
+  if (v->kind == VAL_NAT)
+    return 1;
+  if (val_is(v, OP_CTOR))
+    return v->inst < m->ctor_count && m->ctors[v->inst].interval_count == 0u && m->ctors[v->inst].family < m->family_count
+           && closed_fields(m, v, m->families[m->ctors[v->inst].family].param_count, depth);
+  return (val_is(v, OP_PAIR) || val_is(v, OP_INL) || val_is(v, OP_INR) || val_is(v, OP_SOME) || val_is(v, OP_NONE)
+          || val_is(v, OP_UNIT_VAL) || val_is(v, OP_FLAG_YES) || val_is(v, OP_FLAG_NO))
+         && closed_fields(m, v, 0u, depth);
+}
+
+/* The sum of the counts of the fields FIRST .. FIRST + COUNT - 1 of
+   X = A[1]. A neutral count makes the count of X stuck. */
+static const Value *value_count_sum(Machine *m, const Value *const *a, uint32_t n, uint32_t first, uint32_t count) {
+  const Value *x = a[1];
+  const Value *part;
+  const Value *sub[3];
+  uint64_t sum = 0;
+  uint32_t i;
+  if (first + count > x->argc)
+    return internal(m, "a valueCount of a constructor with too few fields");
+  if (!enter(m))
+    return NULL;
+  sub[0] = a[0];
+  sub[2] = a[2];
+  for (i = 0; i < count; i++) {
+    sub[1] = x->args[first + i];
+    part = value_count(m, sub, 3u);
+    if (part == NULL || part->kind != VAL_NAT) {
+      m->depth--;
+      return part == NULL ? part : val_op(m, VAL_STUCK, OP_VALUE_COUNT, 0, 0, a, n);
+    }
+    if (sum + part->nat < sum) {
+      m->depth--;
+      return internal(m, "a valueCount above 2^64 - 1");
+    }
+    sum += part->nat;
+  }
+  m->depth--;
+  return val_nat(m, sum);
+}
+
+/* bagOf: 1 when the element (the field after the P parameters) converts
+   to a, else 0. Both must be closed data. */
+static const Value *value_count_gen(Machine *m, const Value *const *a, uint32_t n, uint32_t p) {
+  const Value *g = p < a[1]->argc ? a[1]->args[p] : NULL;
+  if (g == NULL)
+    return internal(m, "a bagOf with no element");
+  if (!closed_data(m, g, 0u) || !closed_data(m, a[2], 0u))
+    return val_op(m, VAL_STUCK, OP_VALUE_COUNT, 0, 0, a, n);
+  return val_nat(m, conv_values(m, 0u, g, a[2]) ? 1u : 0u);
+}
+
+static const Value *value_count(Machine *m, const Value *const *a, uint32_t n) {
+  const Value *x = a[1];
+  const Value *out;
+  const char *name;
+  uint32_t p;
+  if (x == NULL || a[2] == NULL)
+    return NULL;
+  if (blocked(m, x, OP_VALUE_COUNT, 0, 0, a, n, &out))
+    return out;
+  if (val_is(x, OP_HCOMP) && x->argc == 4u)
+    return ival_is_end(x->args[1], 0) ? value_count_sum(m, a, n, 3u, 1u) : val_op(m, VAL_STUCK, OP_VALUE_COUNT, 0, 0, a, n);
+  if (!val_is(x, OP_CTOR) || x->inst >= m->ctor_count || m->ctors[x->inst].family >= m->family_count)
+    return internal(m, "a valueCount of a value that is not a Bag constructor");
+  name = m->ctors[x->inst].name;
+  p = m->families[m->ctors[x->inst].family].param_count;
+  if (strcmp(name, "bagOf") == 0)
+    return value_count_gen(m, a, n, p);
+  if (strcmp(name, "bagUnit") == 0)
+    return val_nat(m, 0);
+  if (strcmp(name, "bagOp") == 0 || strcmp(name, "bagComm") == 0)
+    return value_count_sum(m, a, n, p, 2u);
+  if (strcmp(name, "bagAssoc") == 0)
+    return value_count_sum(m, a, n, p, 3u);
+  if (strcmp(name, "bagUnitL") == 0)
+    return value_count_sum(m, a, n, p, 1u);
+  if (strcmp(name, "bagSquash") == 0)
+    return val_op(m, VAL_STUCK, OP_VALUE_COUNT, 0, 0, a, n);
+  return internal(m, "a valueCount of a constructor of another family");
+}
+
 static const Value *nat_sub(Machine *m, const Value *const *a, uint32_t n) {
   const Value *out;
   uint64_t x = 0;
@@ -1293,6 +1403,20 @@ static const Value *nat_sub(Machine *m, const Value *const *a, uint32_t n) {
   if (!nat_args(m, OP_NAT_SUB, a, n, &x, &y, &out))
     return out;
   return val_nat(m, x < y ? 0 : x - y);
+}
+
+/* amountAdd and amountSub (S2, USER ruling Q-S2-2 (a)): a Maybe Amount,
+   none at overflow and at underflow, never a trap. */
+static const Value *amount_op(Machine *m, Op op, const Value *const *a, uint32_t n) {
+  const Value *out;
+  uint64_t x = 0;
+  uint64_t y = 0;
+  int add = op == OP_AMOUNT_ADD;
+  if (!nat_args(m, op, a, n, &x, &y, &out))
+    return out;
+  if (add ? x + y < x : x < y)
+    return constant(m, OP_NONE);
+  return make(m, VAL_OP, OP_SOME, 0, 1, val_nat(m, add ? x + y : x - y), NULL, NULL);
 }
 
 /* natDiv and natMod (S2, R14): the floor and the rest. The divisor is a
@@ -1881,6 +2005,7 @@ static const Value *transp_data(Machine *m, const Value *head, const Value *line
   int neutral = scrut_of(base) == SCRUT_NEUTRAL;
   switch (head->op) {
   case OP_NAT: /* R27: a base former has no path structure */
+  case OP_AMOUNT:
   case OP_FIN:
   case OP_FLAG:
   case OP_UNIT:
@@ -1956,12 +2081,15 @@ static const Value *transp_data(Machine *m, const Value *head, const Value *line
   case OP_PAYLOAD:
   case OP_NAT_ADD:
   case OP_NAT_SUB:
+  case OP_AMOUNT_ADD:
+  case OP_AMOUNT_SUB:
   case OP_NAT_EQ:
   case OP_NAT_LE:
   case OP_FLAG_IF:
   case OP_NAT_DIV:
   case OP_NAT_MOD:
   case OP_FM_LEN:
+  case OP_VALUE_COUNT:
   case OP_PROJ:
   case OP_KMAP_OF:
   case OP_KMAP_GET:
@@ -2836,6 +2964,7 @@ static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, 
     return internal(m, "an operation with the wrong number of arguments");
   switch (op) {
   case OP_NAT:
+  case OP_AMOUNT:
   case OP_FIN:
   case OP_FLAG:
   case OP_UNIT:
@@ -2902,6 +3031,9 @@ static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, 
     return nat_add(m, a, n);
   case OP_NAT_SUB:
     return nat_sub(m, a, n);
+  case OP_AMOUNT_ADD:
+  case OP_AMOUNT_SUB:
+    return amount_op(m, op, a, n);
   case OP_FIN_ADD:
     return fin_add(m, a, n);
   case OP_FIN_NEG:
@@ -2920,6 +3052,8 @@ static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, 
     return nonzero_value(m, a, n);
   case OP_FM_LEN:
     return fm_len(m, a, n);
+  case OP_VALUE_COUNT:
+    return value_count(m, a, n);
   case OP_FLAG_IF:
     return reduce_flag_if(m, a, n);
   case OP_PROJ:
@@ -3074,6 +3208,22 @@ static int conv_system(Machine *m, uint32_t level, const Value *a, const Value *
   return 1;
 }
 
+/* Two systems with the same faces in the same order are equal when each
+   pair of branches is equal. conv_loop tries this test first and the
+   cover test of conv_system after it, so nested hcomp terms do not cost
+   all pairs of branches at each level (USER ruling Q-S2-7 (a)). It
+   accepts a pair only when the cover test also accepts it. */
+static int conv_system_same(Machine *m, uint32_t level, const Value *a, const Value *b) {
+  uint32_t i;
+  if (a->argc != b->argc)
+    return 0;
+  for (i = 0; i + 1u < a->argc; i += 2u)
+    if (!face_implies(m, a->args[i], b->args[i]) || !face_implies(m, b->args[i], a->args[i])
+        || !conv_values(m, level, a->args[i + 1u], b->args[i + 1u]))
+      return 0;
+  return 1;
+}
+
 /* The last argument of an operation is compared in the loop, so a long
    list does not nest. */
 static int conv_loop(Machine *m, uint32_t level, const Value *a, const Value *b) {
@@ -3114,7 +3264,7 @@ static int conv_loop(Machine *m, uint32_t level, const Value *a, const Value *b)
     case VAL_OP:
     case VAL_STUCK:
       if (val_is(a, OP_SYSTEM) && val_is(b, OP_SYSTEM))
-        return conv_system(m, level, a, b) && conv_system(m, level, b, a);
+        return conv_system_same(m, level, a, b) || (conv_system(m, level, a, b) && conv_system(m, level, b, a));
       if (!same_head(a, b))
         return 0;
       if (a->argc == 0)

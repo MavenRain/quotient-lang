@@ -1,5 +1,5 @@
--- O26 (S10 B3): the choice of member 0 is not invariant under the member swap. permute is the member permutation of
--- examples/dao.lang, and refl at the swap case of the permutation type is refused at the end site (PATH_END).
+-- The choice of member 0 is not invariant under the member swap.
+-- The swap case must fail at its endpoint (PATH_END).
 def Member : Type 0 := Sum Unit Unit
 def Choice : Type 0 := Sum Unit Unit
 def MPerm : Type 0 := Sum Unit Unit

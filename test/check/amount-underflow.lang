@@ -1,0 +1,2 @@
+-- REFUSE_OVERFLOW (S2): amountSub gives Maybe Amount, not an Amount.
+def rest : Amount -> Amount := fun (x : Amount) => amountSub x 1

@@ -1,0 +1,2 @@
+-- Owner is a slot of the design signature: a type family is not of the type Type 0.
+def Owner : Type 0 -> Type 0 := fun (X : Type 0) => X

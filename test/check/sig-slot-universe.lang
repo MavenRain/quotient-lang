@@ -1,1 +1,2 @@
-def Outcome : Type 1 := Type 0
+-- Asset is a slot of the design signature: it must have the type Type 0, not Type 1.
+def Asset : Type 1 := Type 0

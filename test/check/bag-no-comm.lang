@@ -1,0 +1,4 @@
+-- A fold out of Bag needs the bagComm case, the commutative clause (law
+-- L1). This fold into Bag Size has six cases and no bagComm case, so it
+-- gives REFUSE_BAG_NONCOMM (S2, USER ruling Q-S2-4 (a)).
+def f : Bag Size -> Bag Size := fun (b : Bag Size) => fold (fun (h : Size) => bagOf Size h) (bagUnit Size) (fun (l : Bag Size) (r : Bag Size) => bagOp Size l r) (fun (x : Bag Size) (y : Bag Size) (z : Bag Size) => fun (i : I) => bagAssoc Size x y z i) (fun (x : Bag Size) => fun (i : I) => bagUnitL Size x i) (fun (x : Bag Size) (y : Bag Size) (p : Path (Bag Size) x y) (q : Path (Bag Size) x y) => fun (i : I) => fun (j : I) => bagSquash Size x y p q i j) b

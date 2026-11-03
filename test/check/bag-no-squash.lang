@@ -1,5 +1,6 @@
--- A fold of Bag needs a case for each constructor: bagOf, bagUnit, bagOp,
--- bagAssoc, bagComm, bagUnitL and bagSquash. This fold into Bag Size has
--- no bagSquash case, so it has no isSet proof (S6, the missing coherence
--- case).
+-- A fold out of Bag needs a case for each constructor: bagOf, bagUnit,
+-- bagOp, bagAssoc, bagComm, bagUnitL and bagSquash. This fold into Bag
+-- Size has no bagSquash case, so it has no isSet proof (S6, the missing
+-- coherence case). A wrong count of cases out of Bag gives
+-- REFUSE_BAG_NONCOMM (S2, USER ruling Q-S2-4 (a)).
 def f : Bag Size -> Bag Size := fun (b : Bag Size) => fold (fun (h : Size) => bagOf Size h) (bagUnit Size) (fun (l : Bag Size) (r : Bag Size) => bagOp Size l r) (fun (x : Bag Size) (y : Bag Size) (z : Bag Size) => fun (i : I) => bagAssoc Size x y z i) (fun (x : Bag Size) (y : Bag Size) => fun (i : I) => bagComm Size x y i) (fun (x : Bag Size) => fun (i : I) => bagUnitL Size x i) b

@@ -103,7 +103,9 @@ typedef enum {
   RULE_TRANSP,
   RULE_HCOMP,
   RULE_NAT2,
+  RULE_AMOUNT2,
   RULE_LEN, /* S3: len A r (survey section 7) */
+  RULE_VALUE_COUNT, /* S2: valueCount A v a (USER ruling Q-S2-5 (a)) */
   RULE_FLAG_IF,
   RULE_NONZERO,       /* S3: NonZero Nat */
   RULE_NONZERO_OF,    /* nonZero x */
@@ -193,6 +195,10 @@ static const Builtin BUILTINS[] = {
   {"nonZero", 1, RULE_NONZERO_OF, OP_NONZERO_OF, OP_OPTION, 0, VIS_INTERNAL},
   {"nonZeroValue", 1, RULE_NONZERO_VALUE, OP_NONZERO_VALUE, OP_NAT, 0, VIS_INTERNAL},
   {"len", 2, RULE_LEN, OP_FM_LEN, OP_NAT, 0, VIS_GUEST},
+  {"Amount", 0, RULE_TYPE0, OP_AMOUNT, OP_NAT, 0, VIS_GUEST},
+  {"amountAdd", 2, RULE_AMOUNT2, OP_AMOUNT_ADD, OP_OPTION, 0, VIS_GUEST},
+  {"amountSub", 2, RULE_AMOUNT2, OP_AMOUNT_SUB, OP_OPTION, 0, VIS_GUEST},
+  {"valueCount", 3, RULE_VALUE_COUNT, OP_VALUE_COUNT, OP_AMOUNT, 0, VIS_GUEST},
 };
 
 #define BUILTIN_COUNT ((uint32_t)(sizeof BUILTINS / sizeof BUILTINS[0]))
@@ -1420,6 +1426,16 @@ static const Core *fold_family(Call *k, const Core *s, const Value *st) {
   return core_op(c, OP_FOLD_FAMILY, st->inst, 0, cores, f->ctor_count + 2u);
 }
 
+static uint32_t find_family(const Machine *m, const char *name);
+
+/* FAM is the family Bag of domain/domain.lang (S2, USER ruling Q-S2-4
+   (a)). A fold or elim out of Bag with a wrong count of cases gives
+   REFUSE_BAG_NONCOMM: the bagComm case is the commutative clause (law
+   L1). Other families keep TYPE_MISMATCH. */
+static int bag_family(const Machine *m, uint32_t fam) {
+  return fam != NO_FAMILY && fam == find_family(m, "Bag");
+}
+
 /* elim P c1 .. cn x over the domain family of ST outside a block (S7 B1,
    O21): the motive type PT is (idx) -> F params idx -> Type k, with D the
    index count. Each case takes the fields, with the IH of a recursive or
@@ -1444,6 +1460,8 @@ static const Core *elim_on_family(Call *k, const Core *motive, const Value *pt, 
     return nul(FAIL(c, "OOM", "out of memory"));
   if (f->index_count != d)
     return nul(FAIL(c, "TYPE_MISMATCH", "elim on %s needs a motive over its %u indices, then a value, found a motive of type %s", f->name, (unsigned)f->index_count, show(c, pt)));
+  if (k->argc < want + 2u && bag_family(m, st->inst))
+    return nul(FAIL(c, "REFUSE_BAG_NONCOMM", "elim on Bag needs a motive, %u cases and a scrutinee: the bagComm case is the commutative clause (law L1)", (unsigned)want));
   if (k->argc < want + 2u)
     return nul(FAIL(c, "TYPE_MISMATCH", "elim on %s needs a motive, %u cases and a scrutinee", f->name, (unsigned)want));
   s = infer(c, k->args[want + 1u], &xt);
@@ -1591,6 +1609,10 @@ static const Core *rule_fold(Call *k) {
     k->hint = k->outer;
     return fold_family(k, s, st);
   }
+  /* REFUSE_BAG_NONCOMM (S2, USER ruling Q-S2-4 (a)): a fold out of Bag
+     with a wrong count of cases. */
+  if (s != NULL && bag_family(c->m, fam))
+    return nul(FAIL(c, "REFUSE_BAG_NONCOMM", "a fold out of Bag needs %u cases, one for each constructor, and found %u: the bagComm case is the commutative clause (law L1)", (unsigned)c->m->families[fam].ctor_count, (unsigned)(k->argc - 1u)));
   if (s != NULL && k->argc == 3u && simple_scrutinee(st)) {
     k->hint = k->outer;
     return fold_simple(k, s, st);
@@ -2219,6 +2241,65 @@ static const Core *rule_prim(Call *k, Op arg) {
 
 static uint32_t find_family(const Machine *m, const char *name);
 
+/* 1 when the type T is first-order data (S2, USER ruling Q-S2-5 (a)):
+   Unit, Flag, Nat, Amount, Fin, a Prod, Sum or Option of first-order
+   data, or a domain family with no parameter, no index and no path
+   constructor, whose fields are the family itself or first-order data.
+   Then the conversion check of the evaluator decides the equality of two
+   closed values of T, and no path of T can make that equality wrong. A
+   function, a path, a universe, a neutral type and a family with a path
+   constructor are not first-order. DEPTH stops a cycle of families. */
+static int asset_first_order(Machine *m, const Value *t, uint32_t depth) {
+  const FamilyInfo *f;
+  const FieldInfo *fi;
+  uint32_t i;
+  uint32_t j;
+  if (t == NULL || depth > 64u)
+    return 0;
+  if (val_is(t, OP_UNIT) || val_is(t, OP_FLAG) || val_is(t, OP_NAT) || val_is(t, OP_AMOUNT) || val_is(t, OP_FIN))
+    return 1;
+  if (val_is(t, OP_PROD) || val_is(t, OP_SUM))
+    return t->argc == 2u && asset_first_order(m, t->args[0], depth + 1u) && asset_first_order(m, t->args[1], depth + 1u);
+  if (val_is(t, OP_OPTION))
+    return t->argc == 1u && asset_first_order(m, t->args[0], depth + 1u);
+  if (!val_is(t, OP_FAMILY) || t->inst >= m->family_count)
+    return 0;
+  f = &m->families[t->inst];
+  if (f->param_count != 0u || f->index_count != 0u || f->block_count > 1u || f->first_ctor + f->ctor_count > m->ctor_count)
+    return 0;
+  for (i = f->first_ctor; i < f->first_ctor + f->ctor_count; i++) {
+    if (m->ctors[i].interval_count != 0u)
+      return 0;
+    for (j = 0; j < m->ctors[i].field_count; j++) {
+      fi = &m->ctors[i].fields[j];
+      if (fi->path || fi->dependent || fi->over_recursive)
+        return 0;
+      if (!fi->recursive && !asset_first_order(m, eval_core(m, NULL, fi->type), depth + 1u))
+        return 0;
+    }
+  }
+  return 1;
+}
+
+/* valueCount A v a (S2, USER ruling Q-S2-5 (a)): the count of a in the
+   bag v : Bag A, an Amount. A C builtin (eval only, as len): the
+   conversion check of the evaluator is the equality on A, so A must be
+   first-order data (REFUSE_SIG: the Asset slot form, PLAN section 4). */
+static const Core *rule_value_count(Call *k) {
+  Checker *c = k->c;
+  uint32_t fam = find_family(c->m, "Bag");
+  const Core *args[3];
+  const Value *a;
+  k->type = tyop(c, OP_AMOUNT, 0, NULL, NULL, NULL);
+  args[0] = check(c, k->args[0], val_univ(c->m, 0));
+  a = here(c, args[0]);
+  if (a != NULL && !asset_first_order(c->m, a, 0u))
+    return nul(FAIL(c, "REFUSE_SIG", "valueCount needs a first-order element type, not %s: no path constructor and no function (PLAN section 4, USER ruling Q-S2-5 (a))", show(c, a)));
+  args[1] = a == NULL || fam >= c->m->family_count ? NULL : check(c, k->args[1], val_op(c->m, VAL_OP, OP_FAMILY, fam, 0, &a, 1));
+  args[2] = args[1] == NULL ? NULL : check(c, k->args[2], a);
+  return args[2] == NULL ? NULL : core_op(c, OP_VALUE_COUNT, 0, 0, args, 3);
+}
+
 /* len A r (S3, USER ruling Q-S3-3 (a)): the op count of the trace
    r : FreeMon A, a Nat (an OpPos). A C builtin: the domain cannot prove
    the Nat monoid laws that fmFold needs (S3 survey section 7). */
@@ -2431,8 +2512,12 @@ static const Core *rule(Call *k) {
     return rule_unglue(k);
   case RULE_NAT2:
     return rule_prim(k, OP_NAT);
+  case RULE_AMOUNT2:
+    return rule_prim(k, OP_AMOUNT);
   case RULE_LEN:
     return rule_len(k);
+  case RULE_VALUE_COUNT:
+    return rule_value_count(k);
   case RULE_FIN_OP:
     return rule_fin_op(k);
   case RULE_FIN:
@@ -2822,6 +2907,19 @@ static int partial_result_ok(Checker *c, const Head *h, const Value *found, cons
   return FAIL(c, "REFUSE_PARTIAL", "%s gives an Option, not a value of type %s: take it apart with option or bind", known_name(c, h), show(c, want));
 }
 
+/* REFUSE_OVERFLOW (S2, USER ruling Q-S2-2 (a)): amountAdd and amountSub
+   give Maybe Amount (none at overflow and at underflow), and the term is
+   where an Amount is wanted. 1 when the term is not this case. */
+static int overflow_result_ok(Checker *c, const Head *h, const Value *found, const Value *want) {
+  if (h->kind != HEAD_BUILTIN || (h->builtin->op != OP_AMOUNT_ADD && h->builtin->op != OP_AMOUNT_SUB))
+    return 1;
+  if (found == NULL || want == NULL || !val_is(found, OP_OPTION) || val_is(want, OP_OPTION))
+    return 1;
+  if (!conv_values(c->m, c->level, found->args[0], want))
+    return 1;
+  return FAIL(c, "REFUSE_OVERFLOW", "%s gives Maybe Amount (none at overflow or at underflow), not a value of type %s: take it apart with option or bind", known_name(c, h), show(c, want));
+}
+
 static const Core *apply_known(Checker *c, const Term *whole, const Head *h, const Term *const *args, uint32_t argc, const Value *hint, const Value **type) {
   uint32_t arity = known_arity(c, h);
   Call k;
@@ -2861,7 +2959,7 @@ static const Core *apply_known(Checker *c, const Term *whole, const Head *h, con
   k.outer = hint;
   k.used = arity;
   core = known_core(&k, h);
-  if (core != NULL && argc == k.used && !partial_result_ok(c, h, k.type, hint))
+  if (core != NULL && argc == k.used && (!partial_result_ok(c, h, k.type, hint) || !overflow_result_ok(c, h, k.type, hint)))
     return NULL;
   return apply_rest(c, core, k.type, args + k.used, argc - k.used, hint, type);
 }
@@ -3057,6 +3155,13 @@ static const Core *elab_inner(Checker *c, const Term *t, const Value *hint, cons
   case TERM_APP:
     return elab_spine(c, t, hint, type);
   case TERM_NAT:
+    /* An Amount literal (S2, USER ruling Q-S2-2 (a)): a numeral is a
+       guest literal when the wanted type is Amount. The lexer refuses
+       a numeral above 2^64 - 1. */
+    if (val_is(hint, OP_AMOUNT)) {
+      *type = hint;
+      return core_leaf(c, CORE_NAT, t->nat);
+    }
     if (!literal_ok(c, "a Nat literal"))
       return NULL;
     if (val_is(hint, OP_FIN) && hint->args[0]->kind == VAL_NAT) {
@@ -3839,80 +3944,76 @@ static int history_ok(Checker *c, const Core *t, int typed, uint32_t depth, cons
   return 1;
 }
 
-/* The design signature (orbit-lang S3; PLAN section 3, O4): 11 types and 9
-   operations. A slot is a program definition of the slot type. A defined or
-   a primitive name is reserved until a later slice gives it (S4, S7, S8). */
-typedef enum {
-  SIG_TYPE,
-  SIG_OP
-} SigSort;
-
+/* The design signature (PLAN section 4; USER ruling Q-S1-3 (a)). A slot is
+   a base sort: a program definition of a slot must have the type Type 0. A
+   defined name is a name that the kernel gives at its slice (PLAN section
+   12). The word `in` is not a row: programs use it as a name. */
 typedef enum {
   SIG_SLOT,
-  SIG_DEFINED,
-  SIG_PRIMITIVE
+  SIG_DEFINED
 } SigKind;
 
 typedef struct {
   const char *name;
-  SigSort sort;
   SigKind kind;
 } SigRow;
 
 static const SigRow SIGNATURE[] = {
-  {"Member", SIG_TYPE, SIG_SLOT},
-  {"Choice", SIG_TYPE, SIG_SLOT},
-  {"Outcome", SIG_TYPE, SIG_SLOT},
-  {"Group", SIG_TYPE, SIG_SLOT},
-  {"Config", SIG_TYPE, SIG_DEFINED},
-  {"Orbit", SIG_TYPE, SIG_DEFINED},
-  {"Constitution", SIG_TYPE, SIG_DEFINED},
-  {"Aggregation", SIG_TYPE, SIG_DEFINED},
-  {"Tally", SIG_TYPE, SIG_DEFINED},
-  {"orbitProj", SIG_OP, SIG_DEFINED},
-  {"act", SIG_OP, SIG_SLOT},
-  {"outcomeSet", SIG_OP, SIG_SLOT},
-  {"menu", SIG_OP, SIG_SLOT},
-  {"aggregate", SIG_OP, SIG_DEFINED},
-  {"gov", SIG_OP, SIG_DEFINED},
-  {"amend", SIG_OP, SIG_DEFINED},
+  /* The base sorts (PLAN section 4): slots of the type Type 0. */
+  {"Asset", SIG_SLOT},
+  {"Owner", SIG_SLOT},
+  {"Key", SIG_SLOT},
+  {"Val", SIG_SLOT},
+  {"Node", SIG_SLOT},
+  {"OutRef", SIG_SLOT},
+  {"Output", SIG_SLOT},
+  {"Query", SIG_SLOT},
+  {"Answer", SIG_SLOT},
+  /* The kernel gives these names at slice S2 (PLAN section 12). */
+  {"Amount", SIG_DEFINED},
+  {"Maybe", SIG_DEFINED},
+  {"Bag", SIG_DEFINED},
+  {"Value", SIG_DEFINED},
+  {"Balance", SIG_DEFINED},
+  {"Delta", SIG_DEFINED},
+  {"Balanced", SIG_DEFINED},
+  {"neg", SIG_DEFINED},
+  /* The kernel gives these names at slice S3 (PLAN section 12). */
+  {"Pfin", SIG_DEFINED},
+  {"Mempool", SIG_DEFINED},
+  {"union", SIG_DEFINED},
+  /* The kernel gives these names at slice S4 (PLAN section 12). */
+  {"Body", SIG_DEFINED},
+  {"Witness", SIG_DEFINED},
+  {"Authorized", SIG_DEFINED},
+  {"AuthTx", SIG_DEFINED},
+  {"Digest", SIG_DEFINED},
+  {"Sig", SIG_DEFINED},
+  {"QC", SIG_DEFINED},
+  {"agg", SIG_DEFINED},
+  /* The kernel gives these names at slice S5 (PLAN section 12). */
+  {"Ind", SIG_DEFINED},
+  {"reads", SIG_DEFINED},
+  {"writes", SIG_DEFINED},
+  /* The kernel gives these names at slice S6 (PLAN section 12). */
+  {"Trace", SIG_DEFINED},
+  {"Eff", SIG_DEFINED},
+  {"Blockchain", SIG_DEFINED},
+  /* The kernel gives these names at slice S7 (PLAN section 12). */
+  {"Ledger", SIG_DEFINED},
+  {"Compatible", SIG_DEFINED},
+  {"apply", SIG_DEFINED},
+  {"query", SIG_DEFINED},
+  /* The kernel gives these names at slice S8 (PLAN section 12). */
+  {"FinMap", SIG_DEFINED},
+  {"UTxO", SIG_DEFINED},
+  {"Valid", SIG_DEFINED},
+  {"canon", SIG_DEFINED},
+  {"root", SIG_DEFINED},
+  {"compose", SIG_DEFINED},
 };
 
 #define SIG_COUNT ((uint32_t)(sizeof SIGNATURE / sizeof SIGNATURE[0]))
-
-/* The slot type of act: Group -> Config -> Config, Config = Member -> Choice. */
-static const Term SIG_MEMBER = {TERM_VAR, 0, 0, "Member", 0, NULL, NULL};
-static const Term SIG_CHOICE = {TERM_VAR, 0, 0, "Choice", 0, NULL, NULL};
-static const Term SIG_GROUP = {TERM_VAR, 0, 0, "Group", 0, NULL, NULL};
-static const Term SIG_CONFIG = {TERM_PI, 0, 0, NULL, 0, &SIG_MEMBER, &SIG_CHOICE};
-static const Term SIG_STEP = {TERM_PI, 0, 0, NULL, 0, &SIG_CONFIG, &SIG_CONFIG};
-static const Term SIG_ACT = {TERM_PI, 0, 0, NULL, 0, &SIG_GROUP, &SIG_STEP};
-
-/* The slot types of outcomeSet (USER ruling S7 Q2) and menu (Q3). */
-static const Term SIG_OUTCOME = {TERM_VAR, 0, 0, "Outcome", 0, NULL, NULL};
-static const Term SIG_IS_SET = {TERM_VAR, 0, 0, "isSet", 0, NULL, NULL};
-static const Term SIG_OUTCOME_SET = {TERM_APP, 0, 0, NULL, 0, &SIG_IS_SET, &SIG_OUTCOME};
-static const Term SIG_CONSTITUTION = {TERM_VAR, 0, 0, "Constitution", 0, NULL, NULL};
-static const Term SIG_MENU = {TERM_PI, 0, 0, NULL, 0, &SIG_OUTCOME, &SIG_CONSTITUTION};
-
-/* An op slot: its slot type, the program slots and the kernel name that the
-   type uses (a slot is checked only after them, so the check of its type
-   meets no unknown name), and the type as the refusal shows it. */
-typedef struct {
-  const char *name;
-  const Term *type;
-  const char *program[3];
-  const char *kernel;
-  const char *shown;
-} OpSlot;
-
-static const OpSlot OP_SLOTS[] = {
-  {"act", &SIG_ACT, {"Member", "Choice", "Group"}, NULL, "Group -> (Member -> Choice) -> Member -> Choice, after Member, Choice and Group"},
-  {"outcomeSet", &SIG_OUTCOME_SET, {"Outcome", NULL, NULL}, NULL, "isSet Outcome, after Outcome"},
-  {"menu", &SIG_MENU, {"Outcome", NULL, NULL}, "Constitution", "Outcome -> Constitution, after Outcome and the DAO prelude"}
-};
-
-#define OP_SLOT_COUNT ((uint32_t)(sizeof OP_SLOTS / sizeof OP_SLOTS[0]))
 
 static uint32_t sig_row(const char *name) {
   uint32_t i;
@@ -3921,86 +4022,35 @@ static uint32_t sig_row(const char *name) {
   return i;
 }
 
-static const OpSlot *op_slot(const char *name) {
-  uint32_t i;
-  for (i = 0; i < OP_SLOT_COUNT && strcmp(OP_SLOTS[i].name, name) != 0; i++)
-    ;
-  return i == OP_SLOT_COUNT ? NULL : &OP_SLOTS[i];
-}
-
-static const char *slot_shown(const SigRow *row) {
-  const OpSlot *s;
-  switch (row->sort) {
-  case SIG_TYPE:
-    return "Type 0";
-  case SIG_OP:
-    break;
-  }
-  s = op_slot(row->name);
-  return s == NULL ? "an op slot type" : s->shown;
-}
-
-static int program_def(const Machine *m, const char *name) {
-  uint32_t i = find_def(m, name);
-  return i != NO_DEF && m->defs[i].origin == ORIGIN_PROGRAM;
-}
-
-/* TV is the slot type of ROW: Type 0 for a type slot; for an op slot, the
-   type of OP_SLOTS after the program slots and the kernel name it uses. */
-static int slot_ok(Checker *c, const SigRow *row, const Value *tv) {
-  uint64_t level = 0;
-  const OpSlot *s;
-  const Core *t;
-  uint32_t i;
-  switch (row->sort) {
-  case SIG_TYPE:
-    return conv_values(c->m, c->level, tv, val_univ(c->m, 0u));
-  case SIG_OP:
-    break;
-  }
-  s = op_slot(row->name);
-  if (s == NULL)
-    return 0;
-  for (i = 0; i < 3u && s->program[i] != NULL; i++) {
-    if (!program_def(c->m, s->program[i]))
-      return 0;
-  }
-  if (s->kernel != NULL && find_def(c->m, s->kernel) == NO_DEF)
-    return 0;
-  t = check_type(c, s->type, &level);
-  return t != NULL && conv_values(c->m, c->level, tv, here(c, t));
-}
-
-static int check_sig(Checker *c, const Decl *d, const Value *tv) {
+/* A program definition of a slot must have the type Type 0, and the
+   Asset slot must be first-order data (USER ruling Q-S2-5 (a)): valueCount
+   counts with the conversion check. A program declaration of a defined
+   name does not get here: kernel_sig refuses it before the name check. */
+static int check_sig(Checker *c, const Decl *d, const Value *tv, const Core *body) {
   uint32_t i = sig_row(d->name);
   if (d->origin != ORIGIN_PROGRAM || i == SIG_COUNT)
     return 1;
   switch (SIGNATURE[i].kind) {
   case SIG_SLOT:
-    return slot_ok(c, &SIGNATURE[i], tv) ? 1 : FAIL(c, "REFUSE_SIG", "the slot %s must have the type %s", d->name, slot_shown(&SIGNATURE[i]));
+    if (!conv_values(c->m, c->level, tv, val_univ(c->m, 0u)))
+      return FAIL(c, "REFUSE_SIG", "the slot %s must have the type Type 0 (PLAN section 4)", d->name);
+    return (strcmp(d->name, "Asset") != 0 || asset_first_order(c->m, here(c, body), 0u)) ? 1 : FAIL(c, "REFUSE_SIG", "the slot Asset must be first-order data: no path constructor and no function (PLAN section 4, USER ruling Q-S2-5 (a))");
   case SIG_DEFINED:
-  case SIG_PRIMITIVE:
     break;
   }
-  return FAIL(c, "REFUSE_SIG", "%s is a %s name of the design signature (PLAN section 3), reserved until a later slice gives it", d->name, SIGNATURE[i].kind == SIG_DEFINED ? "defined" : "primitive");
+  return 1;
 }
 
-/* The kernel gives each defined name of the design signature: Orbit and
-   orbitProj after act (orbit-lang S4), the DAO prelude after the last of
-   act and outcomeSet (S7, PLAN section 8), and each primitive name in the
-   ZK splice after Member, Choice and the DAO prelude (S8 B2b). A program
-   declaration of a defined or primitive name is REFUSE_SIG, before the
-   name check, so the code is the same before and after the kernel gives
-   it. */
+/* A program declaration of a defined name of the design signature is
+   REFUSE_SIG, before the name check, so the code is the same before and
+   after the kernel gives the name. */
 static int kernel_sig(Checker *c, const Decl *d) {
   uint32_t i = sig_row(d->name);
   if (d->origin != ORIGIN_PROGRAM || i == SIG_COUNT)
     return 1;
   switch (SIGNATURE[i].kind) {
   case SIG_DEFINED:
-    return FAIL(c, "REFUSE_SIG", "%s is a defined name of the design signature (PLAN section 3); the kernel gives it (Orbit and orbitProj after act, the DAO prelude after act and outcomeSet)", d->name);
-  case SIG_PRIMITIVE:
-    return FAIL(c, "REFUSE_SIG", "%s is a primitive name of the design signature (PLAN section 3); the kernel gives it (the ZK splice after Member, Choice and the DAO prelude)", d->name);
+    return FAIL(c, "REFUSE_SIG", "%s is a defined name of the design signature (PLAN section 4); the kernel gives it at its slice (PLAN section 12)", d->name);
   case SIG_SLOT:
     break;
   }
@@ -4071,7 +4121,7 @@ static int check_def_body(Checker *c, const Decl *d, const Value *tv, const Core
   int program = d->origin == ORIGIN_PROGRAM;
   const Core *tc;
   int law;
-  if (body == NULL || !check_sig(c, d, tv))
+  if (body == NULL || !check_sig(c, d, tv, body))
     return 0;
   if (has_history(m) && strcmp(d->name, "init") != 0 && !is_family(tv, m->state_family) && !history_ok(c, body, mentions_state(m, c->level, tv), 0, NULL))
     return 0;
@@ -4611,7 +4661,7 @@ int entry_of(Machine *m, const Value *type, Entry *out) {
   const Value *t = type;
   memset(out, 0, sizeof *out);
   while (t != NULL && t->kind == VAL_PI && out->param_count < ENTRY_PARAMS_MAX) {
-    if (!val_is(t->dom, OP_NAT) && !val_is(t->dom, OP_FLAG))
+    if (!val_is(t->dom, OP_NAT) && !val_is(t->dom, OP_AMOUNT) && !val_is(t->dom, OP_FLAG))
       return 0;
     out->param_flag[out->param_count] = val_is(t->dom, OP_FLAG);
     t = closure_apply(m, t, val_var(m, out->param_count));
@@ -4621,7 +4671,7 @@ int entry_of(Machine *m, const Value *type, Entry *out) {
   out->result_option = val_is(t, OP_OPTION);
   t = out->result_option ? t->args[0] : t;
   out->result_flag = val_is(t, OP_FLAG);
-  return val_is(t, OP_NAT) || val_is(t, OP_FLAG);
+  return val_is(t, OP_NAT) || val_is(t, OP_AMOUNT) || val_is(t, OP_FLAG);
 }
 
 static int parse_u64(const char *s, uint64_t *out) {

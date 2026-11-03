@@ -41,7 +41,7 @@ family Trunc1 (A : Type 0) := trunc1 (truncOf : A) | squash1 (squashFrom : Trunc
 family Trunc0 (A : Type 0) := trunc0 (trunc0Of : A) | squash0 (squash0From : Trunc0 A) (squash0To : Trunc0 A) (squash0Left : Path (Trunc0 A) squash0From squash0To) (squash0Right : Path (Trunc0 A) squash0From squash0To) (i : I) (j : I) [ ~i -> squash0Left @ j, i -> squash0Right @ j, ~j -> squash0From, j -> squash0To ]
 -- The set quotient Quot went in S3 (rule R1: its relation parameter is a
 -- value parameter, so it is not a cell signature). The quotients of the
--- DAO are families with no parameter: Orbit, Parity and OrbitN.
+-- DAO are families with no parameter: Parity and OrbitN.
 -- The size index (S6, O24, USER ruling S6): a domain family, so Nat
 -- stays internal.
 family Size := sz0 | szS (szPred : Size)
@@ -91,6 +91,27 @@ family Bag (A : Type 0) := bagOf (bagGen : A)
     [ ~i -> bagOp A (bagUnit A) unitX, i -> unitX ]
   | bagSquash (bagFrom : Bag A) (bagTo : Bag A) (bagLeft : Path (Bag A) bagFrom bagTo) (bagRight : Path (Bag A) bagFrom bagTo) (i : I) (j : I)
     [ ~i -> bagLeft @ j, i -> bagRight @ j, ~j -> bagFrom, j -> bagTo ]
+def bagIsSet : (A : Type 0) -> isSet (Bag A) :=
+  fun (A : Type 0) (x : Bag A) (y : Bag A) (p : Path (Bag A) x y) (q : Path (Bag A) x y) => fun (i : I) => fun (j : I) => bagSquash A x y p q i j
+-- The fold out of Bag (S2, law L1): a map from A into a commutative
+-- monoid M that is a set extends to Bag A. The cases are the laws of M,
+-- in the order of the constructors. The comm case is the L1 clause: a
+-- fold or elim out of Bag without it gives REFUSE_BAG_NONCOMM (USER
+-- ruling Q-S2-4 (a)).
+def bagFold : (A : Type 0) -> (M : Type 0) -> isSet M -> (e : M) -> (op : M -> M -> M) -> ((x : M) -> (y : M) -> (z : M) -> Path M (op (op x y) z) (op x (op y z))) -> ((x : M) -> (y : M) -> Path M (op x y) (op y x)) -> ((x : M) -> Path M (op e x) x) -> (A -> M) -> Bag A -> M :=
+  fun (A : Type 0) (M : Type 0) (s : isSet M) (e : M) (op : M -> M -> M) (assoc : (x : M) -> (y : M) -> (z : M) -> Path M (op (op x y) z) (op x (op y z))) (comm : (x : M) -> (y : M) -> Path M (op x y) (op y x)) (unitL : (x : M) -> Path M (op e x) x) (f : A -> M) (b : Bag A) =>
+    fold (fun (a : A) => f a) e (fun (x : M) (y : M) => op x y)
+      (fun (x : M) (y : M) (z : M) => fun (i : I) => assoc x y z @ i)
+      (fun (x : M) (y : M) => fun (i : I) => comm x y @ i)
+      (fun (x : M) => fun (i : I) => unitL x @ i)
+      (fun (x : M) (y : M) (p : Path M x y) (q : Path M x y) => fun (i : I) => fun (j : I) => (s x y p q @ i) @ j) b
+-- The map of Bag is the fold into Bag B: its comm case is bagComm of B.
+def bagMap : (A : Type 0) -> (B : Type 0) -> (A -> B) -> Bag A -> Bag B :=
+  fun (A : Type 0) (B : Type 0) (f : A -> B) => bagFold A (Bag B) (bagIsSet B) (bagUnit B) (bagOp B)
+    (fun (x : Bag B) (y : Bag B) (z : Bag B) => fun (i : I) => bagAssoc B x y z i)
+    (fun (x : Bag B) (y : Bag B) => fun (i : I) => bagComm B x y i)
+    (fun (x : Bag B) => fun (i : I) => bagUnitL B x i)
+    (fun (a : A) => bagOf B (f a))
 -- The free monoid (S3, USER ruling Q-S3-5 (a), rule R1): the cell monad
 -- of the monoid signature, with the generator fmEta and a set squash. The
 -- cons list List is kit only (the host ABI); a guest List gives REFUSE_CELL,
@@ -271,3 +292,6 @@ family Signal := sigQuiet | sigLoud (loudLevel : Nat)
 and Window := winOpen | winShut (shutFor : Nat)
 family Hop := hopEnd | hopNext (nextEcho : Echo)
 and Echo := echoBack (backHop : Hop)
+-- Maybe (S2, USER ruling Q-S2-2 (a)): the result of amountAdd and
+-- amountSub. none is the abort value at overflow and at underflow.
+def Maybe : Type 0 -> Type 0 := fun (A : Type 0) => Option A

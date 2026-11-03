@@ -1,4 +1,4 @@
--- The bag orbit theorem (slice S7 B3, PLAN Q4 and Q5), guest mode: at each size n the orbits of the
+-- The bag orbit theorem for the domain families, in guest mode: at each size n the orbits of the
 -- configurations Pos n -> Choice under the word action are the bags of n choices.
 def Choice : Type 0 := Sum Unit Unit
 
@@ -19,7 +19,7 @@ def rebuildPath : (k : Size) -> (e : Pos k -> Choice) -> Path (Pos k -> Choice) 
 def liftFront : (m : Size) -> Word m -> (Pos (szS m) -> Choice) -> Pos (szS m) -> Choice :=
   fun (m : Size) (u : Word m) (d : Pos (szS m) -> Choice) => consP m (d (posFirst m)) (actW m u (fun (p : Pos m) => d (posNext m p)))
 
--- swapR is the relation of the kernel Orbit and of OrbitN (domain.lang). Both families are sets by their squash.
+-- swapR is the relation of OrbitN (domain.lang), a set by its squash.
 def swapR : (n : Size) -> (Pos n -> Choice) -> (Pos n -> Choice) -> Type 0 :=
   fun (n : Size) (c : Pos n -> Choice) (d : Pos n -> Choice) => Sigma (w : Word n) (Path (Pos n -> Choice) (actW n w d) c)
 def isSetOrbitN : (k : Size) -> isSet (OrbitN k) :=
@@ -70,7 +70,7 @@ def consO : (m : Size) -> Choice -> OrbitN m -> OrbitN (szS m) :=
       (p : Path (OrbitN n) w v) (ihp : Path (OrbitN (szS n)) ihw ihv) (q : Path (OrbitN n) w v) (ihq : Path (OrbitN (szS n)) ihw ihv) =>
       fun (i : I) => fun (j : I) => (isSetOrbitN (szS n) ihw ihv ihp ihq @ i) @ j) z
 
--- A family of propositions over a path or a square has each PathP (copied from dao.lang).
+-- A family of propositions over a path or a square has each PathP.
 def propOver : (X : Type 0) -> (P : X -> Type 0) -> ((x : X) -> isProp (P x)) -> (a : X) -> (b : X) -> (q : Path X a b) -> (u : P a) -> (v : P b) -> PathP (fun (i : I) => P (q @ i)) u v :=
   fun (X : Type 0) (P : X -> Type 0) (hP : (x : X) -> isProp (P x)) (a : X) (b : X) (q : Path X a b) (u : P a) (v : P b) =>
     fun (i : I) => hcomp (P (q @ i)) (~i \/ i) (fun (k : I) => [
@@ -88,7 +88,7 @@ def propSquare : (X : Type 0) -> (P : X -> Type 0) -> ((x : X) -> isProp (P x)) 
       j -> hP ((s @ i) @ j) (transp (fun (m : I) => P ((s @ (i /\ m)) @ (j /\ m))) i0 ihx) ihy @ k ])
       (transp (fun (m : I) => P ((s @ (i /\ m)) @ (j /\ m))) i0 ihx)
 
--- Two maps into a set agree on OrbitN when they agree at orbitNOf (the orbitExt shape of dao.lang), and two
+-- Two maps into a set agree on OrbitN when they agree at orbitNOf, and two
 -- maps of bags agree when they agree at choiceNil and the choiceCons case follows. The set proofs and the maps
 -- are variables, so the motive does not unfold them at the squash case.
 def orbitNExt : (T : Size -> Type 0) -> ((n : Size) -> isSet (T n)) -> (L : (n : Size) -> OrbitN n -> T n) -> (M : (n : Size) -> OrbitN n -> T n) ->
@@ -196,78 +196,3 @@ def bagOrbitW : SwapCase -> (k : Size) -> Equiv (OrbitN k) (ChoiceBag k) :=
   fun (sw : SwapCase) (k : Size) => isoToEquiv (OrbitN k) (ChoiceBag k) (toBag k) (fromBagW sw k)
     (toFrom (fromBagW sw) (fromBagNil sw) (fromBagCons sw) k) (fromTo (fromBagW sw) (fromBagNil sw) (fromBagCons sw) k)
 def bagOrbit : (k : Size) -> Equiv (OrbitN k) (ChoiceBag k) := bagOrbitW swapO
-
--- The example row: a DAO program with Member Pos n0 and Group Word n0 at three positions. The kernel gives
--- the family Orbit after act (S3, design C 2a). Orbit and OrbitN n0 have the same point and path constructors,
--- so toOrbitN (a fold) and fromOrbitN (fromAt n0) are inverse, orbitRow is ua of that iso, and bagOrbit n0 gives its bags.
-def n0 : Size := szS (szS (szS sz0))
-def Member : Type 0 := Pos n0
-def Group : Type 0 := Word n0
-def act : Group -> (Member -> Choice) -> Member -> Choice := actW n0
-def isSetOrbit : isSet Orbit :=
-  fun (x : Orbit) (y : Orbit) (p : Path Orbit x y) (q : Path Orbit x y) => fun (i : I) => fun (j : I) => orbitSquash x y p q i j
-def toOrbitN : Orbit -> OrbitN n0 :=
-  fun (z : Orbit) => fold (fun (c : Member -> Choice) => orbitNOf n0 c)
-    (fun (a : Member -> Choice) (b : Member -> Choice) (r : swapR n0 a b) => fun (i : I) => orbitNEq n0 a b r i)
-    (isSetOrbitN n0) z
--- An elim on OrbitN has a motive over all sizes, so fromOrbitN is fromAt n0 into OrbAt: Orbit at n0 and OrbitN n
--- at each other size, by elim on the size to depth 4. sel5 takes a value at sizes 0, 1, 2, n0 and a value above n0.
-def size4 : Size -> Size := fun (k : Size) => szS (szS (szS (szS k)))
-def sel5 : (P : Size -> Type 0) -> P sz0 -> P (szS sz0) -> P (szS (szS sz0)) -> P n0 -> ((k : Size) -> P (size4 k)) -> (n : Size) -> P n :=
-  fun (P : Size -> Type 0) (p0 : P sz0) (p1 : P (szS sz0)) (p2 : P (szS (szS sz0))) (p3 : P n0) (p4 : (k : Size) -> P (size4 k)) (n : Size) =>
-    elim (fun (t : Size) => P t) p0 (fun (t1 : Size) (h1 : P t1) =>
-      elim (fun (u : Size) => P (szS u)) p1 (fun (t2 : Size) (h2 : P (szS t2)) =>
-        elim (fun (u : Size) => P (szS (szS u))) p2 (fun (t3 : Size) (h3 : P (szS (szS t3))) =>
-          elim (fun (u : Size) => P (szS (szS (szS u)))) p3 (fun (t4 : Size) (h4 : P (szS (szS (szS t4)))) => p4 t4) t3) t2) t1) n
-def OrbAt : Size -> Type 0 :=
-  fun (n : Size) => elim (fun (t : Size) => Type 0) (OrbitN sz0) (fun (t1 : Size) (h1 : Type 0) =>
-    elim (fun (u : Size) => Type 0) (OrbitN (szS sz0)) (fun (t2 : Size) (h2 : Type 0) =>
-      elim (fun (u : Size) => Type 0) (OrbitN (szS (szS sz0))) (fun (t3 : Size) (h3 : Type 0) =>
-        elim (fun (u : Size) => Type 0) Orbit (fun (t4 : Size) (h4 : Type 0) => OrbitN (size4 t4)) t3) t2) t1) n
-def mkO : (n : Size) -> (Pos n -> Choice) -> OrbAt n :=
-  sel5 (fun (n : Size) => (Pos n -> Choice) -> OrbAt n) (fun (c : Pos sz0 -> Choice) => orbitNOf sz0 c) (fun (c : Pos (szS sz0) -> Choice) => orbitNOf (szS sz0) c)
-    (fun (c : Pos (szS (szS sz0)) -> Choice) => orbitNOf (szS (szS sz0)) c) (fun (c : Member -> Choice) => orbitProj c)
-    (fun (k : Size) (c : Pos (size4 k) -> Choice) => orbitNOf (size4 k) c)
-def mkEqO : (n : Size) -> (a : Pos n -> Choice) -> (b : Pos n -> Choice) -> swapR n a b -> Path (OrbAt n) (mkO n a) (mkO n b) :=
-  sel5 (fun (n : Size) => (a : Pos n -> Choice) -> (b : Pos n -> Choice) -> swapR n a b -> Path (OrbAt n) (mkO n a) (mkO n b))
-    (fun (a : Pos sz0 -> Choice) (b : Pos sz0 -> Choice) (r : swapR sz0 a b) => fun (i : I) => orbitNEq sz0 a b r i)
-    (fun (a : Pos (szS sz0) -> Choice) (b : Pos (szS sz0) -> Choice) (r : swapR (szS sz0) a b) => fun (i : I) => orbitNEq (szS sz0) a b r i)
-    (fun (a : Pos (szS (szS sz0)) -> Choice) (b : Pos (szS (szS sz0)) -> Choice) (r : swapR (szS (szS sz0)) a b) => fun (i : I) => orbitNEq (szS (szS sz0)) a b r i)
-    (fun (a : Member -> Choice) (b : Member -> Choice) (r : swapR n0 a b) => fun (i : I) => orbitEq a b r i)
-    (fun (k : Size) (a : Pos (size4 k) -> Choice) (b : Pos (size4 k) -> Choice) (r : swapR (size4 k) a b) => fun (i : I) => orbitNEq (size4 k) a b r i)
-def isSetAt : (n : Size) -> isSet (OrbAt n) :=
-  sel5 (fun (n : Size) => isSet (OrbAt n)) (isSetOrbitN sz0) (isSetOrbitN (szS sz0)) (isSetOrbitN (szS (szS sz0))) isSetOrbit (fun (k : Size) => isSetOrbitN (size4 k))
-def fromAt : (n : Size) -> OrbitN n -> OrbAt n :=
-  fun (n : Size) (z : OrbitN n) => elim (fun (t : Size) (x : OrbitN t) => OrbAt t)
-    (fun (t : Size) (c : Pos t -> Choice) => mkO t c)
-    (fun (t : Size) (a : Pos t -> Choice) (b : Pos t -> Choice) (r : swapR t a b) => fun (i : I) => mkEqO t a b r @ i)
-    (fun (t : Size) (w : OrbitN t) (ihw : OrbAt t) (v : OrbitN t) (ihv : OrbAt t)
-      (p : Path (OrbitN t) w v) (ihp : Path (OrbAt t) ihw ihv) (q : Path (OrbitN t) w v) (ihq : Path (OrbAt t) ihw ihv) =>
-      fun (i : I) => fun (j : I) => (isSetAt t ihw ihv ihp ihq @ i) @ j) z
-def fromOrbitN : OrbitN n0 -> Orbit := fromAt n0
-def backAt : (n : Size) -> OrbAt n -> OrbitN n :=
-  sel5 (fun (n : Size) => OrbAt n -> OrbitN n) (fun (x : OrbitN sz0) => x) (fun (x : OrbitN (szS sz0)) => x) (fun (x : OrbitN (szS (szS sz0))) => x) toOrbitN
-    (fun (k : Size) (x : OrbitN (size4 k)) => x)
-def backFrom : (n : Size) -> (c : Pos n -> Choice) -> Path (OrbitN n) (backAt n (fromAt n (orbitNOf n c))) (orbitNOf n c) :=
-  sel5 (fun (n : Size) => (c : Pos n -> Choice) -> Path (OrbitN n) (backAt n (fromAt n (orbitNOf n c))) (orbitNOf n c))
-    (fun (c : Pos sz0 -> Choice) => refl) (fun (c : Pos (szS sz0) -> Choice) => refl) (fun (c : Pos (szS (szS sz0)) -> Choice) => refl) (fun (c : Member -> Choice) => refl)
-    (fun (k : Size) (c : Pos (size4 k) -> Choice) => refl)
--- fromOrbitN after toOrbitN is the identity: elim on Orbit into the propositions Path Orbit (fromOrbitN (toOrbitN z)) z
--- (the orbitNExt shape), refl at orbitProj. toOrbitN after fromOrbitN is the identity by orbitNExt, refl at orbitNOf.
-def orbitFromTo : (x : Orbit) -> Path Orbit (fromOrbitN (toOrbitN x)) x :=
-  fun (x : Orbit) =>
-    elim (fun (z : Orbit) => Path Orbit (fromOrbitN (toOrbitN z)) z)
-      (fun (a : Member -> Choice) => refl)
-      (fun (a : Member -> Choice) (b : Member -> Choice) (r : swapR n0 a b) => fun (i : I) =>
-        propOver Orbit (fun (z : Orbit) => Path Orbit (fromOrbitN (toOrbitN z)) z) (fun (z : Orbit) => isSetOrbit (fromOrbitN (toOrbitN z)) z)
-          (orbitProj a) (orbitProj b) (fun (k : I) => orbitEq a b r k) refl refl @ i)
-      (fun (w : Orbit) (ihw : Path Orbit (fromOrbitN (toOrbitN w)) w) (y : Orbit) (ihy : Path Orbit (fromOrbitN (toOrbitN y)) y)
-        (p : Path Orbit w y) (ihp : PathP (fun (j : I) => Path Orbit (fromOrbitN (toOrbitN (p @ j))) (p @ j)) ihw ihy)
-        (q : Path Orbit w y) (ihq : PathP (fun (j : I) => Path Orbit (fromOrbitN (toOrbitN (q @ j))) (q @ j)) ihw ihy) =>
-        fun (i : I) => fun (j : I) => (propSquare Orbit (fun (z : Orbit) => Path Orbit (fromOrbitN (toOrbitN z)) z) (fun (z : Orbit) => isSetOrbit (fromOrbitN (toOrbitN z)) z)
-          w y p q (fun (m : I) => fun (n : I) => orbitSquash w y p q m n) ihw ihy ihp ihq @ i) @ j) x
-def orbitToFrom : (y : OrbitN n0) -> Path (OrbitN n0) (toOrbitN (fromOrbitN y)) y :=
-  orbitNExt (fun (n : Size) => OrbitN n) isSetOrbitN (fun (n : Size) (z : OrbitN n) => backAt n (fromAt n z)) (fun (n : Size) (z : OrbitN n) => z) backFrom n0
-
-def orbitRow : Path (Type 0) Orbit (OrbitN n0) :=
-  ua Orbit (OrbitN n0) (isoToEquiv Orbit (OrbitN n0) toOrbitN fromOrbitN orbitToFrom orbitFromTo)

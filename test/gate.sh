@@ -75,6 +75,14 @@ if ! rg -q -F 'count operations: a position is `len r` (an OpPos) and a deadline
   echo "FAIL time-block.lang: the message does not name the op-count form"
   fail=$((fail + 1))
 fi
+
+# A higher-order Asset is refused at the slot, not later at valueBal (S2,
+# USER ruling Q-S2-5 (a)): rule_value_count gives the same code.
+build/langc check test/check/sig-asset-higher.lang 2>"$tmp/err" >/dev/null || true
+if ! rg -q -F 'Asset: the slot Asset must be first-order data' "$tmp/err"; then
+  echo "FAIL sig-asset-higher.lang: the message does not name the Asset slot"
+  fail=$((fail + 1))
+fi
 echo "time hint: $time_hint checked"
 
 # Each line of test/eval/expect.txt is `FILE NAME [ARGS] => OUTPUT`. `langc eval`

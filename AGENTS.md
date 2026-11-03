@@ -1,17 +1,20 @@
 # AGENTS.md
 
-How an agent works in quotient-lang. This file is true at S1.
+How an agent works in quotient-lang. This file is true at S2.
 The final form comes at slice S15 (`docs/PLAN.md` section 9, A5).
 
-## State at S1
+## State at S2
 
 - The code is the permit-lang 18deea2 kernel with R0 (`docs/PLAN.md`
   section 8.1): `langc` (C99, TinyCC) and its sample domain in
   `domain/`. S1 adds REFUSE_NOT_IN_DESIGN (section 7).
-- The quotient-lang types, laws, refusals and targets are a plan only:
-  `docs/PLAN.md` sections 2 to 10.
+- S2 adds `Amount`, `Bag` and the value prelude after the slot `Asset`
+  (`Value`, `Balance`, `[[ ]]v`, `Delta`, `neg`, `Balanced`), with
+  REFUSE_OVERFLOW and REFUSE_BAG_NONCOMM at `Bag` (sections 4 and 7).
+- The other quotient-lang types, laws, refusals and targets are a plan
+  only: `docs/PLAN.md` sections 2 to 10.
 - The USER ruled Q-R1 to Q-R8 before S0 (`docs/PLAN.md` sections 1 and
-  14). S1 is DONE. The next slice is S2 (section 12).
+  14). S2 is DONE. The next slice is S3 (section 12).
 - `design/DESIGN.md` is verbatim. Do not edit it. A design change is a
   new paste and an open item.
 

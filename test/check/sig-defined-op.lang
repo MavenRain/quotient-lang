@@ -1,0 +1,2 @@
+-- neg is a defined operation of slice S2: a program def is refused.
+def neg : Unit -> Unit := fun (u : Unit) => u

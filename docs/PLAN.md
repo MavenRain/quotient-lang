@@ -17,9 +17,10 @@ file gives the readings of that request, the route, the slices and the open
 items. The USER ruled Q-R1 to Q-R8 before S0 (section 14). So sections 2 to
 5 are RULED, not proposals.
 
-Status: S1 DONE (2026-11-02): the permit-lang 18deea2 kernel with
-R0 (section 8.1), REFUSE_NOT_IN_DESIGN (section 7) and the footprint
-checker survey (section 5.5). Next: S2 (section 12).
+Status: S2 DONE (2026-11-02): `Amount`, `Bag`, `Value`, `Balance`,
+`[[ ]]v`, `Delta`, `neg`, `Balanced`, REFUSE_OVERFLOW and
+REFUSE_BAG_NONCOMM at `Bag` (sections 4 and 7), with L1 and L8
+(section 6), on the S1 kernel (section 8.1). Next: S3 (section 12).
 
 ## 1. Rulings
 
@@ -123,6 +124,41 @@ equality and no other operation unless a row gives one: `Asset`, `Owner`,
 `Key`, `Val`, `Node`, `OutRef`, `Output`, `Query`, `Answer`, `Amount`
 (u64, Q-R3 (a)). `State` is `Key -> Val` (D1 sec 7), held as
 `FinMap Key Val`.
+
+`Amount` (S2, Q-S2-2 (a)) is a nominal builtin type that a guest can
+use. `amountAdd` and `amountSub` give `Maybe Amount`: `none` at
+overflow and at underflow, never a trap. A numeral is an `Amount`
+literal when the wanted type is `Amount`. `Maybe A` is `Option A`
+(`domain/domain.lang`). An `amountAdd` or `amountSub` result where an
+`Amount` is wanted gives REFUSE_OVERFLOW (section 7). `langc` does not
+lower a Wasm entry with a `Maybe` result, so the Wasm entries of
+`examples/amount.lang` give an `Amount` (`none` keeps the old value).
+
+Value prelude (S2, Q-S2-3 (a), Q-S2-5 (a), Q-S2-6 (a)): after a
+program defines the slot `Asset`, the front end puts kernel
+declarations after it:
+
+- `Value = Bag Asset`.
+- `Balance = Asset -> Amount`, and `valueBal v a`, the code name of
+  `[[ ]]v`: the count of `a` in `v`. The C builtin `valueCount` (eval
+  only, as `len`) counts. It compares two assets with the conversion
+  check of the evaluator. So the `Asset` slot must be first-order data
+  (REFUSE_SIG, section 7).
+- `balanceAdd`: `amountAdd` at each asset, so it gives `Maybe Amount`.
+- The family `Delta`: the formal differences `deltaOf a b` of `Value`,
+  the path `deltaEq` when `a + d = c + b`, and the squash
+  `deltaSquash`. Then `deltaZero`; `deltaSub`, the code name of
+  `a - b`; `neg`; `Balanced d`, a path from `d` to `deltaZero`.
+- `deltaAdd`, the code name of `+` on `Delta`: a nested fold. Its path
+  case uses `deltaExt`: two maps out of `Delta` into a set are equal
+  when they agree at each `deltaOf a b`. The helpers are `valueSwap`,
+  `deltaShift` and `deltaAddZero`.
+- The L8 paths (section 6): `deltaSelf` (`a - a = 0`), `balancedNeg`
+  and `balancedAdd`.
+
+`Delta` is `Delta Value` only (the instance `Net` of section 3). A
+program without an `Asset` slot gets no value prelude: `Value` is then
+an unknown name (NAME_UNKNOWN, `test/check/value-no-asset.lang`).
 
 ## 5. Footprint checking (RULED: X17, Q-R5 (a))
 
@@ -241,14 +277,14 @@ Notes:
 
 | Law | Statement | Discharge |
 |---|---|---|
-| L1 | `Bag` is commutative: an eliminator out of `Bag A` gives the `comm` clause. `agg (xs ++ ys) = agg xs (x) agg ys`. | kernel, per eliminator; `agg` needs O2 |
+| L1 | `Bag` is commutative: an eliminator out of `Bag A` gives the `comm` clause. `agg (xs ++ ys) = agg xs (x) agg ys`. | kernel, per eliminator. S2 DONE at `Bag`: a fold or elim out of `Bag` with a wrong count of cases gives `REFUSE_BAG_NONCOMM` (Q-S2-4 (a)); `examples/bag.lang`. `agg` needs O2 (S4) |
 | L2 | `Pfin` union laws: unit, assoc, comm, idem. Mempool merge is order-free. | prelude (merge-lang S1b, quorum-lang FMSet port) |
 | L3 | Trace swap: if `Ind a b`, `[[a <| b <| t]] = [[b <| a <| t]]`. | checker, from the frame law (section 5) |
 | L4 | `[[t ++ u]] = [[t]] ; [[u]]`, and `[[ ]]` is the unique monoid map that extends `step` (D1 sec 8). | prelude |
 | L5 | No-malleability: equal bodies give equal `AuthTx`; txid reads `Body` only. | checker: a step or txid that reads a `Witness` is refused |
 | L6 | Nerode right congruence: `t ~N u` gives `t ++ k ~N u ++ k`. | prelude |
 | L7 | `Valid` compose: `Valid r r'` and `Valid r' r''` give `Valid r r''`. Uses L4 and O1 once. | prelude; T2 emits it |
-| L8 | `Delta`: `a - a = 0`; `Balanced` is closed under `+`. | prelude |
+| L8 | `Delta`: `a - a = 0`; `Balanced` is closed under `+`. | prelude, S2 DONE: `deltaSelf` (`a - a = 0`), `balancedAdd` (Q-S2-6 (a)) and `balancedNeg` (section 4); `examples/value.lang` |
 | L9 | `eval` factors through `Blockchain` (X6). | by construction |
 
 Assumptions (named, never proved in the language):
@@ -267,8 +303,9 @@ assumptions (A2).
 | `REFUSE_CELL` | A type constructor other than the cell monad and its dual (kernel) | S1 |
 | `REFUSE_PARTIAL` | A partial operation or general recursion (kernel R0) | S1, DONE (port). Two sites give this code for a partial name in a spine head: `unknown_name` and `var_core`. A mutant that removes the `unknown_name` refusal is equivalent: `var_core` then refuses the same name with the same code and text. The S1 mutant PARTIAL-CODE changes the code at `unknown_name`, and the row partial-name.lang kills it. |
 | `REFUSE_NOT_IN_DESIGN` | A name of the DROP rows X4 and X10 in any declaration form or binder (path 1); an axiom of a universe type whose name is not an admitted base sort (path 2, Q-S1-2 (a)) | S1, DONE |
-| `REFUSE_OVERFLOW` | `Amount` arithmetic used outside `Maybe` | S2 |
-| `REFUSE_BAG_NONCOMM` | An eliminator out of `Bag` or `Pfin` without its path clauses; a non-commutative `agg` (E5) | S2, S4 |
+| `REFUSE_SIG` | A program that does not keep to the base signature of section 4: a base sort that is not a slot of `Type 0`, a program definition of a kernel name of S2 to S8, or an `Asset` slot that is not first-order data (Q-S2-5 (a)) | S1 (port: the orbit-lang sample table). S2, DONE: the table is now the section 4 names (Q-S1-3 (a)). The 9 base sorts other than `Amount` are slots of `Type 0`, and the kernel names of S2 to S8 are defined rows. A mutant that makes the `SIG_DEFINED` case of `check_sig` give 1 is equivalent: `kernel_sig` refuses the same program first. The S2 mutant SLOT-FIRST-ORDER lived in round 1: the prelude `valueBal` then refuses the same program by `rule_value_count` with the same code. The message row of sig-asset-higher.lang ("Asset: the slot Asset must be first-order data") kills it. |
+| `REFUSE_OVERFLOW` | `Amount` arithmetic used outside `Maybe` | S2, DONE: an `amountAdd` or `amountSub` result where an `Amount` is wanted (`overflow_result_ok`). Rows: amount-overflow.lang, amount-underflow.lang. |
+| `REFUSE_BAG_NONCOMM` | An eliminator out of `Bag` or `Pfin` without its path clauses; a non-commutative `agg` (E5) | S2, DONE at `Bag` (Q-S2-4 (a)): a fold or elim out of `Bag` with a wrong count of cases. Rows: bag-no-squash.lang, bag-no-comm.lang, bag-elim-no-comm.lang. Open: `Pfin` (S3) and the non-commutative `agg` at `Bag Sig` (S4). |
 | `REFUSE_WITNESS_READ` | A step or txid that reads a `Witness` (L5) | S4 |
 | `REFUSE_FOOTPRINT_READ` | A `get` outside `reads` | S5 |
 | `REFUSE_FOOTPRINT_WRITE` | A `set` outside `writes` | S5 |
@@ -293,8 +330,9 @@ text of docs/PLAN.md, AGENTS.md and README.md. Not taken: permit-lang
 505ca37 (the S4 affine layer) and relay-lang 9109e2a (the relay domain).
 The cut list (crypto, the ZK prelude, the chain words, the relay domain)
 is at relay 05dd63b and permit S3. The kernel keeps REFUSE_TIME and the
-other codes of 18deea2. The orbit-lang sample signature of REFUSE_SIG
-stays until a later slice (Q-S1-3).
+other codes of 18deea2. S2 replaced the orbit-lang sample
+signature of REFUSE_SIG with the section 4 names (Q-S1-3 (a)). S2 adds
+`conv_system_same` to `src/front/eval.c` (Q-S2-7 (a), section 13 K7).
 
 ### 8.2 The three targets
 
@@ -356,8 +394,8 @@ One session for each slice: scope, gate, mutants, docs, close.
 |---|---|---|
 | S0 | Seed from tcc-wasm, DESIGN.md, this plan, README table, AGENTS.md; serial gate EXIT 0 (9 parse refusals, 19 check refusals, 32 evals, 10 lowered, 13 Wasm modules valid, 813 differential cases, 0 mismatches, review and domain regressions passed); seed commit; private repo | DONE |
 | S1 | First build slice. Survey and port the Cubical TT kernel with R0 (8.1): `REFUSE_CELL`, `REFUSE_PARTIAL`, the no-trap Wasm writer, `test/notraptool.c`. Add `REFUSE_NOT_IN_DESIGN` with the section 4 name list. Survey the footprint checker (section 5): the key-pattern syntax, the three-phase step, the sources to port. | DONE: serial gate EXIT 0 (31 examples, 16 parse refusals, 160 check refusals, 10 kit-only refusals, 86 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 0 failures; review, domain and path regressions passed). Review restored 33 valid Wasm modules and 1088 differential cases with 0 mismatches; 7 of 8 mutants KILLED, PARTIAL equivalent (section 7) |
-| S2 | `Amount` (u64, `Maybe` arithmetic), `Asset`, `Bag`, `Value`, `Balance`, `[[ ]]v`, `Delta`, `neg`, `Balanced`; `REFUSE_OVERFLOW`; L1, L8. | NEXT |
-| S3 | `Pfin`, `in`, `union`, `Key`, `Footprint`; L2. | |
+| S2 | `Amount` (u64, `Maybe` arithmetic), `Asset`, `Bag`, `Value`, `Balance`, `[[ ]]v`, `Delta`, `neg`, `Balanced`; `REFUSE_OVERFLOW`; L1, L8. | DONE: serial gate EXIT 0 (31 examples, 16 parse refusals, 154 check refusals, 10 kit-only refusals, 90 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 33 valid Wasm modules, 2293 differential cases with 0 mismatches, 0 failures; review, domain and path regressions passed). 20 of 20 mutants KILLED (SLOT-FIRST-ORDER by the message row sig-asset-higher.lang); the `SIG_DEFINED` mutant is equivalent (section 7) |
+| S3 | `Pfin`, `in`, `union`, `Key`, `Footprint`; L2. | NEXT |
 | S4 | `Body`, `Witness`, `Authorized`, `AuthTx`, `Digest` (abstract), `Sig`, `agg`, `QC`; `REFUSE_WITNESS_READ`, `REFUSE_BAG_NONCOMM` at `Bag Sig`; L5. | |
 | S5 | `State`, `Eff`, `step`, `reads`, `writes`, the frame-law checker, `Ind`, the `Ind` matrix; `REFUSE_FOOTPRINT_*`; L3. | |
 | S6 | `Trace`, `swap`, `++`, `[t]`, `[[ ]]`, `Blockchain`, `D`; X4 and X10 refused; `REFUSE_EQ_UNDECIDABLE`; L4, L9. | |
@@ -379,7 +417,12 @@ One session for each slice: scope, gate, mutants, docs, close.
 
 - K1 D1 is in DESIGN.md as a digest only. A slice that needs a detail reads
   D1 again with the Claude Docs connector (DESIGN.md 4 gives the ids), and
-  records the detail here.
+  records the detail here. S2 (D1 sec 2 and 3, as built):
+  `Value = Bag Asset`; `Balance = Asset -> Amount`; `[[ ]]v` is
+  `valueBal`, a count by `valueCount`; `Delta` is the formal
+  differences of `Value`, with the path `deltaEq` when
+  `a + d = c + b`; `Balanced d` is a path to `deltaZero`; `+` on
+  `Delta` is `deltaAdd` (section 4).
 - K2 D1 marks these as not mechanized: the concat law (sec 1), `Balanced`
   (sec 3), `QC` (sec 4), the frame law (sec 7), the consensus colimit
   (sec 10), shards (sec 11), `FinMap` and `root` (sec 12). The checker of
@@ -391,9 +434,17 @@ One session for each slice: scope, gate, mutants, docs, close.
   MVP subset that `langc` emits (permit-lang Q-S0-1 precedent), or the
   merge-lang Wasm engine (merge-lang S7). S10 surveys.
 - K5 SPEC.md is the kit text. It changes at each slice and is final at S19.
-- K6 The kit sample domain in `domain/` stays until S2 replaces it. S1
-  keeps the permit-lang 18deea2 domain and the orbit-lang sample
-  signature of REFUSE_SIG (Q-S1-3).
+- K6 DONE (S2). The REFUSE_SIG table is the section 4 names (Q-S1-3
+  (a)). The orbit-lang sample splice is gone from `src/front/front.c`
+  (Q-S2-1 (a)). `domain/domain.lang` keeps the permit-lang 18deea2 kit
+  names and adds `bagIsSet`, `bagFold`, `bagMap` and `Maybe`.
+- K7 Kernel divergence (S2, Q-S2-7 (a)): `src/front/eval.c` differs
+  from the permit-lang 18deea2 port by `conv_system_same`. The cover
+  test of `conv_system` compares all pairs of branches in both
+  directions, so its cost is exponential in the hcomp depth of
+  `deltaExt` and `deltaAdd`. `conv_loop` tries `conv_system_same` (the
+  same faces in the same order, and each pair of branches equal) first.
+  A repin of the kernel must keep it.
 
 ## 14. Questions for the USER
 
@@ -443,17 +494,62 @@ recommendation (a).
   (a) keep it until the slice that gives the first section 4 slot (S2
   or S4), which replaces it with section 4 rows; (b) cut it in S1.
   Recommendation: (a).
+  RULED: (a), USER 11-02 (S2 STEP 0): S2 replaces the rows.
 - Q-S1-4: The section 5.4 "list of field inequalities" for a key space
   with more than one argument. For `allow(a.o, a.s)` against
   `allow(b.o, b.s)` the test is `a.o != b.o` OR `a.s != b.s`. (a) store
   an AND of OR-clauses (`IndClause`); a one-argument space gives clauses
   with one literal each; (b) allow only one-argument key spaces.
   Recommendation: (a).
+  RULED: (a), USER 11-02 (S2 STEP 0).
 - Q-S1-5: The `Pfin` idempotence cell. (a) `midem : (s : Pfin A) -> m s s
   = s`, which uses only recursive fields and passes the quorum cell rule;
   (b) the singleton form `m (eta x) (eta x) = eta x`, which can hit
   REFUSE_CELL. Recommendation: (a).
+  RULED: (a), USER 11-02 (S2 STEP 0).
 - Q-S1-6: Field access in a pattern. Section 5.1 writes `b.input`, but the
   kernel has no `.` token. (a) add `.` only inside a pattern and lower it
   to `proj_app`; (b) write `utxo (input b)` and change the 5.1 example.
   Recommendation: (a).
+  RULED: (a), USER 11-02 (S2 STEP 0).
+- Q-S2-1: The orbit-lang sample in src/front/front.c (the Orbit family
+  after `act`, the DAO prelude after `outcomeSet`; K6). (a) S2 removes
+  the splice and drops or rewrites the 15 check rows and 5 examples that
+  use it; a kernel code that would lose its last row gets a row with
+  section 4 names; (b) keep the splice to a later slice.
+  RULED: (a), USER 11-02 (S2).
+  DONE (S2): the splice is gone. S2 drops 13 obsolete check rows,
+  3 examples and 16 eval rows, and rewrites 9 REFUSE_SIG fixtures.
+  Review keeps the standalone signature example, the OrbitN theorem
+  in bagorbit.lang, and the independent PATH_END rows beta-critical
+  and perm-member0-wrong. Only the final DAO section of bagorbit.lang
+  needs the removed Orbit splice.
+- Q-S2-2: The form of `Amount`. (a) a nominal builtin type that a guest
+  can use, with `amountAdd` and `amountSub` that give `Maybe Amount`
+  (`none` at overflow and at underflow), an `Amount` literal form, and
+  eval and lower ops; (b) a domain alias of `Nat`.
+  RULED: (a), USER 11-02 (S2).
+- Q-S2-3: `Asset` is a program slot, and domain/domain.lang loads before
+  the program. (a) after a program defines `Asset`, the front end splices
+  the value prelude (`Value`, `Balance`, `[[ ]]v`, `Delta`, `neg`,
+  `Balanced`), as the orbit sample did after `act`; (b) each domain
+  definition takes the asset type as a parameter.
+  RULED: (a), USER 11-02 (S2).
+- Q-S2-4: The scope of `REFUSE_BAG_NONCOMM`. Fold and elim cases are
+  positional. (a) a fold or elim out of `Bag` with a wrong count of cases
+  gives `REFUSE_BAG_NONCOMM`; other families keep `TYPE_MISMATCH`; (b)
+  tag the cases, so that only a missing `comm` case gives it.
+  RULED: (a), USER 11-02 (S2).
+- Q-S2-5: the equality on `Asset` for `[[ ]]v`. RULED (a) by the USER,
+  2026-11-02: a C builtin `valueCount` (eval only, as `len`) counts with
+  the conversion check of the evaluator. `check_sig` requires that the
+  `Asset` slot is first-order data (no path constructor, no function).
+- Q-S2-6: L8, `Balanced` is closed under `+`. RULED (a) by the USER,
+  2026-11-02: the prelude builds `deltaAdd` (a nested fold) and the path
+  `balancedAdd`.
+- Q-S2-7: the cost of `conv_system` at `balancedAdd`. RULED (a) by the
+  USER, 2026-11-02: the kernel fast path `conv_system_same` in
+  `src/front/eval.c`. The all-pairs cover test of `conv_system` is
+  exponential in the hcomp depth of `deltaExt` and `deltaAdd`. The fast
+  path accepts a pair only when the cover test also accepts it.
+  `ARENA_LIMIT_BYTES` stays 1 GiB (section 13 K7).

@@ -1,0 +1,3 @@
+-- The value prelude follows the program def Asset (S2, Q-S2-3 (a)). With
+-- no Asset, Delta is not a name.
+def valueNone : Type 0 := Delta

@@ -1,0 +1,37 @@
+-- The value prelude (S2, USER ruling Q-S2-3 (a)): after a program defines
+-- Asset, the front end puts Value, Delta, deltaZero, deltaSub, neg,
+-- Balanced, the L8 paths deltaSelf and balancedNeg, Balance, valueBal
+-- ([[ ]]v), balanceAdd, valueSwap, deltaShift, deltaExt, deltaAdd,
+-- deltaAddZero and the L8 path balancedAdd after it. Delta is
+-- the formal differences of Value: deltaEq is a path from deltaOf a b to
+-- deltaOf c d when a + d = c + b. Subtraction is total (X13).
+def Asset : Type 0 := Size
+def valueGold : Value := bagOf Asset sz0
+def valueSilver : Value := bagOf Asset (szS sz0)
+def valueBoth : Value := bagOp Asset valueGold valueSilver
+-- neg swaps the two sides; it computes on points.
+def valueNegAt : Path Delta (neg (deltaSub valueGold valueSilver)) (deltaSub valueSilver valueGold) := refl
+def valueNegZero : Path Delta (neg deltaZero) deltaZero := refl
+-- L8: a - a = 0.
+def valueSelf : Path Delta (deltaSub valueBoth valueBoth) deltaZero := deltaSelf valueBoth
+-- neg keeps Balanced.
+def valueBalanced : Balanced (deltaSub valueGold valueGold) := deltaSelf valueGold
+def valueNegBalanced : Balanced (neg (deltaSub valueGold valueGold)) :=
+  balancedNeg (deltaSub valueGold valueGold) valueBalanced
+-- [[ ]]v (valueBal, USER ruling Q-S2-5 (a)): the count of each asset in a
+-- Value.
+def valueGoldCount : Amount := valueBal valueBoth sz0
+def valueGoldTwice : Amount := valueBal (bagOp Asset valueGold valueGold) sz0
+def valueGoldNone : Amount := valueBal valueSilver sz0
+def valueEmptyCount : Amount := valueBal (bagUnit Asset) sz0
+-- The count is the same at each point of a bagComm path.
+def valueCommPath : Path Amount (valueBal (bagOp Asset valueGold valueSilver) sz0) (valueBal (bagOp Asset valueSilver valueGold) sz0) :=
+  fun (i : I) => valueBal (bagComm Asset valueGold valueSilver i) sz0
+-- balanceAdd adds two balances at an asset: none at overflow.
+def valueBalSum : Maybe Amount := balanceAdd (valueBal valueGold) (valueBal valueBoth) sz0
+-- deltaAdd adds two differences (USER ruling Q-S2-6 (a)); it computes on points.
+def valueAddAt : Path Delta (deltaAdd (deltaSub valueGold valueSilver) (deltaSub valueSilver valueGold)) (deltaSub valueBoth (bagOp Asset valueSilver valueGold)) := refl
+def valueAddZero : Path Delta (deltaAdd deltaZero deltaZero) deltaZero := deltaAddZero
+-- L8: deltaAdd keeps Balanced.
+def valueAddBalanced : Balanced (deltaAdd (deltaSub valueGold valueGold) (deltaSub valueSilver valueSilver)) :=
+  balancedAdd (deltaSub valueGold valueGold) (deltaSub valueSilver valueSilver) (deltaSelf valueGold) (deltaSelf valueSilver)

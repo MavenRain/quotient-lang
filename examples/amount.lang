@@ -1,0 +1,22 @@
+-- Amount (S2, USER ruling Q-S2-2 (a)): a u64 that a guest program can
+-- use. amountAdd and amountSub give Maybe Amount: none at overflow and at
+-- underflow, never a trap. A numeral is an Amount literal when the wanted
+-- type is Amount.
+def amountTen : Amount := 10
+def amountPlus : Amount -> Amount -> Maybe Amount :=
+  fun (x : Amount) (y : Amount) => amountAdd x y
+def amountMinus : Amount -> Amount -> Maybe Amount :=
+  fun (x : Amount) (y : Amount) => amountSub x y
+-- Add y, then take z back: none when x + y overflows or when z is more
+-- than x + y.
+def amountMove : Amount -> Amount -> Amount -> Maybe Amount :=
+  fun (x : Amount) (y : Amount) (z : Amount) => bind (amountAdd x y) (fun (s : Amount) => amountSub s z)
+-- The Wasm entries give an Amount, not a Maybe Amount (an entry with an
+-- Option result does not lower). At none the balance stays x: the abort
+-- value keeps the state.
+def amountCredit : Amount -> Amount -> Amount :=
+  fun (x : Amount) (y : Amount) => option x (fun (s : Amount) => s) (amountAdd x y)
+def amountDebit : Amount -> Amount -> Amount :=
+  fun (x : Amount) (y : Amount) => option x (fun (s : Amount) => s) (amountSub x y)
+def amountMoveOr : Amount -> Amount -> Amount -> Amount :=
+  fun (x : Amount) (y : Amount) (z : Amount) => option x (fun (s : Amount) => s) (amountMove x y z)

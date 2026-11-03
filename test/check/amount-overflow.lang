@@ -1,0 +1,2 @@
+-- REFUSE_OVERFLOW (S2): amountAdd gives Maybe Amount, not an Amount.
+def total : Amount := amountAdd 1 2

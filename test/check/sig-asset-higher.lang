@@ -1,0 +1,3 @@
+-- The Asset slot must be first-order data (USER ruling Q-S2-5 (a)): Bag
+-- Size has path constructors, so the count of [[ ]]v is not sound.
+def Asset : Type 0 := Bag Size
