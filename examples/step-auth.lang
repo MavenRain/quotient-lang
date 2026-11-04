@@ -1,0 +1,31 @@
+-- The authorized transaction slots on the generated family Body: witnessOk, AuthTx and Mempool (USER ruling Q-S5-31 (a)).
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Cfg : Size -> Size -> Key
+def lim : Size := szS sz0
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from), Bal(b.to), Cfg(b.to, lim)] writes [Bal(b.to)]
+family Mint := mint (dst : Size) footprint b reads [Cfg(b.dst, lim)] writes [Bal(b.dst)]
+family Hold := hold (who : Size) footprint b reads [Bal(b.who)] writes [Bal(b.who)]
+step Pay p := [get x := Bal(p.from), get z := Cfg(p.to, lim), let y := x, set Bal(p.to) := y]
+step Mint q := [get v := Cfg(q.dst, lim), set Bal(q.dst) := v]
+def s0 : State := fun (k : Key) => elim (fun (t : Key) => Val) (fun (a : Size) => a) (fun (a : Size) (c : Size) => szS c) k
+def two : Size := szS (szS sz0)
+def r1 : Val := effRun (step (bodyPay (mk two sz0))) s0 (Bal sz0)
+def r2 : Val := effRun (step (bodyPay (mk two sz0))) s0 (Bal lim)
+def r3 : Val := effRun (step (bodyPay (mk two sz0))) s0 (Bal two)
+def r4 : Val := effRun (step (bodyPay (mk sz0 lim))) s0 (Bal lim)
+def t1 : Val := effRun (step (bodyMint (mint sz0))) s0 (Bal sz0)
+def t2 : Val := effRun (step (bodyMint (mint sz0))) s0 (Bal lim)
+def u1 : Val := effRun (step (bodyHold (hold lim))) s0 (Bal lim)
+def Witness : Type 0 := Size
+def witnessOk : Body -> Witness -> Sum Unit Unit :=
+  fun (b : Body) (w : Witness) => btrue
+def bPay : Body := bodyPay (mk two sz0)
+def txA : AuthTx :=
+  pack bPay (trunc1 (Sigma (w : Witness) (Path (Sum Unit Unit) (witnessOk bPay w) btrue)) (pack sz0 refl))
+def txB : AuthTx :=
+  pack bPay (trunc1 (Sigma (w : Witness) (Path (Sum Unit Unit) (witnessOk bPay w) btrue)) (pack (szS sz0) refl))
+def txSame : Path AuthTx txA txB := authTxEq txA txB refl
+def pool : Mempool := union AuthTx (pfinOf AuthTx txA) (pfinOf AuthTx txB)
+def bodyB : Body := witness txB
+def runB : Val := effRun (step (witness txB)) s0 (Bal sz0)

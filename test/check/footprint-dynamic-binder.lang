@@ -1,0 +1,4 @@
+-- S5 (X17, u4 item 5): c.from does not project the binder b.
+-- REFUSE_FOOTPRINT_DYNAMIC.
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) footprint b reads [Bal(c.from)] writes [Bal(b.from)]

@@ -1,0 +1,2 @@
+-- Q-S5-12 (a): a footprint family has one constructor.
+family Pay := mk (from : Size) | other (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.from)]

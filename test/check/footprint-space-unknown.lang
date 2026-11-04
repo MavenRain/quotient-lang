@@ -1,0 +1,4 @@
+-- S5 (X17, u4 item 5): the pattern Cfg names no declared key space.
+-- NAME_UNKNOWN (Q-S5-16 (a)).
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) footprint b reads [Cfg(b.from)] writes [Bal(b.from)]

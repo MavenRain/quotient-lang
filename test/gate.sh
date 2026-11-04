@@ -242,6 +242,36 @@ ir_refused spine.lang "REFUSE_LOWER: trapHead: heap use has no static bound"
 ir_refused hop.lang "REFUSE_LOWER: hopDepth: a recursive fold over a block of families"
 echo "ir refusals: $irrefusals checked"
 
+# The Ind matrix (S5 unit 5, Q-S5-32 (a)). Each line of test/ind/expect.txt is
+# `NAME ROW`: `langc --kit ind` of examples/ind-*.lang and test/ind/*.lang must
+# exit 0 and print the rows of NAME.lang in the file order. A refused program
+# stays refused, and a program with no footprint family prints no row.
+: >"$tmp/ind.txt"
+for prog in examples/ind-*.lang test/ind/*.lang; do
+  name=$(basename "$prog" .lang)
+  status=0
+  build/langc --kit ind "$prog" >"$tmp/ind.one" 2>"$tmp/err" || status=$?
+  [ "$status" -eq 0 ] || { echo "FAIL ind $name: want exit 0, got exit $status: $(head -n 1 "$tmp/err")"; fail=$((fail + 1)); }
+  awk -v n="$name" '{print n " " $0}' "$tmp/ind.one" >>"$tmp/ind.txt"
+done
+cmp -s "$tmp/ind.txt" test/ind/expect.txt || { echo "FAIL ind rows: the rows are not the rows of test/ind/expect.txt"; fail=$((fail + 1)); }
+indrows=$(awk 'END {print NR}' "$tmp/ind.txt")
+status=0
+build/langc $(kit test/check/kit.txt step-reads-witness.lang) ind test/check/step-reads-witness.lang >"$tmp/ind.one" 2>"$tmp/err" || status=$?
+case "$status:$(head -n 1 "$tmp/err")" in
+  "1:langc: REFUSE_WITNESS_READ: "*) ;;
+  *) echo "FAIL ind step-reads-witness: want exit 1 and REFUSE_WITNESS_READ, got exit $status"; fail=$((fail + 1)) ;;
+esac
+if [ -s "$tmp/ind.one" ]; then
+  echo "FAIL ind step-reads-witness: a refused program printed a row"
+  fail=$((fail + 1))
+fi
+status=0
+build/langc $(kit examples/kit.txt functions.lang) ind examples/functions.lang >"$tmp/ind.one" 2>"$tmp/err" || status=$?
+[ "$status" -eq 0 ] && [ ! -s "$tmp/ind.one" ] || { echo "FAIL ind functions: want exit 0 and no row, got exit $status"; fail=$((fail + 1)); }
+indrows=$((indrows + 2))
+echo "ind rows: $indrows checked"
+
 # The IR lowerings (S3): `langc
 # --kit check` must accept each file and `langc --kit ir` must exit 0. The
 # IR text of natops.lang and of block.lang (S3) must be

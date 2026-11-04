@@ -1,0 +1,6 @@
+-- The Ind matrix (S5 unit 5, Q-S5-32 (a)): an ind pair. Pay and Cast use different key spaces, so they always commute.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]

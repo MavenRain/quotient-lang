@@ -10,7 +10,9 @@ deep.lang PARSE_DEPTH
 state-no-ctor.lang PARSE_EXPECT
 dangling-at.lang PARSE_EXPECT
 system-top.lang PARSE_EXPECT
-irrelevant-dot.lang LEX_CHAR
+irrelevant-dot.lang PARSE_EXPECT
 irrelevant-brace.lang LEX_CHAR
 irrelevant-at.lang PARSE_EXPECT
 irrelevant-attr.lang LEX_CHAR
+footprint-no-binder.lang PARSE_EXPECT
+step-bad-item.lang PARSE_EXPECT

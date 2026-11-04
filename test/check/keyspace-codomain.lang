@@ -1,0 +1,2 @@
+-- Q-S5-13 (a): the codomain of a key space is the slot Key.
+keyspace Bal : Nat -> Nat

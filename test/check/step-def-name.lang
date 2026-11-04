@@ -1,0 +1,6 @@
+-- A program def cannot have the name stepPay: the front end makes the def stepPay from the step of Pay (Q-S5-26 (a)).
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+step Pay p := [get x := Bal(p.from), set Bal(p.to) := x]
+def stepPay : Pay -> Eff := fun (p : Pay) => just

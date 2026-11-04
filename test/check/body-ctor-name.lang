@@ -1,0 +1,6 @@
+-- A program def with the name of a generated Body constructor (Q-S5-28 (a)): REFUSE_NAME.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+step Pay p := [get x := Bal(p.from), set Bal(p.to) := x]
+def bodyPay : Size := sz0

@@ -1,0 +1,5 @@
+-- S5 (u4n): with a key space in the program, Key is the generated family
+-- of the key spaces (Q-S5-23 (a)): a program def of Key before the key
+-- space is REFUSE_SIG.
+def Key : Type 0 := Size
+keyspace Bal : Size -> Key

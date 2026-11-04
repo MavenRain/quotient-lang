@@ -1,0 +1,3 @@
+-- Q-S5-12 (a): a footprint family is not indexed; its constructor has
+-- no `: result`.
+family Tag : Size -> Type 0 := tag (s : Size) : Tag s footprint b reads [Bal(b.s)] writes [Bal(b.s)]

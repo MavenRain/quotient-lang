@@ -1,0 +1,12 @@
+-- The step prelude (S5 u4h, USER rulings Q-S5-7 (a) and Q-S5-18 (a)).
+-- effRun keeps the state when the step aborts (none). effSeq is the
+-- Kleisli composite and just is its unit.
+def Key : Type 0 := Nat
+def Val : Type 0 := Nat
+def start : State := fun (k : Key) => k
+def abort : Eff := fun (s : State) => none
+def setSeven : Eff := fun (s : State) => some (fun (k : Key) => 7)
+def keepAt : Nat -> Val := fun (k : Nat) => effRun abort start k
+def setAt : Nat -> Val := fun (k : Nat) => effRun setSeven start k
+def seqAbortAt : Nat -> Val := fun (k : Nat) => effRun (effSeq setSeven abort) start k
+def seqUnitAt : Nat -> Val := fun (k : Nat) => effRun (effSeq just setSeven) start k

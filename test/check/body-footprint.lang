@@ -1,0 +1,6 @@
+-- S5 (X17, u4i): with a footprint family in the program, Body is the sum
+-- of the footprint families (Q-S5-6 (a)): a program def of the slot Body
+-- is REFUSE_SIG (Q-S5-8 (a)).
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+def Body : Type 0 := Size

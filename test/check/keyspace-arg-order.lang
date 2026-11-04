@@ -1,0 +1,2 @@
+-- Q-S5-13 (a): each argument of a key space has a first-order type.
+keyspace Bal : (Nat -> Nat) -> Key

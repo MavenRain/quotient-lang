@@ -1,0 +1,35 @@
+-- Step locals cannot capture the names used by generated key and state terms.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Cfg : Size -> Key
+def one : Size := szS sz0
+def s0 : State := fun (k : Key) => sz0
+def abortSome : State -> Maybe State := fun (s : State) => none
+family EqBody := eqBody (eqAt : Size) footprint b reads [] writes [Bal(b.eqAt)]
+step EqBody p := [let keyEq := fun (x : Key) (y : Key) => flagYes, set Bal(p.eqAt) := one]
+family BodyLocal := bodyLocal (bodyAt : Size) footprint b reads [] writes [Bal(b.bodyAt)]
+step BodyLocal p := [let p := bodyLocal one, set Bal(p.bodyAt) := one]
+family ProjBody := projBody (projAt : Size) footprint b reads [] writes [Bal(b.projAt)]
+step ProjBody p := [let projAt := fun (x : ProjBody) => one, set Bal(p.projAt) := one]
+family SpaceBody := spaceBody (spaceAt : Size) footprint b reads [] writes [Bal(b.spaceAt)]
+step SpaceBody p := [let Bal := fun (n : Size) => Cfg n, set Bal(p.spaceAt) := one]
+family FlagBody := flagBody (flagAt : Size) footprint b reads [] writes [Bal(b.flagAt)]
+step FlagBody p := [let flagIf := fun (b : Flag) (x : Val) (y : Val) => x, set Bal(p.flagAt) := one]
+family SomeBody := someBody (someAt : Size) footprint b reads [] writes [Bal(b.someAt)]
+step SomeBody p := [let some := abortSome, set Bal(p.someAt) := one]
+family ScopeBody := scopeBody (scopeAt : Size) (scopeNext : Size) footprint b reads [] writes [Bal(b.scopeAt), Bal(b.scopeNext)]
+step ScopeBody p := [let x := one, let y := (fun (x : Size) => x) sz0, let z := (fun (u : Size) => x) sz0, let x := y, set Bal(p.scopeAt) := x, set Bal(p.scopeNext) := z]
+def eqInside : Val := effRun (stepEqBody (eqBody sz0)) s0 (Bal sz0)
+def eqOutside : Val := effRun (stepEqBody (eqBody sz0)) s0 (Bal one)
+def bodyInside : Val := effRun (stepBodyLocal (bodyLocal sz0)) s0 (Bal sz0)
+def bodyOutside : Val := effRun (stepBodyLocal (bodyLocal sz0)) s0 (Bal one)
+def projInside : Val := effRun (stepProjBody (projBody sz0)) s0 (Bal sz0)
+def projOutside : Val := effRun (stepProjBody (projBody sz0)) s0 (Bal one)
+def spaceInside : Val := effRun (stepSpaceBody (spaceBody sz0)) s0 (Bal sz0)
+def spaceOutside : Val := effRun (stepSpaceBody (spaceBody sz0)) s0 (Cfg sz0)
+def flagInside : Val := effRun (stepFlagBody (flagBody sz0)) s0 (Bal sz0)
+def flagOutside : Val := effRun (stepFlagBody (flagBody sz0)) s0 (Bal one)
+def someInside : Val := effRun (stepSomeBody (someBody sz0)) s0 (Bal sz0)
+def someOutside : Val := effRun (stepSomeBody (someBody sz0)) s0 (Bal one)
+def scopeInside : Val := effRun (stepScopeBody (scopeBody sz0 one)) s0 (Bal sz0)
+def scopeNextValue : Val := effRun (stepScopeBody (scopeBody sz0 one)) s0 (Bal one)

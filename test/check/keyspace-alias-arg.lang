@@ -1,0 +1,4 @@
+-- Q-S5-25 (a): an alias def of Size is not one of the six key argument forms.
+def Val : Type 0 := Size
+def Sz : Type 0 := Size
+keyspace Bal : Sz -> Key

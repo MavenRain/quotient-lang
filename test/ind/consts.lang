@@ -1,0 +1,10 @@
+-- Ind rows (S5 unit 5, Q-S5-33 (a)): constant pattern arguments compare by value. one and uno have one value, two has a different value.
+def Val : Type 0 := Size
+keyspace Cfg : Size -> Size -> Key
+def one : Size := szS sz0
+def uno : Size := szS sz0
+def two : Size := szS (szS sz0)
+family Fa := fa (x : Size) footprint b reads [Cfg(b.x, one)] writes [Cfg(b.x, one)]
+family Fb := fb (y : Size) footprint b reads [Cfg(b.y, two)] writes [Cfg(b.y, two)]
+family Fc := fc (w : Size) footprint b reads [Cfg(b.w, uno)] writes [Cfg(b.w, uno)]
+family Fd := fd (z : Size) footprint b reads [Cfg(uno, b.z)] writes [Cfg(uno, b.z)]

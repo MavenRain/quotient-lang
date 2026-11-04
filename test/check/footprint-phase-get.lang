@@ -1,0 +1,8 @@
+-- S5 u4 item 7 (X17): the phase is read, decide, write. A get after a
+-- set gives REFUSE_FOOTPRINT_PHASE, also when its pattern is in the reads.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Cfg : Size -> Size -> Key
+def lim : Size := szS sz0
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from), Bal(b.to), Cfg(b.to, lim)] writes [Bal(b.to)]
+step Pay p := [get x := Bal(p.from), set Bal(p.to) := x, get y := Bal(p.to)]

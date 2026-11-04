@@ -1,0 +1,4 @@
+-- S5 (X17, u4i): a footprint family with the program name txid. It would
+-- skip the type Body -> Digest (law L5): REFUSE_SIG (Q-S5-19 (a)).
+keyspace Bal : Size -> Key
+family txid := mk (from : Size) footprint b reads [Bal(b.from)] writes [Bal(b.from)]

@@ -1,0 +1,9 @@
+-- S5 u4 item 7 (X17, Q-S5-21 (a)): a field argument must project the
+-- step binder p. The footprint binder b is not in scope in the step:
+-- REFUSE_FOOTPRINT_DYNAMIC.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Cfg : Size -> Size -> Key
+def lim : Size := szS sz0
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from), Bal(b.to), Cfg(b.to, lim)] writes [Bal(b.to)]
+step Pay p := [get x := Bal(b.from), set Bal(p.to) := x]

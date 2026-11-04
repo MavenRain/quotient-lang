@@ -1,0 +1,4 @@
+-- Q-S5-25 (a): with Size arguments only, the key-eq prelude checks in base mode.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Cfg : Size -> Size -> Key

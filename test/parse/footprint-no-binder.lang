@@ -1,0 +1,1 @@
+family Pay := mk (from : Nat) (to : Nat) footprint reads [Bal(b.from)] writes [Bal(b.to)]

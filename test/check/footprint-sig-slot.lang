@@ -1,0 +1,4 @@
+-- S5 (X17, u4i): a footprint family with the slot name Body. A footprint
+-- family is a summand of Body, not a slot: REFUSE_SIG (Q-S5-19 (a)).
+keyspace Bal : Size -> Key
+family Body := mk (from : Size) footprint b reads [Bal(b.from)] writes [Bal(b.from)]

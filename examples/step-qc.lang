@@ -1,0 +1,39 @@
+-- The quorum certificate slots on the generated family Body: signs, QC and runQ (USER ruling Q-S5-31 (a)).
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Cfg : Size -> Size -> Key
+def lim : Size := szS sz0
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from), Bal(b.to), Cfg(b.to, lim)] writes [Bal(b.to)]
+family Mint := mint (dst : Size) footprint b reads [Cfg(b.dst, lim)] writes [Bal(b.dst)]
+family Hold := hold (who : Size) footprint b reads [Bal(b.who)] writes [Bal(b.who)]
+step Pay p := [get x := Bal(p.from), get z := Cfg(p.to, lim), let y := x, set Bal(p.to) := y]
+step Mint q := [get v := Cfg(q.dst, lim), set Bal(q.dst) := v]
+def s0 : State := fun (k : Key) => elim (fun (t : Key) => Val) (fun (a : Size) => a) (fun (a : Size) (c : Size) => szS c) k
+def two : Size := szS (szS sz0)
+def r1 : Val := effRun (step (bodyPay (mk two sz0))) s0 (Bal sz0)
+def r2 : Val := effRun (step (bodyPay (mk two sz0))) s0 (Bal lim)
+def r3 : Val := effRun (step (bodyPay (mk two sz0))) s0 (Bal two)
+def r4 : Val := effRun (step (bodyPay (mk sz0 lim))) s0 (Bal lim)
+def t1 : Val := effRun (step (bodyMint (mint sz0))) s0 (Bal sz0)
+def t2 : Val := effRun (step (bodyMint (mint sz0))) s0 (Bal lim)
+def u1 : Val := effRun (step (bodyHold (hold lim))) s0 (Bal lim)
+def Node : Type 0 := Sum Unit Unit
+def Sig : Type 0 := Sum Unit Unit
+def sigIsSet : isSet Sig := bitIsSet
+def sigOne : Sig := bfalse
+def sigMul : Sig -> Sig -> Sig := or
+def sigAssoc : (x : Sig) -> (y : Sig) -> (z : Sig) -> Path Sig (sigMul (sigMul x y) z) (sigMul x (sigMul y z)) := orAssoc
+def sigComm : (x : Sig) -> (y : Sig) -> Path Sig (sigMul x y) (sigMul y x) := orComm
+def sigUnitL : (x : Sig) -> Path Sig (sigMul sigOne x) x := orUnitL
+def nodeEq : Node -> Node -> Sum Unit Unit := eqBit
+def quorum : Pfin Node -> Sum Unit Unit := fun (q : Pfin Node) =>
+  elim (fun (s : Sum Unit Unit) => Sum Unit Unit) (fun (u : Unit) => bfalse) (fun (u : Unit) => pfinIn Node nodeEq btrue q) (pfinIn Node nodeEq bfalse q)
+def signs : Node -> Body -> Sig -> Sum Unit Unit := fun (v : Node) (b : Body) (s : Sig) => s
+def bPay : Body := bodyPay (mk two sz0)
+def qcSet : Pfin Node := union Node (pfinOf Node bfalse) (pfinOf Node btrue)
+def qcHas : Sum Unit Unit := quorum qcSet
+def qcAll : (v : Node) -> Path (Sum Unit Unit) (pfinIn Node nodeEq v qcSet) btrue -> Sigma (s : Sig) (Path (Sum Unit Unit) (signs v bPay s) btrue) :=
+  fun (v : Node) (p : Path (Sum Unit Unit) (pfinIn Node nodeEq v qcSet) btrue) => pack btrue (fun (i : I) => btrue)
+def qcPay : QC bPay :=
+  pack qcSet (pack (fun (i : I) => btrue) (trunc1 ((v : Node) -> Path (Sum Unit Unit) (pfinIn Node nodeEq v qcSet) btrue -> Sigma (s : Sig) (Path (Sum Unit Unit) (signs v bPay s) btrue)) qcAll))
+def runQ : Val := effRun (step bPay) s0 (Bal sz0)

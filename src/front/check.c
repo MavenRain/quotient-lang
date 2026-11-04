@@ -94,6 +94,7 @@ typedef enum {
   RULE_PURE,
   RULE_MAP,
   RULE_BIND,
+  RULE_STEP_LET,
   RULE_FILTER,
   RULE_FOLD,
   RULE_UNFOLD,
@@ -199,6 +200,7 @@ static const Builtin BUILTINS[] = {
   {"amountAdd", 2, RULE_AMOUNT2, OP_AMOUNT_ADD, OP_OPTION, 0, VIS_GUEST},
   {"amountSub", 2, RULE_AMOUNT2, OP_AMOUNT_SUB, OP_OPTION, 0, VIS_GUEST},
   {"valueCount", 3, RULE_VALUE_COUNT, OP_VALUE_COUNT, OP_AMOUNT, 0, VIS_GUEST},
+  {"step#let", 2, RULE_STEP_LET, OP_BIND, OP_NAT, 0, VIS_INTERNAL},
 };
 
 #define BUILTIN_COUNT ((uint32_t)(sizeof BUILTINS / sizeof BUILTINS[0]))
@@ -1059,6 +1061,14 @@ static const Core *rule_map(Call *k) {
 }
 
 /* bind m f */
+/* A bare lambda `fun y => t`: a TERM_LAM with no binder type. */
+static int is_bare_lam(const Term *t) {
+  return t != NULL && t->kind == TERM_LAM && t->left == NULL;
+}
+
+static const Core *bare_fn_into(Checker *c, const Term *t, const Value *dom, const Value **result);
+static const Core *rule_step_let(Call *k);
+
 static const Core *rule_bind(Call *k) {
   Checker *c = k->c;
   Carrier carrier = CARRIER_OPTION;
@@ -1073,7 +1083,8 @@ static const Core *rule_bind(Call *k) {
     return NULL;
   if (!carrier_of(mt, &carrier, &a))
     return not_carrier(k, mt);
-  f = fn_into(c, k->args[1], a, k->hint, &res);
+  /* Q-S5-26 (a): a bare `fun y => t` takes its binder type from the first argument. */
+  f = is_bare_lam(k->args[1]) && k->hint == NULL ? bare_fn_into(c, k->args[1], a, &res) : fn_into(c, k->args[1], a, k->hint, &res);
   if (f == NULL)
     return NULL;
   if (!carrier_of(res, &result_carrier, &b) || result_carrier != carrier)
@@ -2495,6 +2506,8 @@ static const Core *rule(Call *k) {
     return rule_map(k);
   case RULE_BIND:
     return rule_bind(k);
+  case RULE_STEP_LET:
+    return rule_step_let(k);
   case RULE_FILTER:
     return rule_filter(k);
   case RULE_FOLD:
@@ -3247,6 +3260,10 @@ static const char *name_owner(const Checker *c, const char *name) {
     }
     if (m->ctors[i].name != NULL && strcmp(m->ctors[i].name, name) == 0)
       return "a domain constructor";
+  }
+  for (i = 0; i < m->space_count; i++) {
+    if (strcmp(m->spaces[i].name, name) == 0)
+      return "a key space";
   }
   i = find_def(m, name);
   if (i == NO_DEF)
@@ -4117,12 +4134,33 @@ static const Value *sig_global_value(Machine *m, uint32_t k) {
   return eval_core(m, NULL, &g);
 }
 
-/* The codomain of the function type TV at the level LEVEL, if the domain
-   of TV converts with the def NAME; NULL if not. */
-static const Value *sig_arrow(Checker *c, const Value *tv, uint32_t level, const char *name) {
+/* The type value of the sig name NAME: the value of the def NAME, else the
+   type value of the family NAME (a TERM_VAR, check_type, then here, as
+   step_type gives it). USER ruling Q-S5-31 (a): the generated Body is a
+   family, not a def. NULL if NAME has no def and no family. */
+static const Value *sig_name_value(Checker *c, const char *name) {
   Machine *m = c->m;
   uint32_t k = sig_def_index(m, name);
-  if (k == m->def_count || tv == NULL || tv->kind != VAL_PI || !conv_values(m, level, tv->dom, sig_global_value(m, k)))
+  Term v;
+  uint64_t level = 0;
+  const Core *t;
+  if (k != m->def_count)
+    return sig_global_value(m, k);
+  if (find_family(m, name) == NO_FAMILY)
+    return NULL;
+  memset(&v, 0, sizeof v);
+  v.kind = TERM_VAR;
+  v.name = name;
+  t = check_type(c, &v, &level);
+  return t == NULL ? NULL : here(c, t);
+}
+
+/* The codomain of the function type TV at the level LEVEL, if the domain
+   of TV converts with the type value of the sig name NAME; NULL if not. */
+static const Value *sig_arrow(Checker *c, const Value *tv, uint32_t level, const char *name) {
+  Machine *m = c->m;
+  const Value *want = tv == NULL || tv->kind != VAL_PI ? NULL : sig_name_value(c, name);
+  if (want == NULL || !conv_values(m, level, tv->dom, want))
     return NULL;
   return closure_apply(m, tv, val_var(m, level));
 }
@@ -4173,6 +4211,28 @@ static int sig_arg_ok(Checker *c, const char *name, const Value *tv) {
 static int program_defines(const Checker *c, const char *name) {
   size_t i;
   for (i = 0; i < c->decls->count && !(c->decls->items[i].origin == ORIGIN_PROGRAM && strcmp(c->decls->items[i].name, name) == 0); i++)
+    ;
+  return i < c->decls->count;
+}
+
+/* Q-S5-6 (a) and Q-S5-8 (a): 1 if the program declares a footprint
+   family. Then the slot Body is the sum of the footprint families, and a
+   program def of Body is REFUSE_SIG. The scan covers all the program
+   declarations, so the order of the def and the family does not matter. */
+static int program_footprint(const Checker *c) {
+  size_t i;
+  for (i = 0; i < c->decls->count && !(c->decls->items[i].origin == ORIGIN_PROGRAM && c->decls->items[i].kind == DECL_FAMILY && c->decls->items[i].footprint != NULL); i++)
+    ;
+  return i < c->decls->count;
+}
+
+/* Q-S5-23 (a): 1 if the program declares a key space. Then Key is the
+   generated family of the key spaces, and a program def of Key is
+   REFUSE_SIG (kernel_sig). The scan covers all the program declarations,
+   so the order of the def and the key space does not matter. */
+static int program_keyspace(const Checker *c) {
+  size_t i;
+  for (i = 0; i < c->decls->count && !(c->decls->items[i].origin == ORIGIN_PROGRAM && c->decls->items[i].kind == DECL_KEYSPACE); i++)
     ;
   return i < c->decls->count;
 }
@@ -4291,6 +4351,16 @@ static int kernel_sig(Checker *c, const Decl *d) {
   case SIG_DEFINED:
     return FAIL(c, "REFUSE_SIG", "%s is a defined name of the design signature (PLAN section 4); the kernel gives it at its slice (PLAN section 12)", d->name);
   case SIG_SLOT:
+    /* Q-S5-8 (a) (u4v): as for Key, a program def of Body gives REFUSE_SIG
+       before and after the generated Body family (front.c body_family). */
+    if (d->kind == DECL_DEF && d->origin == ORIGIN_PROGRAM && strcmp(d->name, "Body") == 0 && program_footprint(c))
+      return FAIL(c, "REFUSE_SIG", "the slot Body is the sum of the footprint families (Q-S5-6 (a)): a program with a footprint family must not define Body (Q-S5-8 (a))");
+    /* Q-S5-23 (a): with a key space in the program, the front end makes
+       Key (key_family). This rule is before name_free, so a program def
+       of Key gives REFUSE_SIG before and after the generated family. */
+    if (strcmp(d->name, "Key") == 0 && d->kind == DECL_DEF && program_keyspace(c))
+      return FAIL(c, "REFUSE_SIG", "the slot Key is the generated family of the key spaces (Q-S5-23 (a)): a program with a key space must not define Key");
+    break;
   case SIG_PROGRAM:
     break;
   }
@@ -4823,17 +4893,478 @@ static int check_cofamily(Checker *c, const Decl *d) {
   return 1;
 }
 
+/* Q-S5-12 (a): a footprint clause (X17) goes only on a family of one sort
+   with one constructor and no `: result`. The checker refuses a footprint
+   on the state form, on a cofamily, on a sort of an `and` block, on a
+   family with more than one constructor and on a constructor with
+   `: result`. D is the first sort of its block. */
+static int footprint_shape(Checker *c, const Decl *d) {
+  size_t count = d->block_count > 0u ? d->block_count : 1u;
+  size_t s;
+  for (s = 0; s < count; s++) {
+    const Decl *e = &d[s];
+    if (e->footprint == NULL)
+      continue;
+    if (e->is_state)
+      return FAIL(c, "REFUSE_FOOTPRINT_SHAPE", "%s is the state form with a footprint clause; a footprint clause goes on a family (Q-S5-12 (a))", e->name);
+    if (e->kind == DECL_COFAMILY)
+      return FAIL(c, "REFUSE_FOOTPRINT_SHAPE", "%s is a cofamily with a footprint clause; a footprint clause goes on a family (Q-S5-12 (a))", e->name);
+    if (count > 1u)
+      return FAIL(c, "REFUSE_FOOTPRINT_SHAPE", "%s is a sort of an and block with a footprint clause; a footprint family is a block of one sort (Q-S5-12 (a))", e->name);
+    if (e->param_count > 0u)
+      return FAIL(c, "REFUSE_FOOTPRINT_SHAPE", "%s has %zu parameters and a footprint clause; a footprint family has no parameters, as a Body summand is a closed type (Q-S5-17 (a), Q-S5-6 (a))", e->name, e->param_count);
+    if (e->ctor_count != 1u)
+      return FAIL(c, "REFUSE_FOOTPRINT_SHAPE", "%s has %zu constructors; a footprint family has one constructor (Q-S5-12 (a))", e->name, e->ctor_count);
+    if (e->ctors[0].result != NULL)
+      return FAIL(c, "REFUSE_FOOTPRINT_SHAPE", "%s has a footprint clause and its constructor %s has a result `: F ...`; a footprint family is not indexed (Q-S5-12 (a))", e->name, e->ctors[0].name);
+  }
+  return 1;
+}
+
+/* The index of the key space NAME in the key space table, or
+   m->space_count when no key space has that name. */
+static size_t find_space(const Machine *m, const char *name) {
+  size_t i;
+  for (i = 0; i < m->space_count; i++) {
+    if (strcmp(m->spaces[i].name, name) == 0)
+      return i;
+  }
+  return m->space_count;
+}
+
+/* Q-S5-15 (a) (u4g): the type FOUND of the footprint pattern argument WHAT
+   is the key space argument type WANT. TYPE_MISMATCH on a miss. */
+static int footprint_arg_type(Checker *c, const Decl *d, const KeyPat *kp, const Value *found, const Value *want, const char *what) {
+  if (found != NULL && want != NULL && conv_values(c->m, c->level, found, want))
+    return 1;
+  return FAIL(c, "TYPE_MISMATCH", "the argument %s of the pattern %s in the footprint of %s has the type %s; the key space %s wants %s at its position (Q-S5-15 (a))", what, kp->space, d->name, found != NULL ? show(c, found) : "?", kp->space, want != NULL ? show(c, want) : "?");
+}
+
+/* Q-S5-15 (a), Q-S5-17 (a) (u4g): the type of the field J of CI. A
+   footprint family has no parameters (footprint_shape), so a field type
+   that uses no earlier field is closed: eval it in the empty env. A field
+   type that uses an earlier field is not a closed key argument type. */
+static int footprint_field_type(Checker *c, const Decl *d, const CtorInfo *ci, const KeyPat *kp, uint32_t j, const Value *want) {
+  const FieldInfo *fi = &ci->fields[j];
+  if (fi->dependent || fi->over_recursive || fi->path)
+    return FAIL(c, "TYPE_MISMATCH", "the argument %s.%s of the pattern %s in the footprint of %s: the type of the field %s uses an earlier field, so it is not a closed key argument type (Q-S5-17 (a))", d->footprint->binder, fi->name, kp->space, d->name, fi->name);
+  return footprint_arg_type(c, d, kp, eval_core(c->m, NULL, fi->type), want, fi->name);
+}
+
+/* u4 item 5 (X17, survey sec 1): an argument of a footprint pattern is
+   static. A numeral fits. A name is a closed def (find_def). `b.field`
+   projects the binder b to a field of the one constructor CI of the
+   family (the proj_app lookup). Q-S5-15 (a) (u4g): the argument has
+   the key space argument type WANT at its position (TYPE_MISMATCH). */
+static int footprint_arg(Checker *c, const Decl *d, const CtorInfo *ci, const KeyPat *kp, const PatArg *pa, const Value *want) {
+  uint32_t j;
+  uint32_t def = NO_DEF;
+  switch (pa->kind) {
+  case PAT_ARG_NAT:
+    return footprint_arg_type(c, d, kp, nat_type(c), want, "a numeral");
+  case PAT_ARG_NAME:
+    def = pa->name != NULL ? find_def(c->m, pa->name) : NO_DEF;
+    if (def != NO_DEF)
+      return footprint_arg_type(c, d, kp, c->m->defs[def].type, want, pa->name);
+    return FAIL(c, "REFUSE_FOOTPRINT_DYNAMIC", "the argument %s of the pattern %s in the footprint of %s is not a closed def; an argument is b.field, a numeral or a closed def (X17)", pa->name != NULL ? pa->name : "?", kp->space, d->name);
+  case PAT_ARG_FIELD:
+    break;
+  }
+  if (pa->base == NULL || pa->name == NULL || strcmp(pa->base, d->footprint->binder) != 0)
+    return FAIL(c, "REFUSE_FOOTPRINT_DYNAMIC", "the argument %s.%s of the pattern %s in the footprint of %s does not project the binder %s; an argument is b.field, a numeral or a closed def (X17)", pa->base != NULL ? pa->base : "?", pa->name != NULL ? pa->name : "?", kp->space, d->name, d->footprint->binder);
+  for (j = 0; j < ci->field_count; j++) {
+    if (ci->fields[j].name != NULL && strcmp(ci->fields[j].name, pa->name) == 0)
+      return footprint_field_type(c, d, ci, kp, j, want);
+  }
+  return FAIL(c, "REFUSE_FOOTPRINT_DYNAMIC", "the argument %s.%s of the pattern %s in the footprint of %s: the constructor %s has no field %s (X17)", pa->base, pa->name, kp->space, d->name, ci->name, pa->name);
+}
+
+/* u4 item 5: each pattern of a footprint clause names a key space of the
+   key space table and has its arity (Q-S5-16 (a): NAME_UNKNOWN for a
+   space that is not declared, REFUSE_KEYSPACE for a wrong count). Each
+   argument is static (footprint_arg). */
+static int footprint_pats(Checker *c, const Decl *d, const CtorInfo *ci, const KeyPat *pats, size_t n) {
+  const Machine *m = c->m;
+  size_t p;
+  size_t a;
+  for (p = 0; p < n; p++) {
+    size_t s = find_space(m, pats[p].space);
+    if (s == m->space_count)
+      return FAIL(c, "NAME_UNKNOWN", "the pattern %s in the footprint of %s names no key space; declare keyspace %s before the family (Q-S5-16 (a))", pats[p].space, d->name, pats[p].space);
+    if (pats[p].arg_count != m->spaces[s].arity)
+      return FAIL(c, "REFUSE_KEYSPACE", "the pattern %s in the footprint of %s has %zu arguments; the key space %s has the arity %u (Q-S5-13 (a), Q-S5-16 (a))", pats[p].space, d->name, pats[p].arg_count, pats[p].space, (unsigned)m->spaces[s].arity);
+    for (a = 0; a < pats[p].arg_count; a++) {
+      if (!footprint_arg(c, d, ci, &pats[p], &pats[p].args[a], m->spaces[s].arg_types[a]))
+        return 0;
+    }
+  }
+  return 1;
+}
+
+/* u4 item 5 (X17): the footprint clause of the family D, after
+   check_family. The family is the last one with its name in the family
+   table. footprint_shape gives it one constructor. */
+/* Law L5 at step (S5 survey section 4, USER ruling Q-S4-2 (a)). 1 if a
+   parameter type or a point field type of the family FAM mentions
+   Witness, Authorized or AuthTx, also through the body of a program def
+   (an alias). A footprint family is a summand of Body, so it passes the
+   S4 Body slot rule. */
+static int family_mentions_witness(const Machine *m, uint32_t fam) {
+  uint32_t i, j;
+  for (i = 0; i < m->families[fam].param_count; i++) {
+    if (mentions_witness(m, m->families[fam].param_types[i]))
+      return 1;
+  }
+  for (j = 0; j < m->families[fam].ctor_count; j++) {
+    const CtorInfo *ci = &m->ctors[m->families[fam].first_ctor + j];
+    for (i = 0; i < ci->field_count; i++) {
+      if (mentions_witness(m, ci->fields[i].type))
+        return 1;
+    }
+  }
+  return 0;
+}
+
+static int footprint_decl(Checker *c, const Decl *d) {
+  const Machine *m = c->m;
+  const CtorInfo *ci = NULL;
+  uint32_t i;
+  if (d->footprint == NULL)
+    return 1;
+  /* Q-S5-19 (a): check_sig checks only a def, so a footprint family with
+     a slot or program name would skip the slot rules and the kernel-fixed
+     types. A footprint family is a summand of Body, not a slot. */
+  if (sig_row(d->name) != SIG_COUNT)
+    return FAIL(c, "REFUSE_SIG", "the footprint family %s has a name of the design signature: a footprint family is a summand of Body, not a slot or a program name (Q-S5-19 (a))", d->name);
+  for (i = 0; i < m->family_count; i++) {
+    if (m->families[i].name != NULL && strcmp(m->families[i].name, d->name) == 0)
+      ci = &m->ctors[m->families[i].first_ctor];
+  }
+  if (ci == NULL)
+    return FAIL(c, "INTERNAL", "the footprint family %s is not in the family table", d->name);
+  /* Law L5 at step (S5 survey section 4, USER ruling Q-S4-2 (a)). */
+  if (family_mentions_witness(m, ci->family))
+    return FAIL(c, "REFUSE_WITNESS_READ", "the footprint family %s must not mention Witness, Authorized or AuthTx: a footprint family is a summand of Body, and txid and step read the body only (law L5, PLAN section 6, USER ruling Q-S4-2 (a), S5 survey section 4)", d->name);
+  return footprint_pats(c, d, ci, d->footprint->reads, d->footprint->read_count) && footprint_pats(c, d, ci, d->footprint->writes, d->footprint->write_count);
+}
+
+/* Q-S5-14 (a): a key argument type is a first-order type, the base name
+   Size (the domain family), or Option, Prod and List of key argument
+   types. first_order does not change: the state and slot rules use it. */
+static int key_arg_type(const Machine *m, const Value *t) {
+  uint32_t i;
+  if (first_order(t))
+    return 1;
+  if (t == NULL || t->kind != VAL_OP)
+    return 0;
+  if (t->op == OP_FAMILY)
+    return t->argc == 0u && t->inst < m->family_count && m->families[t->inst].name != NULL && strcmp(m->families[t->inst].name, "Size") == 0;
+  if (t->op != OP_OPTION && t->op != OP_PROD && t->op != OP_LIST)
+    return 0;
+  for (i = 0; i < t->argc; i++) {
+    if (!key_arg_type(m, t->args[i]))
+      return 0;
+  }
+  return 1;
+}
+
+/* Q-S5-25 (a): 1 if the term T of a key argument type is written in one
+   of the six forms that keyEq has an eq term for: the name Nat, Size or
+   Flag, `Option T` or `List T`, or `Prod A B`, with each T, A and B again
+   one of the six forms. An alias def name, Unit, Sum, Fin, a program
+   family and a Pi are not. front.c has the same test for the key-eq
+   prelude. */
+static int key_arg_form(const Term *t) {
+  const Term *head;
+  if (t == NULL)
+    return 0;
+  if (t->kind == TERM_VAR)
+    return t->name != NULL && (strcmp(t->name, "Nat") == 0 || strcmp(t->name, "Size") == 0 || strcmp(t->name, "Flag") == 0);
+  if (t->kind != TERM_APP || t->left == NULL)
+    return 0;
+  head = t->left;
+  if (head->kind == TERM_VAR && head->name != NULL && (strcmp(head->name, "Option") == 0 || strcmp(head->name, "List") == 0))
+    return key_arg_form(t->right);
+  if (head->kind != TERM_APP || head->left == NULL || head->left->kind != TERM_VAR || head->left->name == NULL || strcmp(head->left->name, "Prod") != 0)
+    return 0;
+  return key_arg_form(head->right) && key_arg_form(t->right);
+}
+
+/* Q-S5-13 (a): a key space `Space : A1 -> ... -> An -> Key` (X17) has
+   n >= 1 arguments, each of a key argument type (key_arg_type,
+   Q-S5-14 (a)), and the codomain Key, the generated family of the key
+   spaces (Q-S5-23 (a)). The space has no body. The pattern arity is n.
+   The space goes in the key space table (name, arity and the argument
+   types, Q-S5-15 (a)) for the pattern
+   checks of a footprint (u4 item 5). */
+static int check_keyspace(Checker *c, const Decl *d) {
+  Machine *m = c->m;
+  const Term *t = d->type;
+  size_t arity = 0;
+  size_t n = 0;
+  uint64_t level = 0;
+  const Value **types;
+  for (; t != NULL && t->kind == TERM_PI; t = t->right)
+    n++;
+  types = arena_alloc(m->arena, (n + 1u) * sizeof *types);
+  if (types == NULL)
+    return FAIL(c, "OOM", "out of memory");
+  for (t = d->type; t != NULL && t->kind == TERM_PI; t = t->right) {
+    uint64_t arg_level = 0;
+    const Core *a = check_type(c, t->left, &arg_level);
+    const Value *av = a == NULL ? NULL : here(c, a);
+    if (a == NULL)
+      return 0;
+    types[arity] = av;
+    if (!key_arg_type(m, av))
+      return FAIL(c, "REFUSE_KEYSPACE", "argument %zu of the key space %s does not have a key argument type (Nat, Flag, the base name Size, or Option, Prod and List of them); Q-S5-13 (a) and Q-S5-14 (a)", arity + 1u, d->name);
+    if (!key_arg_form(t->left))
+      return FAIL(c, "REFUSE_KEYSPACE", "argument %zu of the key space %s is not written as Nat, Size, Flag, Option T, List T or Prod A B (each T, A and B again one of these forms), so keyEq has no eq term for it (Q-S5-25 (a))", arity + 1u, d->name);
+    arity++;
+  }
+  if (arity == 0u)
+    return FAIL(c, "REFUSE_KEYSPACE", "the key space %s has no argument; its type is A1 -> ... -> An -> Key with n >= 1 (Q-S5-13 (a))", d->name);
+  if (t == NULL || t->kind != TERM_VAR || t->name == NULL || strcmp(t->name, "Key") != 0)
+    return FAIL(c, "REFUSE_KEYSPACE", "the codomain of the key space %s is not Key, the generated family of the key spaces (Q-S5-13 (a), Q-S5-23 (a))", d->name);
+  if (check_type(c, d->type, &level) == NULL)
+    return 0;
+  if (m->space_count >= m->space_cap)
+    return FAIL(c, "OOM", "the key space table is full");
+  m->spaces[m->space_count].name = d->name;
+  m->spaces[m->space_count].arity = (uint32_t)arity;
+  m->spaces[m->space_count].arg_types = types;
+  m->space_count++;
+  return 1;
+}
+
+/* Q-S5-21 (a): 1 if NAME is bound by a get or a let item before the item N
+   of the step S. */
+static int step_bound(const StepDecl *s, size_t n, const char *name) {
+  size_t i;
+  for (i = 0; i < n && !(s->items[i].kind != STEP_SET && s->items[i].name != NULL && name != NULL && strcmp(s->items[i].name, name) == 0); i++)
+    ;
+  return i < n;
+}
+
+/* Q-S5-21 (a): each argument of a step pattern is static. A name bound by
+   an earlier get or let item, and a field whose base is not the step
+   binder, give REFUSE_FOOTPRINT_DYNAMIC. The item N is the pattern item. */
+static int step_args_static(Checker *c, const Decl *d, size_t n, const KeyPat *kp) {
+  const StepDecl *s = d->step;
+  size_t a;
+  for (a = 0; a < kp->arg_count; a++) {
+    const PatArg *pa = &kp->args[a];
+    if (pa->kind == PAT_ARG_NAME && step_bound(s, n, pa->name))
+      return FAIL(c, "REFUSE_FOOTPRINT_DYNAMIC", "the argument %s of the pattern %s in the step of %s is a name of a get or a let of the step; a step pattern is static (X17, Q-S5-21 (a))", pa->name, kp->space, d->name);
+    if (pa->kind == PAT_ARG_FIELD && (pa->base == NULL || strcmp(pa->base, s->binder) != 0))
+      return FAIL(c, "REFUSE_FOOTPRINT_DYNAMIC", "the argument %s.%s of the pattern %s in the step of %s does not project the step binder %s; a step pattern is static (X17, Q-S5-21 (a))", pa->base != NULL ? pa->base : "?", pa->name != NULL ? pa->name : "?", kp->space, d->name, s->binder);
+  }
+  return 1;
+}
+
+/* 1 if the step argument SA is the footprint argument FA. The step binder
+   is renamed to the footprint binder (PLAN 5.2): step_args_static checked
+   the step base, footprint_arg the footprint base, so a field compares by
+   its field name. */
+static int step_arg_same(const PatArg *sa, const PatArg *fa) {
+  if (sa->kind != fa->kind)
+    return 0;
+  switch (sa->kind) {
+  case PAT_ARG_NAT:
+    return sa->nat == fa->nat;
+  case PAT_ARG_NAME:
+  case PAT_ARG_FIELD:
+    return sa->name != NULL && fa->name != NULL && strcmp(sa->name, fa->name) == 0;
+  }
+  return 0;
+}
+
+/* 1 if the step pattern KP is one of the N footprint patterns PATS. */
+static int step_pat_in(const KeyPat *kp, const KeyPat *pats, size_t n) {
+  size_t p;
+  size_t a;
+  for (p = 0; p < n; p++) {
+    if (kp->space == NULL || pats[p].space == NULL || strcmp(kp->space, pats[p].space) != 0 || kp->arg_count != pats[p].arg_count)
+      continue;
+    for (a = 0; a < kp->arg_count && step_arg_same(&kp->args[a], &pats[p].args[a]); a++)
+      ;
+    if (a == kp->arg_count)
+      return 1;
+  }
+  return 0;
+}
+
+/* The type value of the global NAME for the step terms (S5 u4k): the
+   name elaborated as a type in the empty context, before the step binds
+   a local. NAME is Val or the footprint family of the step. */
+static const Value *step_type(Checker *c, const char *name, const StepDecl *s) {
+  Term v;
+  uint64_t level = 0;
+  const Core *k;
+  memset(&v, 0, sizeof v);
+  v.kind = TERM_VAR;
+  v.name = name;
+  v.line = s->item_count > 0 ? s->items[0].line : 0;
+  v.col = s->item_count > 0 ? s->items[0].col : 0;
+  k = check_type(c, &v, &level);
+  return k == NULL ? NULL : here(c, k);
+}
+
+/* u4 item 7 (Q-S5-10 (a), Q-S5-20 (a), Q-S5-21 (a)), unit u4j: the
+   pattern rules of `step Fam b := [item, ...]`. Fam is the last earlier
+   program family of the name (else NAME_UNKNOWN) and has a footprint
+   (else REFUSE_STEP; a program family without a footprint is REFUSE_DATA
+   first, so this is a guard). A second step of Fam is REFUSE_STEP. The
+   binder b is renamed to the footprint binder. One pass with the phase
+   read, decide, write; it starts at read. A get pattern comes before the
+   first set (REFUSE_FOOTPRINT_PHASE) and is in reads
+   (REFUSE_FOOTPRINT_READ). A set pattern is in writes
+   (REFUSE_FOOTPRINT_WRITE) and moves the phase to write. The step decl
+   name is the family name: no name_free. Unit u4k checks the terms (the
+   let and set values, x : Val for a get, the let phase rule). */
+/* Q-S5-26 (a), Q-S5-27 (a): infer a bare `fun y => t` (no binder type)
+   with y at DOM, the type that the first argument of bind or step#let
+   gives. */
+static const Core *infer_bare_lam(Checker *c, const Term *t, const Value *dom, const Value **type) {
+  const Value *bt = NULL;
+  const Core *ann = quote_value(c->m, c->level, dom);
+  const Core *body;
+  const Core *quoted;
+  if (!push(c, t->name, dom))
+    return NULL;
+  body = infer(c, t->right, &bt);
+  quoted = body == NULL || bt == NULL ? NULL : quote_value(c->m, c->level, bt);
+  pop(c);
+  if (body == NULL)
+    return NULL;
+  if (quoted == NULL)
+    return nul(FAIL(c, "INTERNAL", "the body of fun %s => ... has no type", t->name));
+  *type = val_closure(c->m, VAL_PI, t->name, dom, c->env, quoted);
+  return core_bind(c, CORE_LAM, t->name, ann, body);
+}
+
+/* The fn_into of a bare lambda (Q-S5-26 (a)): RESULT is the body type. The
+   body type must not use the binder. */
+static const Core *bare_fn_into(Checker *c, const Term *t, const Value *dom, const Value **result) {
+  const Value *ft = NULL;
+  const Core *f = infer_bare_lam(c, t, dom, &ft);
+  if (f == NULL)
+    return NULL;
+  *result = closure_apply(c->m, ft, val_var(c->m, c->level));
+  if (!conv_values(c->m, c->level + 2u, *result,
+                   closure_apply(c->m, ft, val_var(c->m, c->level + 1u))))
+    return nul(FAIL(c, "TYPE_MISMATCH", "this operation needs a function with a non-dependent result type"));
+  return f;
+}
+
+/* Q-S5-27 (a): `step#let e (fun y => t)`, the step let that the front
+   writes (the lexer cannot make the name). At `Maybe T` it is the bind rule
+   with y : T. Else it is the bare lambda with y at the type of e, applied
+   to e (the step_check let rule). */
+static const Core *rule_step_let(Call *k) {
+  Checker *c = k->c;
+  const Value *ty = NULL;
+  const Value *ft = NULL;
+  const Core *x;
+  const Core *f;
+  if (!is_bare_lam(k->args[1]))
+    return nul(FAIL(c, "INTERNAL", "step#let needs a bare lambda as its second argument"));
+  x = infer(c, k->args[0], &ty);
+  if (x == NULL)
+    return NULL;
+  if (ty == NULL)
+    return nul(FAIL(c, "INTERNAL", "the let value of %s has no type", k->args[1]->name));
+  if (val_is(ty, OP_OPTION))
+    return rule_bind(k);
+  f = infer_bare_lam(c, k->args[1], ty, &ft);
+  if (f == NULL)
+    return NULL;
+  k->type = closure_apply(c->m, ft, here(c, x));
+  return core_app(c, f, x);
+}
+
+static int step_check(Checker *c, const Decl *d) {
+  const DeclList *ds = c->decls;
+  const Decl *fam = NULL;
+  const StepDecl *s = d->step;
+  size_t at;
+  size_t i;
+  int phase_write = 0;
+  int ok;
+  size_t pushed;
+  const Value *val_ty;
+  const Value *fam_ty;
+  for (at = 0; at < ds->count && &ds->items[at] != d; at++)
+    ;
+  if (at == ds->count || s == NULL || d->name == NULL || s->binder == NULL)
+    return FAIL(c, "INTERNAL", "the step is not in the declaration list or has no name");
+  for (i = 0; i < at; i++) {
+    if (ds->items[i].kind == DECL_FAMILY && ds->items[i].origin == ORIGIN_PROGRAM && ds->items[i].name != NULL && strcmp(ds->items[i].name, d->name) == 0)
+      fam = &ds->items[i];
+  }
+  if (fam == NULL)
+    return FAIL(c, "NAME_UNKNOWN", "the step names %s, but no program family %s comes before it (Q-S5-20 (a))", d->name, d->name);
+  if (fam->footprint == NULL)
+    return FAIL(c, "REFUSE_STEP", "the family %s has no footprint clause; a step is for a footprint family (Q-S5-10 (a), Q-S5-20 (a))", d->name);
+  for (i = 0; i < at; i++) {
+    if (ds->items[i].kind == DECL_STEP && ds->items[i].name != NULL && strcmp(ds->items[i].name, d->name) == 0)
+      return FAIL(c, "REFUSE_STEP", "the family %s has a second step; a family has one step (Q-S5-20 (a))", d->name);
+  }
+  val_ty = step_type(c, "Val", s);
+  fam_ty = val_ty == NULL ? NULL : step_type(c, d->name, s);
+  ok = fam_ty != NULL && push(c, s->binder, fam_ty);
+  pushed = ok ? 1u : 0u;
+  for (i = 0; ok && i < s->item_count; i++) {
+    const StepItem *it = &s->items[i];
+    const Value *ty = NULL;
+    switch (it->kind) {
+    case STEP_GET:
+      ok = step_args_static(c, d, i, &it->pat);
+      if (ok && phase_write)
+        ok = FAIL(c, "REFUSE_FOOTPRINT_PHASE", "the get of %s in the step of %s comes after a set; the phase is read, decide, write (X17)", it->pat.space, d->name);
+      if (ok && !step_pat_in(&it->pat, fam->footprint->reads, fam->footprint->read_count))
+        ok = FAIL(c, "REFUSE_FOOTPRINT_READ", "the get pattern %s in the step of %s is not in the reads of its footprint (X17)", it->pat.space, d->name);
+      ok = ok && push(c, it->name, val_ty);
+      pushed += ok ? 1u : 0u;
+      break;
+    case STEP_SET:
+      ok = step_args_static(c, d, i, &it->pat);
+      if (ok && !step_pat_in(&it->pat, fam->footprint->writes, fam->footprint->write_count))
+        ok = FAIL(c, "REFUSE_FOOTPRINT_WRITE", "the set pattern %s in the step of %s is not in the writes of its footprint (X17)", it->pat.space, d->name);
+      ok = ok && check(c, it->term, val_ty) != NULL;
+      phase_write = 1;
+      break;
+    case STEP_LET:
+      ok = infer(c, it->term, &ty) != NULL;
+      if (ok && ty == NULL)
+        ok = FAIL(c, "INTERNAL", "the let value of %s in the step of %s has no type", it->name, d->name);
+      if (ok && phase_write && val_is(ty, OP_OPTION))
+        ok = FAIL(c, "REFUSE_FOOTPRINT_PHASE", "the let of %s in the step of %s has a Maybe type and comes after a set; a let that can give none is not in the write phase (X17, Q-S5-4 (a))", it->name, d->name);
+      ok = ok && push(c, it->name, val_is(ty, OP_OPTION) ? ty->args[0] : ty);
+      pushed += ok ? 1u : 0u;
+      break;
+    }
+  }
+  for (; pushed > 0u; pushed--)
+    pop(c);
+  return ok;
+}
+
 static int check_decl(Checker *c, const Decl *d) {
   const DroppedName *x = d->name != NULL ? dropped_name(d->name) : NULL;
   if (x != NULL)
     return FAIL(c, "REFUSE_NOT_IN_DESIGN", DROPPED_HINT, d->name, x->row, x->why);
   if (d->kind == DECL_AXIOM && d->name != NULL && d->type != NULL && d->type->kind == TERM_UNIV && !admitted_name(d->name))
     return FAIL(c, "REFUSE_NOT_IN_DESIGN", "%s is not a base sort of PLAN section 4 (X1 to X21, the design parameters, the section 3 instances); a base sort comes from the design only", d->name);
+  if (!footprint_shape(c, d))
+    return 0;
   if (d->is_state && guest(c))
     return kit_refused(c, "the state form");
   if (d->is_state)
     return check_state(c, d);
-  if (d->kind == DECL_FAMILY && d->origin == ORIGIN_PROGRAM)
+  /* Q-S5-11 (a): a program can declare a family that has a footprint
+     clause (X17); the other program families stay refused (rule R1). */
+  if (d->kind == DECL_FAMILY && d->origin == ORIGIN_PROGRAM && d->footprint == NULL)
     return FAIL(c, "REFUSE_DATA", "a program cannot declare a family (rule R1); only domain/domain.lang can");
   if (d->kind == DECL_COFAMILY && d->origin == ORIGIN_PROGRAM)
     return FAIL(c, "REFUSE_DATA", "a program cannot declare a cofamily (rule R1); only domain/domain.lang can");
@@ -4843,18 +5374,181 @@ static int check_decl(Checker *c, const Decl *d) {
     return FAIL(c, "REFUSE_AXIOM", "an axiom has no proof (rule R2)");
   if (d->is_rec)
     return FAIL(c, "REFUSE_REC", "def rec is refused (rule R3); use fold or unfold");
-  if (!kernel_sig(c, d) || !name_free(c, d->name))
+  /* u4 item 7 (Q-S5-10 (a)): a step has no type, and its name is the
+     family name, so step_check comes before kernel_sig and name_free. */
+  if (d->kind == DECL_STEP)
+    return step_check(c, d);
+  /* Q-S5-24 (a): a key space name is the name of its constructor in the
+     generated family Key, so the family check covers its name clashes. */
+  if (!kernel_sig(c, d) || (d->kind != DECL_KEYSPACE && !name_free(c, d->name)))
     return 0;
   switch (d->kind) {
   case DECL_FAMILY:
-    return check_family(c, d);
+    return check_family(c, d) && footprint_decl(c, d);
   case DECL_COFAMILY:
     return check_cofamily(c, d);
+  case DECL_KEYSPACE:
+    return check_keyspace(c, d);
+  case DECL_STEP:
+    return step_check(c, d);
   case DECL_DEF:
   case DECL_AXIOM:
     break;
   }
   return check_def(c, d);
+}
+
+/* The Ind matrix (S5 unit 5, X2, survey secs 5 and 6, PLAN 5.4). One row
+   for each pair a <= b of the program footprint families in declaration
+   order, a = b included. The conflict pairs of a row are writes a x (reads
+   b + writes b) and reads a x writes b: shared reads are allowed. Two key
+   patterns of different spaces do not meet. At one position, two constants
+   that are not equal do not meet (Q-S5-33 (a): by value, with
+   conv_values); each other position gives the literal `x != y`. A pattern
+   pair that can meet gives one clause (the OR of its literals). An empty
+   clause gives dep; no clause gives ind; else ind-if (the AND of the
+   clauses). The key equality is static unification, so the verdict is
+   exact. L3 is by shape (Q-S5-5 (a)): this matrix and the three-phase step
+   check are the evidence. */
+
+/* A new zeroed row at the end of the matrix: the arena array starts at 4
+   rows and doubles (the merge-lang machine_row form). */
+static IndRow *ind_row(Machine *m) {
+  IndMatrix *x = &m->ind;
+  IndRow *rows = x->rows;
+  if (x->row_count == x->row_cap) {
+    uint32_t cap = x->row_cap == 0u ? 4u : 2u * x->row_cap;
+    rows = arena_alloc(m->arena, (size_t)cap * sizeof *rows);
+    if (rows == NULL)
+      return NULL;
+    if (x->row_count > 0u)
+      memcpy(rows, x->rows, (size_t)x->row_count * sizeof *rows);
+    x->rows = rows;
+    x->row_cap = cap;
+  }
+  memset(&rows[x->row_count], 0, sizeof rows[x->row_count]);
+  x->row_count++;
+  return &rows[x->row_count - 1u];
+}
+
+/* A footprint family of the program (a Body summand). */
+static int ind_family(const Decl *d) {
+  return d->kind == DECL_FAMILY && d->origin == ORIGIN_PROGRAM && d->footprint != NULL;
+}
+
+/* The value of a constant pattern argument: a numeral, or the value of the
+   closed def (Q-S5-33 (a)). NULL when it is not known. */
+static const Value *ind_const_value(Checker *c, const PatArg *pa) {
+  if (pa->kind == PAT_ARG_NAT)
+    return val_nat(c->m, pa->nat);
+  return pa->name != NULL ? sig_name_value(c, pa->name) : NULL;
+}
+
+/* 1 when two constant arguments can be the same value. A value that is not
+   known can be the same (the sound default). */
+static int ind_const_same(Checker *c, const PatArg *x, const PatArg *y) {
+  const Value *vx;
+  const Value *vy;
+  if (x->kind == PAT_ARG_NAT && y->kind == PAT_ARG_NAT)
+    return x->nat == y->nat;
+  vx = ind_const_value(c, x);
+  vy = ind_const_value(c, y);
+  return vx == NULL || vy == NULL || conv_values(c->m, c->level, vx, vy);
+}
+
+/* The operand of a pattern argument: a field of the left family
+   (IND_OPD_FIELD_A), of the right family (IND_OPD_FIELD_B), or a constant. */
+static IndOperand ind_operand(const PatArg *pa, IndOpdKind field) {
+  IndOperand o;
+  o.kind = pa->kind == PAT_ARG_FIELD ? field : IND_OPD_CONST;
+  o.name = pa->kind == PAT_ARG_NAT ? NULL : pa->name;
+  o.nat = pa->kind == PAT_ARG_NAT ? pa->nat : 0u;
+  return o;
+}
+
+/* The clause of the pattern pair KA (left family) and KB (right family),
+   put at CLAUSES[*N] when the two keys can meet. An empty clause sets the
+   dep space of ROW. */
+static int ind_meet(Checker *c, const KeyPat *ka, const KeyPat *kb, IndClause *clauses, uint32_t *n, IndRow *row) {
+  IndLit *lits;
+  uint32_t k = 0;
+  size_t i;
+  if (strcmp(ka->space, kb->space) != 0 || ka->arg_count != kb->arg_count)
+    return 1;
+  for (i = 0; i < ka->arg_count; i++) {
+    const PatArg *x = &ka->args[i];
+    const PatArg *y = &kb->args[i];
+    if (x->kind != PAT_ARG_FIELD && y->kind != PAT_ARG_FIELD && !ind_const_same(c, x, y))
+      return 1;
+  }
+  lits = arena_alloc(c->m->arena, (ka->arg_count + 1u) * sizeof *lits);
+  if (lits == NULL)
+    return diag_fail(c->m->diag, "OOM", NULL, "out of memory");
+  for (i = 0; i < ka->arg_count; i++) {
+    const PatArg *x = &ka->args[i];
+    const PatArg *y = &kb->args[i];
+    if (x->kind == PAT_ARG_FIELD || y->kind == PAT_ARG_FIELD) {
+      lits[k].left = ind_operand(x, IND_OPD_FIELD_A);
+      lits[k].right = ind_operand(y, IND_OPD_FIELD_B);
+      k++;
+    }
+  }
+  if (k == 0u && row->dep_space == NULL)
+    row->dep_space = ka->space;
+  clauses[*n].lits = lits;
+  clauses[*n].lit_count = k;
+  (*n)++;
+  return 1;
+}
+
+/* The row of the footprint families DA <= DB. */
+static int ind_pair(Checker *c, const Decl *da, const Decl *db) {
+  const FootprintDecl *fa = da->footprint;
+  const FootprintDecl *fb = db->footprint;
+  size_t cap = fa->write_count * (fb->read_count + fb->write_count) + fa->read_count * fb->write_count;
+  IndRow *row = ind_row(c->m);
+  IndClause *clauses = arena_alloc(c->m->arena, (cap + 1u) * sizeof *clauses);
+  uint32_t n = 0;
+  size_t p;
+  size_t q;
+  if (row == NULL || clauses == NULL)
+    return diag_fail(c->m->diag, "OOM", NULL, "out of memory");
+  row->a = da->name;
+  row->b = db->name;
+  row->clauses = clauses;
+  for (p = 0; p < fa->write_count; p++) {
+    for (q = 0; q < fb->read_count + fb->write_count; q++) {
+      const KeyPat *kb = q < fb->read_count ? &fb->reads[q] : &fb->writes[q - fb->read_count];
+      if (!ind_meet(c, &fa->writes[p], kb, clauses, &n, row))
+        return 0;
+    }
+  }
+  for (p = 0; p < fa->read_count; p++) {
+    for (q = 0; q < fb->write_count; q++) {
+      if (!ind_meet(c, &fa->reads[p], &fb->writes[q], clauses, &n, row))
+        return 0;
+    }
+  }
+  row->clause_count = n;
+  row->verdict = row->dep_space != NULL ? IND_DEP : n == 0u ? IND_ALWAYS : IND_IF;
+  return 1;
+}
+
+/* The Ind matrix of the program, after all the decls check (S5 unit 5). */
+static int ind_matrix(Checker *c) {
+  const DeclList *decls = c->decls;
+  size_t i;
+  size_t j;
+  for (i = 0; i < decls->count; i++) {
+    if (!ind_family(&decls->items[i]))
+      continue;
+    c->m->ind.body_count++;
+    for (j = i; j < decls->count; j++) {
+      if (ind_family(&decls->items[j]) && !ind_pair(c, &decls->items[i], &decls->items[j]))
+        return 0;
+    }
+  }
+  return 1;
 }
 
 int check_program(Arena *arena, const DeclList *decls, Machine *m, Diag *diag, CheckMode mode) {
@@ -4877,11 +5571,13 @@ int check_program(Arena *arena, const DeclList *decls, Machine *m, Diag *diag, C
   m->defs = arena_alloc(arena, (decls->count + extra + 1u) * sizeof *m->defs);
   m->families = arena_alloc(arena, (decls->count + extra + 1u) * sizeof *m->families);
   m->ctors = arena_alloc(arena, (ctors + 1u) * sizeof *m->ctors);
-  if (m->defs == NULL || m->families == NULL || m->ctors == NULL)
+  m->spaces = arena_alloc(arena, (decls->count + 1u) * sizeof *m->spaces);
+  if (m->defs == NULL || m->families == NULL || m->ctors == NULL || m->spaces == NULL)
     return diag_fail(diag, "OOM", NULL, "out of memory");
   m->def_cap = (uint32_t)(decls->count + extra);
   m->family_cap = (uint32_t)(decls->count + extra);
   m->ctor_cap = (uint32_t)ctors;
+  m->space_cap = (uint32_t)decls->count;
   memset(&c, 0, sizeof c);
   c.m = m;
   c.decls = decls;
@@ -4893,6 +5589,9 @@ int check_program(Arena *arena, const DeclList *decls, Machine *m, Diag *diag, C
     /* The other sorts of a block are checked with its first sort (S6). */
     i += decls->items[i].kind == DECL_FAMILY && decls->items[i].block_count > 1u ? decls->items[i].block_count - 1u : 0u;
   }
+  /* The Ind matrix of the footprint families (S5 unit 5). */
+  if (!ind_matrix(&c))
+    return 0;
   m->def = NULL;
   return 1;
 }

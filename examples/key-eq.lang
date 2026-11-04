@@ -1,0 +1,11 @@
+-- Q-S5-25 (a): keyEq gives flagYes for the same key space with equal arguments, else flagNo.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Cfg : Size -> Size -> Key
+keyspace Lim : Nat -> Key
+def sameBal : Flag := keyEq (Bal sz0) (Bal sz0)
+def otherCfg : Flag := keyEq (Cfg sz0 sz0) (Cfg sz0 (szS sz0))
+def twoSpaces : Flag := keyEq (Bal sz0) (Cfg sz0 sz0)
+def sameCfg : Flag := keyEq (Cfg (szS sz0) sz0) (Cfg (szS sz0) sz0)
+def sameLim : Flag := keyEq (Lim 3) (Lim 3)
+def otherLim : Flag := keyEq (Lim 3) (Lim 4)

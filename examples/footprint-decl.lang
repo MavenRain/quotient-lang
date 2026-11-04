@@ -1,0 +1,7 @@
+-- S5 (X17, u4 item 5): a footprint family. Each pattern names a declared
+-- key space with its arity. Each argument is b.field (a field of the one
+-- constructor) or a closed def (Q-S5-16 (a)).
+keyspace Bal : Size -> Key
+keyspace Cfg : Size -> Size -> Key
+def lim : Size := szS sz0
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from), Cfg(b.to, lim)] writes [Bal(b.to)]

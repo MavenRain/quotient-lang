@@ -1,0 +1,25 @@
+ind-acct Pay Pay: dep
+ind-spaces Pay Pay: ind-if (a.to != b.from) and (a.to != b.to) and (a.from != b.to)
+ind-spaces Pay Cast: ind
+ind-spaces Cast Cast: ind-if (a.voter != b.voter)
+ind-utxo Spend Spend: ind-if (a.coin != b.coin)
+consts Fa Fa: ind-if (a.x != b.x)
+consts Fa Fb: ind
+consts Fa Fc: ind-if (a.x != b.w)
+consts Fa Fd: ind-if (a.x != uno or one != b.z)
+consts Fb Fb: ind-if (a.y != b.y)
+consts Fb Fc: ind
+consts Fb Fd: ind-if (a.y != uno or two != b.z)
+consts Fc Fc: ind-if (a.w != b.w)
+consts Fc Fd: ind-if (a.w != uno or uno != b.z)
+consts Fd Fd: ind-if (a.z != b.z)
+verdicts Pay Pay: ind-if (a.to != b.from) and (a.to != b.to) and (a.from != b.to)
+verdicts Pay Cast: ind
+verdicts Pay Tally: ind
+verdicts Pay Store: ind
+verdicts Cast Cast: ind-if (a.voter != b.voter)
+verdicts Cast Tally: ind
+verdicts Cast Store: ind
+verdicts Tally Tally: dep
+verdicts Tally Store: ind
+verdicts Store Store: ind-if (a.k != b.k or a.j != b.j)

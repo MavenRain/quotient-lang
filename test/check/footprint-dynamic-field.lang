@@ -1,0 +1,4 @@
+-- S5 (X17, u4 item 5): the constructor mk has no field amount.
+-- REFUSE_FOOTPRINT_DYNAMIC.
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) footprint b reads [Bal(b.amount)] writes [Bal(b.from)]

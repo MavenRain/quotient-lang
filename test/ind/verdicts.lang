@@ -1,0 +1,11 @@
+-- Ind rows (S5 unit 5, Q-S5-32 (a)): the three verdicts, the a = b rows, three clauses and a clause with two literals.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+keyspace Total : Size -> Key
+keyspace Cfg : Size -> Size -> Key
+def gen : Size := sz0
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
+family Tally := mktally (n : Size) footprint b reads [Total(gen)] writes [Total(gen)]
+family Store := mkstore (k : Size) (j : Size) footprint b reads [Cfg(b.k, b.j)] writes [Cfg(b.k, b.j)]

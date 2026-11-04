@@ -1,0 +1,4 @@
+-- S5 (Q-S5-13 (a)): two key space declarations. The type term of the
+-- first one stops at the second `keyspace` (u4d).
+keyspace Bal : Nat -> Key
+keyspace Cfg : Nat -> Nat -> Key

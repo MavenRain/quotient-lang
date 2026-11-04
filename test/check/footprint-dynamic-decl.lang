@@ -1,0 +1,4 @@
+-- S5 (X17, u4 item 5): the argument x of a footprint pattern is not
+-- b.field, a numeral or a closed def. REFUSE_FOOTPRINT_DYNAMIC.
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) footprint b reads [Bal(x)] writes [Bal(b.from)]

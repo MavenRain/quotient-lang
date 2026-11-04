@@ -63,7 +63,9 @@ typedef enum {
   DECL_DEF,    /* def [rec] name : type := body */
   DECL_AXIOM,  /* axiom name : type */
   DECL_FAMILY, /* family name params [: index] := ctor | ... [and ...] */
-  DECL_COFAMILY /* cofamily name params := corec field* (S4): elaborated */
+  DECL_COFAMILY, /* cofamily name params := corec field* (S4): elaborated */
+  DECL_KEYSPACE, /* keyspace Space : T (S5, X17): a key constructor T -> Key */
+  DECL_STEP      /* step Fam b := [item, ...] (S5, Q-S5-10 (a)): the step items */
 } DeclKind;
 
 /* A family is legal only in the domain file (rule R1). ORIGIN_KIT is the
@@ -74,6 +76,73 @@ typedef enum {
   ORIGIN_KIT,
   ORIGIN_PROGRAM
 } Origin;
+
+/* A key pattern argument (S5, X17): `b.field`, a Nat literal or the
+   name of a closed def. */
+typedef enum {
+  PAT_ARG_FIELD,
+  PAT_ARG_NAT,
+  PAT_ARG_NAME
+} PatArgKind;
+
+typedef struct {
+  PatArgKind kind;
+  int line;
+  int col;
+  const char *base; /* PAT_ARG_FIELD: the name before '.' (the binder) */
+  const char *name; /* PAT_ARG_FIELD: the field; PAT_ARG_NAME: the def */
+  uint64_t nat;     /* PAT_ARG_NAT */
+} PatArg;
+
+/* A static key pattern `Space(arg, ...)` (S5, X17). */
+typedef struct {
+  int line;
+  int col;
+  const char *space;
+  const PatArg *args;
+  size_t arg_count;
+} KeyPat;
+
+/* The footprint clause of a family (S5, Q-S5-1 (a)):
+   `footprint b reads [pat, ...] writes [pat, ...]`. */
+typedef struct {
+  int line;
+  int col;
+  const char *binder;
+  const KeyPat *reads;
+  size_t read_count;
+  const KeyPat *writes;
+  size_t write_count;
+} FootprintDecl;
+
+/* A step item (S5, X17, PLAN 5.2). `get x := pat` binds x : Val (Q-S5-3 (a)).
+   `let x := term` has one form; a let at `Maybe T` aborts (Q-S5-4 (a)).
+   `set pat := term` writes the key. */
+typedef enum {
+  STEP_GET,
+  STEP_LET,
+  STEP_SET
+} StepItemKind;
+
+typedef struct {
+  StepItemKind kind;
+  int line;
+  int col;
+  const char *name; /* STEP_GET and STEP_LET: the bound name */
+  KeyPat pat;       /* STEP_GET and STEP_SET: the key pattern */
+  const Term *term; /* STEP_LET and STEP_SET: the value */
+} StepItem;
+
+/* The step of a footprint family (S5, Q-S5-10 (a)):
+   `step Fam b := [item, ...]`. The checker renames the binder b to the
+   footprint binder before it compares a pattern (PLAN 5.2). */
+typedef struct {
+  int line;
+  int col;
+  const char *binder;
+  const StepItem *items;
+  size_t item_count;
+} StepDecl;
 
 typedef struct {
   DeclKind kind;
@@ -99,6 +168,10 @@ typedef struct {
      one. */
   size_t block_first;
   size_t block_count;
+  /* The footprint clause of a family (S5, X17), or NULL. */
+  const FootprintDecl *footprint;
+  /* The step items of a `step` declaration (S5, Q-S5-10 (a)), or NULL. */
+  const StepDecl *step;
 } Decl;
 
 /* Domain declarations come first, then the program. */

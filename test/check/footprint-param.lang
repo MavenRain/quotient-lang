@@ -1,0 +1,4 @@
+-- S5 (X17, u4g): a footprint family with a parameter. A Body summand is a
+-- closed type: REFUSE_FOOTPRINT_SHAPE (Q-S5-17 (a)).
+keyspace Bal : Size -> Key
+family Pay (A : Type 0) := mk (from : Size) footprint b reads [Bal(b.from)] writes [Bal(b.from)]

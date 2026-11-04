@@ -1,0 +1,4 @@
+-- The Ind matrix (S5 unit 5, Q-S5-32 (a)): an ind-if pair. Two spends conflict only when they spend one coin.
+def Val : Type 0 := Size
+keyspace Coin : Size -> Key
+family Spend := spend (coin : Size) footprint b reads [Coin(b.coin)] writes [Coin(b.coin)]

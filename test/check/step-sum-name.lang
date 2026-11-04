@@ -1,0 +1,6 @@
+-- A program def step after the generated step : Body -> Eff (Q-S5-22 (a)): REFUSE_NAME.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+step Pay p := [get x := Bal(p.from), set Bal(p.to) := x]
+def step : Pay -> Eff := fun (p : Pay) => just

@@ -1,0 +1,8 @@
+-- Two steps of one family, each good, give REFUSE_STEP (Q-S5-20 (a)).
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Cfg : Size -> Size -> Key
+def lim : Size := szS sz0
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from), Bal(b.to), Cfg(b.to, lim)] writes [Bal(b.to)]
+step Pay p := [get x := Bal(p.from), set Bal(p.to) := x]
+step Pay q := [get y := Bal(q.to), set Bal(q.to) := y]

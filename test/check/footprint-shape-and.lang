@@ -1,0 +1,3 @@
+-- Q-S5-12 (a): a footprint clause cannot go on a sort of an and block.
+family Pay := mk (from : Size) footprint b reads [Bal(b.from)] writes [Bal(b.from)]
+and Fee := fee (amt : Size)

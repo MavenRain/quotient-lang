@@ -1,0 +1,4 @@
+-- S5 (X17, u4g): a numeral has the type Nat; the key space Cfg wants Size
+-- at argument 2. TYPE_MISMATCH (Q-S5-15 (a)).
+keyspace Cfg : Size -> Size -> Key
+family Pay := mk (from : Size) footprint b reads [Cfg(b.from, 0)] writes [Cfg(b.from, b.from)]

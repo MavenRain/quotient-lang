@@ -53,6 +53,7 @@ const char *tok_kind_name(TokKind kind) {
     case TOK_LBRACKET: return "'['";
     case TOK_RBRACKET: return "']'";
     case TOK_COMMA: return "','";
+    case TOK_DOT: return "'.'";
     case TOK_KW_DEF: return "'def'";
     case TOK_KW_REC: return "'rec'";
     case TOK_KW_FUN: return "'fun'";
@@ -177,6 +178,8 @@ static int lex_symbol(Lexer *lx) {
     case '[': kind = TOK_LBRACKET; break;
     case ']': kind = TOK_RBRACKET; break;
     case ',': kind = TOK_COMMA; break;
+    /* User mode only: lex_text sends '.' to lex_ident in internal mode. */
+    case '.': kind = TOK_DOT; break;
     case '/':
       kind = next == '\\' ? TOK_MEET : TOK_EOF;
       width = 2;

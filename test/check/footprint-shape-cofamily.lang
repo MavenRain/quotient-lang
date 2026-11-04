@@ -1,0 +1,2 @@
+-- Q-S5-12 (a): a footprint clause cannot go on a cofamily.
+cofamily Strm (A : Type 0) := strmCorec (strmHead : A) (strmTail : Strm A) footprint b reads [Bal(b.strmHead)] writes [Bal(b.strmHead)]

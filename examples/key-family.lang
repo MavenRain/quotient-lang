@@ -1,0 +1,5 @@
+-- The generated Key family (Q-S5-23 (a), Q-S5-24 (a)): no def Key; a get of Bal(p.from).
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from), Bal(b.to)] writes [Bal(b.to)]
+step Pay p := [get x := Bal(p.from), set Bal(p.to) := x]

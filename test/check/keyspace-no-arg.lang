@@ -1,0 +1,2 @@
+-- Q-S5-13 (a): a key space has one argument or more.
+keyspace Bal : Key

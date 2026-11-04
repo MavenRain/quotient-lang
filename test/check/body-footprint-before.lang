@@ -1,0 +1,5 @@
+-- S5 (X17, u4i): the Body def comes before the footprint family. The
+-- check covers all the program declarations: REFUSE_SIG (Q-S5-8 (a)).
+def Body : Type 0 := Size
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]

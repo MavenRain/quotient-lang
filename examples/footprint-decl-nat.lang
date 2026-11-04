@@ -1,0 +1,6 @@
+-- S5 (X17, u4 item 5): a footprint pattern with a numeral argument.
+-- Nat is a kit item, so this is a kit row.
+keyspace Bal : Nat -> Key
+keyspace Cfg : Nat -> Nat -> Key
+def lim : Nat := 3
+family Pay := mk (from : Nat) (to : Nat) footprint b reads [Bal(b.from), Cfg(0, lim)] writes [Bal(b.to)]

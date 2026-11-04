@@ -1,0 +1,7 @@
+-- A footprint family is a summand of Body, so a field of type Witness is
+-- REFUSE_WITNESS_READ: step reads the body only (law L5, S5 survey section 4).
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+def Witness : Type 0 := Size
+family Pay := mk (from : Size) (w : Witness) footprint b reads [Bal(b.from)] writes [Bal(b.from)]
+step Pay p := [get x := Bal(p.from), set Bal(p.from) := x]

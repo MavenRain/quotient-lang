@@ -1,0 +1,1 @@
+step T b := [put x := K(b.f)]

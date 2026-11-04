@@ -1,0 +1,8 @@
+-- An alias does not hide Witness from a footprint family (law L5, S5 survey
+-- section 4): the field type Seal names Witness.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+def Witness : Type 0 := Size
+def Seal : Type 0 := Witness
+family Pay := mk (from : Size) (w : Seal) footprint b reads [Bal(b.from)] writes [Bal(b.from)]
+step Pay p := [get x := Bal(p.from), set Bal(p.from) := x]

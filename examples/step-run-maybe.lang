@@ -1,0 +1,13 @@
+-- The front end makes the def stepPay from the step of Pay. The let at Maybe Val aborts the step when chk gives none, and effRun keeps the state s0.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Cfg : Size -> Size -> Key
+def lim : Size := szS sz0
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from), Bal(b.to), Cfg(b.to, lim)] writes [Bal(b.to)]
+def chk : Size -> Maybe Size := fun (n : Size) => elim (fun (t : Size) => Maybe Size) none (fun (k : Size) (ih : Maybe Size) => some n) n
+step Pay p := [get x := Bal(p.from), let y := chk x, set Bal(p.to) := y]
+def s0 : State := fun (k : Key) => elim (fun (t : Key) => Val) (fun (a : Size) => a) (fun (a : Size) (c : Size) => szS c) k
+def two : Size := szS (szS sz0)
+def m1 : Val := effRun (stepPay (mk sz0 lim)) s0 (Bal lim)
+def m2 : Val := effRun (stepPay (mk two lim)) s0 (Bal lim)
+def m3 : Val := effRun (stepPay (mk two lim)) s0 (Bal two)

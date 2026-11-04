@@ -1,0 +1,2 @@
+-- Q-S5-14 (a): a domain family other than Size is not a key argument type.
+keyspace Bal : Parity -> Key

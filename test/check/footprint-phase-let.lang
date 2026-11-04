@@ -1,0 +1,8 @@
+-- A let at Maybe T after a set gives REFUSE_FOOTPRINT_PHASE (X17, Q-S5-4 (a)).
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Cfg : Size -> Size -> Key
+def lim : Size := szS sz0
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from), Bal(b.to), Cfg(b.to, lim)] writes [Bal(b.to)]
+def chk : Size -> Maybe Size := fun (n : Size) => some n
+step Pay p := [get x := Bal(p.from), set Bal(p.to) := x, let y := chk x]

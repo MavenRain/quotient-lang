@@ -1,0 +1,7 @@
+-- A step with get, get, let and set: the pattern rules pass and the terms check (S5 u4k).
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Cfg : Size -> Size -> Key
+def lim : Size := szS sz0
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from), Bal(b.to), Cfg(b.to, lim)] writes [Bal(b.to)]
+step Pay p := [get x := Bal(p.from), get z := Cfg(p.to, lim), let y := x, set Bal(p.to) := y]

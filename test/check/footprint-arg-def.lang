@@ -1,0 +1,5 @@
+-- S5 (X17, u4g): the closed def lim has the type Type 0; the key space Bal
+-- wants Size. TYPE_MISMATCH (Q-S5-15 (a)).
+keyspace Bal : Size -> Key
+def lim : Type 0 := Size
+family Pay := mk (from : Size) footprint b reads [Bal(lim)] writes [Bal(b.from)]

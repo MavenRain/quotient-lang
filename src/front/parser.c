@@ -29,6 +29,9 @@ typedef struct {
   const char *def;
   Origin origin;
   int depth;
+  /* 1 while the parser reads a constructor result `: F ...`: the
+     application stops at the contextual word `footprint` (Q-S5-12 (a)). */
+  int stop_footprint;
 } Parser;
 
 /* One binder group: `(x y : A)` gives two names that share one type. */
@@ -41,6 +44,8 @@ typedef struct {
 
 static const Term *parse_term(Parser *p);
 static const Term *parse_atom(Parser *p);
+static int at_word(const Parser *p, const char *word);
+static int at_decl_word(const Parser *p);
 
 static const Token *peek_at(const Parser *p, size_t ahead) {
   size_t i = p->pos + ahead;
@@ -150,6 +155,7 @@ static int starts_atom(TokKind kind) {
     case TOK_LBRACKET:
     case TOK_RBRACKET:
     case TOK_COMMA:
+    case TOK_DOT:
     case TOK_KW_DEF:
     case TOK_KW_REC:
     case TOK_KW_FUN:
@@ -386,6 +392,7 @@ static const Term *parse_atom(Parser *p) {
     case TOK_LBRACKET:
     case TOK_RBRACKET:
     case TOK_COMMA:
+    case TOK_DOT:
     case TOK_KW_DEF:
     case TOK_KW_REC:
     case TOK_KW_FUN:
@@ -404,7 +411,7 @@ static const Term *parse_atom(Parser *p) {
 
 static const Term *parse_app(Parser *p) {
   const Term *head = parse_atom(p);
-  while (head != NULL && starts_atom(cur(p)->kind)) {
+  while (head != NULL && starts_atom(cur(p)->kind) && !(p->stop_footprint && at_word(p, "footprint")) && !at_decl_word(p)) {
     const Term *arg = parse_atom(p);
     Term *app = arg == NULL ? NULL : make_term(p, TERM_APP, head->line, head->col);
     if (app == NULL) return NULL;
@@ -501,6 +508,189 @@ static int parse_fields(Parser *p, int marks, const Field **out, size_t *out_cou
   return 1;
 }
 
+/* A contextual word of S5 (`keyspace`, `footprint`, `reads`, `writes`):
+   a name token with this text. These words are not keywords, so the S4
+   programs that use them as names do not change. */
+static int at_word(const Parser *p, const char *word) {
+  const Token *tok = cur(p);
+  size_t len = strlen(word);
+  return tok->kind == TOK_IDENT && tok->len == len && memcmp(tok->text, word, len) == 0;
+}
+
+/* A term stops at the start of an S5 declaration (u4d): `keyspace Name :`
+   or `step Fam b :=`. Only this token shape stops a term, so a name
+   `keyspace` or `step` in a term of an S4 program stays a name. */
+static int at_decl_word(const Parser *p) {
+  return (at_word(p, "keyspace") && peek_at(p, 1)->kind == TOK_IDENT && peek_at(p, 2)->kind == TOK_COLON)
+    || (at_word(p, "step") && peek_at(p, 1)->kind == TOK_IDENT && peek_at(p, 2)->kind == TOK_IDENT && peek_at(p, 3)->kind == TOK_DEFINE);
+}
+
+static int expect_word(Parser *p, const char *word, const char *what) {
+  if (!at_word(p, word)) return fail_at(p, cur(p), what);
+  bump(p);
+  return 1;
+}
+
+/* arg ::= Binder '.' Field | Nat | Name (S5, X17). */
+static int parse_pat_arg(Parser *p, PatArg *a) {
+  const Token *tok = cur(p);
+  a->line = tok->line;
+  a->col = tok->col;
+  a->base = NULL;
+  a->name = NULL;
+  a->nat = 0;
+  if (at(p, TOK_NAT)) {
+    a->kind = PAT_ARG_NAT;
+    a->nat = tok->nat;
+    bump(p);
+    return 1;
+  }
+  a->kind = PAT_ARG_NAME;
+  a->name = take_name(p, "a key argument: 'b.field', a Nat literal or a name");
+  if (a->name == NULL || !eat(p, TOK_DOT)) return a->name != NULL;
+  a->kind = PAT_ARG_FIELD;
+  a->base = a->name;
+  a->name = take_name(p, "a field name after '.'");
+  return a->name != NULL;
+}
+
+/* pat ::= Space '(' arg (',' arg)* ')' (S5, X17). */
+static int parse_key_pat(Parser *p, KeyPat *k) {
+  PatArg *args = NULL;
+  size_t count = 0;
+  size_t cap = 0;
+  k->line = cur(p)->line;
+  k->col = cur(p)->col;
+  k->space = take_name(p, "a key space name");
+  if (k->space == NULL || !expect(p, TOK_LPAREN, "'('")) return 0;
+  do {
+    args = grow(p, args, count, &cap, sizeof *args);
+    if (args == NULL || !parse_pat_arg(p, &args[count])) return 0;
+    count++;
+  } while (eat(p, TOK_COMMA));
+  k->args = args;
+  k->arg_count = count;
+  return expect(p, TOK_RPAREN, "')'");
+}
+
+/* '[' [pat (',' pat)*] ']' (S5, X17). */
+static int parse_key_pats(Parser *p, const KeyPat **out, size_t *out_count) {
+  KeyPat *items = NULL;
+  size_t count = 0;
+  size_t cap = 0;
+  if (!expect(p, TOK_LBRACKET, "'['")) return 0;
+  if (!at(p, TOK_RBRACKET)) {
+    do {
+      items = grow(p, items, count, &cap, sizeof *items);
+      if (items == NULL || !parse_key_pat(p, &items[count])) return 0;
+      count++;
+    } while (eat(p, TOK_COMMA));
+  }
+  *out = items;
+  *out_count = count;
+  return expect(p, TOK_RBRACKET, "']'");
+}
+
+/* `footprint b reads [pat, ...] writes [pat, ...]` after the constructors
+   of a family (S5, Q-S5-1 (a)). The binder is a name that is not `reads`
+   or `writes` (parse row footprint-no-binder). */
+static int parse_footprint(Parser *p, Decl *d) {
+  FootprintDecl *f = arena_alloc(p->arena, sizeof *f);
+  if (f == NULL) return oom(p);
+  f->line = cur(p)->line;
+  f->col = cur(p)->col;
+  bump(p);
+  if (at_word(p, "reads") || at_word(p, "writes")) return fail_at(p, cur(p), "a binder name after 'footprint'");
+  f->binder = take_name(p, "a binder name after 'footprint'");
+  if (f->binder == NULL || !expect_word(p, "reads", "'reads'")) return 0;
+  if (!parse_key_pats(p, &f->reads, &f->read_count) || !expect_word(p, "writes", "'writes'")) return 0;
+  if (!parse_key_pats(p, &f->writes, &f->write_count)) return 0;
+  d->footprint = f;
+  return 1;
+}
+
+/* item ::= 'get' Name ':=' pat | 'let' Name ':=' term | 'set' pat ':=' term
+   (S5, PLAN 5.2). `get`, `let` and `set` are contextual words. */
+static int parse_step_item(Parser *p, StepItem *it) {
+  it->line = cur(p)->line;
+  it->col = cur(p)->col;
+  it->name = NULL;
+  it->term = NULL;
+  it->pat = (KeyPat){0};
+  if (at_word(p, "get")) {
+    bump(p);
+    it->kind = STEP_GET;
+    it->name = take_name(p, "a name after 'get'");
+    if (it->name == NULL || !expect(p, TOK_DEFINE, "':='")) return 0;
+    return parse_key_pat(p, &it->pat);
+  }
+  if (at_word(p, "let")) {
+    bump(p);
+    it->kind = STEP_LET;
+    it->name = take_name(p, "a name after 'let'");
+    if (it->name == NULL || !expect(p, TOK_DEFINE, "':='")) return 0;
+    it->term = parse_term(p);
+    return it->term != NULL;
+  }
+  if (!at_word(p, "set")) return fail_at(p, cur(p), "a step item: 'get', 'let' or 'set'");
+  bump(p);
+  it->kind = STEP_SET;
+  if (!parse_key_pat(p, &it->pat) || !expect(p, TOK_DEFINE, "':='")) return 0;
+  it->term = parse_term(p);
+  return it->term != NULL;
+}
+
+/* `step Fam b := [item, ...]` (S5, Q-S5-10 (a)): the step items of the
+   footprint family Fam, with the binder b for the body. The brackets and
+   commas stop a `let` term before the next item. */
+static int parse_step(Parser *p, Decl *d) {
+  size_t step_cap = 0;
+  size_t item_cap = 0;
+  size_t count = 0;
+  StepItem *items = NULL;
+  StepDecl *s = grow(p, NULL, 0, &step_cap, sizeof *s);
+  if (s == NULL) return 0;
+  s->line = cur(p)->line;
+  s->col = cur(p)->col;
+  bump(p);
+  d->kind = DECL_STEP;
+  d->type = NULL;
+  d->body = NULL;
+  d->params = NULL;
+  d->param_count = 0;
+  d->ctors = NULL;
+  d->ctor_count = 0;
+  d->index = NULL;
+  d->name = take_name(p, "a family name after 'step'");
+  if (d->name == NULL) return 0;
+  p->def = d->name;
+  s->binder = take_name(p, "a binder name after the family name");
+  if (s->binder == NULL || !expect(p, TOK_DEFINE, "':='") || !expect(p, TOK_LBRACKET, "'['")) return 0;
+  if (!at(p, TOK_RBRACKET)) {
+    do {
+      items = grow(p, items, count, &item_cap, sizeof *items);
+      if (items == NULL || !parse_step_item(p, &items[count])) return 0;
+      count++;
+    } while (eat(p, TOK_COMMA));
+  }
+  s->items = items;
+  s->item_count = count;
+  d->step = s;
+  return expect(p, TOK_RBRACKET, "']'");
+}
+
+/* `keyspace Space : T` (S5, X17): the key constructor `Space : T -> Key`. */
+static int parse_keyspace(Parser *p, Decl *d) {
+  bump(p);
+  d->kind = DECL_KEYSPACE;
+  d->name = take_name(p, "a key space name");
+  if (d->name == NULL) return 0;
+  p->def = d->name;
+  if (!expect(p, TOK_COLON, "':'")) return 0;
+  d->type = parse_term(p);
+  return d->type != NULL;
+}
+
 static int parse_def(Parser *p, Decl *d) {
   bump(p);
   d->kind = DECL_DEF;
@@ -549,14 +739,16 @@ static int parse_family(Parser *p, Decl *d) {
     ctor->col = cur(p)->col;
     ctor->name = take_name(p, "a constructor name");
     if (ctor->name == NULL || !parse_fields(p, d->is_state, &ctor->fields, &ctor->field_count)) return 0;
+    p->stop_footprint = 1;
     ctor->result = eat(p, TOK_COLON) ? parse_term(p) : NULL;
+    p->stop_footprint = 0;
     if (ctor->result == NULL && p->diag->set) return 0;
     ctor->boundary = at(p, TOK_LBRACKET) ? parse_system(p) : NULL;
     if (ctor->boundary == NULL && p->diag->set) return 0;
   } while (eat(p, TOK_BAR));
   d->ctors = ctors;
   d->ctor_count = count;
-  return 1;
+  return at_word(p, "footprint") ? parse_footprint(p, d) : 1;
 }
 
 /* `and NAME params [: index] := ctor | ...` (S6): the next sort of the
@@ -575,6 +767,8 @@ static int parse_and(Parser *p, Decl *d) {
   d->is_state = 0;
   d->is_sealed = 0;
   d->is_law = 0;
+  d->footprint = NULL;
+  d->step = NULL;
   return parse_family(p, d);
 }
 
@@ -587,6 +781,10 @@ static int parse_decl(Parser *p, Decl *d) {
   d->is_state = tok->kind == TOK_KW_STATE;
   d->is_sealed = 0;
   d->is_law = 0;
+  d->footprint = NULL;
+  d->step = NULL;
+  if (at_word(p, "keyspace")) return parse_keyspace(p, d);
+  if (at_word(p, "step")) return parse_step(p, d);
   switch (tok->kind) {
     /* `sealed family` and `law def` (S5): domain-only modifiers; the
        checker refuses them in a program (REFUSE_DATA). */
@@ -621,6 +819,7 @@ static int parse_decl(Parser *p, Decl *d) {
     case TOK_LBRACKET:
     case TOK_RBRACKET:
     case TOK_COMMA:
+    case TOK_DOT:
     case TOK_KW_REC:
     case TOK_KW_FUN:
     case TOK_KW_TYPE:
@@ -628,7 +827,7 @@ static int parse_decl(Parser *p, Decl *d) {
     case TOK_KW_AND:
       break;
   }
-  return fail_at(p, tok, "'def', 'axiom', 'family', 'cofamily', 'state', 'sealed' or 'law'");
+  return fail_at(p, tok, "'def', 'axiom', 'family', 'cofamily', 'state', 'sealed', 'law', 'keyspace' or 'step'");
 }
 
 int parse_source(Arena *arena, const char *source, Origin origin, const TokenList *toks, DeclList *list, Diag *diag) {

@@ -1,0 +1,4 @@
+-- Q-S5-25 (a): keyEq is a def of the key-eq prelude, so a program def keyEq is REFUSE_NAME.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+def keyEq : Size := sz0

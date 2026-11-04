@@ -1,0 +1,8 @@
+-- S5 u4 item 7 (X17): a set pattern that is not in the writes of the
+-- footprint gives REFUSE_FOOTPRINT_WRITE. The writes have Bal(b.to) only.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Cfg : Size -> Size -> Key
+def lim : Size := szS sz0
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from), Bal(b.to), Cfg(b.to, lim)] writes [Bal(b.to)]
+step Pay p := [get x := Bal(p.from), set Bal(p.from) := x]

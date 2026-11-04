@@ -298,6 +298,76 @@ typedef struct {
   int law_only;
 } DefInfo;
 
+/* A key space of the program (S5, X17, Q-S5-13 (a)): `keyspace Space :
+   A1 -> ... -> An -> Key`. A pattern `Space(a1, ..., an)` has the arity n.
+   A space has no term binding. */
+typedef struct {
+  const char *name;
+  uint32_t arity;
+  /* The argument type values A1 ... An (Q-S5-15 (a), u4g): the footprint
+     pattern checks use them. */
+  const Value *const *arg_types;
+} KeySpaceInfo;
+
+/* The Ind verdict of a pair of footprint families (S5, X2, survey sec 6,
+   PLAN 5.4): ind (the pair always commutes), dep (the pair is in D, X21),
+   ind-if (the pair commutes when each clause holds). */
+typedef enum {
+  IND_ALWAYS,
+  IND_DEP,
+  IND_IF
+} IndVerdict;
+
+/* The kind of an operand of an Ind literal. */
+typedef enum {
+  IND_OPD_FIELD_A, /* a field of the left family a */
+  IND_OPD_FIELD_B, /* a field of the right family b */
+  IND_OPD_CONST    /* a numeral or a closed def */
+} IndOpdKind;
+
+/* An operand: the field name (IND_OPD_FIELD_A, IND_OPD_FIELD_B), or a constant: the
+   closed def name, or NULL and the numeral NAT. A field of a one-constructor
+   family has a unique name, so the name identifies the field. */
+typedef struct {
+  IndOpdKind kind;
+  const char *name;
+  uint64_t nat;
+} IndOperand;
+
+/* The literal `left != right`; left and right are not both constants. */
+typedef struct {
+  IndOperand left;
+  IndOperand right;
+} IndLit;
+
+/* A clause: the OR of its literals. An empty clause is false: the two keys
+   are always equal. */
+typedef struct {
+  const IndLit *lits;
+  uint32_t lit_count;
+} IndClause;
+
+/* A row of the matrix: the footprint families a <= b (declaration order)
+   and the AND of the clauses. dep_space is the key space of the first empty
+   clause (IND_DEP). */
+typedef struct {
+  const char *a;
+  const char *b;
+  IndVerdict verdict;
+  const IndClause *clauses;
+  uint32_t clause_count;
+  const char *dep_space;
+} IndRow;
+
+/* The Ind matrix (S5 unit 5): the rows in order, an arena array. body_count
+   is the count of the footprint families (the Body summands). */
+typedef struct {
+  IndRow *rows;
+  uint32_t row_count;
+  uint32_t row_cap;
+  uint32_t body_count;
+} IndMatrix;
+
 /* The checked program and the evaluation state. No global state: every
    function gets this context. */
 typedef struct {
@@ -321,6 +391,12 @@ typedef struct {
   /* Each Glue that a true key reduced, newest first. transp at Glue reads
      them to get A, phi and sys at an end. */
   const struct GlueRec *glue_recs;
+  /* The key spaces, in the order of their declarations (S5 u4d). */
+  KeySpaceInfo *spaces;
+  uint32_t space_count;
+  uint32_t space_cap;
+  /* The Ind matrix of the footprint families (S5 unit 5). */
+  IndMatrix ind;
 } Machine;
 
 /* One Glue that a true key reduced. OUT is the result, a fresh copy of the

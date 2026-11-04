@@ -1,0 +1,4 @@
+-- S5 (X17, u4g): the field from has the type Nat; the key space Bal wants
+-- Size. TYPE_MISMATCH (Q-S5-15 (a)). Nat is a kit item, so this is a kit row.
+keyspace Bal : Size -> Key
+family Pay := mk (from : Nat) footprint b reads [Bal(b.from)] writes [Bal(b.from)]

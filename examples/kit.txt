@@ -18,3 +18,9 @@ glue.lang
 univ.lang
 elim.lang
 history-bind.lang
+keyspace-two.lang
+keyspace-size-kit.lang
+footprint-decl-nat.lang
+step-abort.lang
+key-eq.lang
+step-hygiene.lang

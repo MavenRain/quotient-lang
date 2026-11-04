@@ -17,6 +17,7 @@ typedef enum {
   CMD_IR,
   CMD_ABI,
   CMD_BUILD,
+  CMD_IND,
 } Command;
 
 typedef struct {
@@ -40,6 +41,7 @@ static const struct {
   {"ir", CMD_IR},
   {"abi", CMD_ABI},
   {"build", CMD_BUILD},
+  {"ind", CMD_IND},
 };
 
 static int usage(FILE *err) {
@@ -48,6 +50,7 @@ static int usage(FILE *err) {
         "       langc [--kit] ir PROG\n"
         "       langc [--kit] abi PROG [--text]\n"
         "       langc [--kit] build PROG -o OUT [--runtime]\n"
+        "       langc [--kit] ind PROG\n"
         "--kit: the kit mode, the trusted test scope of the kit gate\n", err);
   return 2;
 }
@@ -82,6 +85,7 @@ static int parse_options(int argc, char **argv, Options *opt, Diag *diag) {
   opt->prog_path = argv[2];
   switch (opt->command) {
     case CMD_CHECK:
+    case CMD_IND:
     case CMD_IR:
       return argc == 3 ? 1 : diag_fail(diag, "USAGE", NULL, "too many arguments");
     case CMD_ABI:
@@ -133,12 +137,97 @@ static int run_target(const Options *opt, Machine *machine, Diag *diag) {
     case CMD_CHECK:
     case CMD_EVAL:
     case CMD_BUILD:
+    case CMD_IND:
       break;
   }
   out = fopen(opt->out_path, "wb");
   if (out == NULL) return diag_fail(diag, "IO", NULL, "cannot write '%s'", opt->out_path) + 1;
   ok = target_write(&prog, opt->runtime ? TARGET_PART_RUNTIME : TARGET_PART_MAIN, out, stderr);
   return fclose(out) == 0 && ok ? 0 : 1;
+}
+
+/* Prints the Ind operand OPD: `a.NAME`, `b.NAME`, the closed def name or the
+   numeral (S5 unit 5, Q-S5-32 (a)). */
+static void ind_operand_print(const IndOperand *opd, FILE *out) {
+  switch (opd->kind) {
+    case IND_OPD_FIELD_A:
+      fprintf(out, "a.%s", opd->name);
+      return;
+    case IND_OPD_FIELD_B:
+      fprintf(out, "b.%s", opd->name);
+      return;
+    case IND_OPD_CONST:
+      if (opd->name != NULL) {
+        fputs(opd->name, out);
+      } else {
+        fprintf(out, "%llu", (unsigned long long)opd->nat);
+      }
+      return;
+  }
+}
+
+/* Returns 1 when the Ind operands X and Y are the same operand. */
+static int ind_operand_same(const IndOperand *x, const IndOperand *y) {
+  if (x->kind != y->kind) return 0;
+  if (x->name == NULL || y->name == NULL) return x->name == y->name && x->nat == y->nat;
+  return strcmp(x->name, y->name) == 0;
+}
+
+/* Returns 1 when the clauses X and Y have the same literals in the same order. */
+static int ind_clause_same(const IndClause *x, const IndClause *y) {
+  if (x->lit_count != y->lit_count) return 0;
+  for (uint32_t l = 0; l < x->lit_count; l++) {
+    if (!ind_operand_same(&x->lits[l].left, &y->lits[l].left)) return 0;
+    if (!ind_operand_same(&x->lits[l].right, &y->lits[l].right)) return 0;
+  }
+  return 1;
+}
+
+/* Returns 1 when clause C of ROW is equal to an earlier clause of ROW. */
+static int ind_clause_seen(const IndRow *row, uint32_t c) {
+  for (uint32_t e = 0; e < c; e++) {
+    if (ind_clause_same(&row->clauses[e], &row->clauses[c])) return 1;
+  }
+  return 0;
+}
+
+/* Prints the Ind matrix IND (S5 unit 5, Q-S5-32 (a)): one line for each row in
+   row order, `A B: ind`, `A B: dep` or `A B: ind-if C1 and C2`. A clause is
+   `(L1 or L2)` and a literal is `X != Y`. A clause that is equal to an earlier
+   clause of the row is not printed again (the AND is idempotent). Returns 0,
+   or 1 on a write error. */
+static int ind_print(const IndMatrix *ind, FILE *out) {
+  for (uint32_t r = 0; r < ind->row_count; r++) {
+    const IndRow *row = &ind->rows[r];
+    uint32_t shown = 0;
+    fprintf(out, "%s %s: ", row->a, row->b);
+    switch (row->verdict) {
+      case IND_ALWAYS:
+        fputs("ind", out);
+        break;
+      case IND_DEP:
+        fputs("dep", out);
+        break;
+      case IND_IF:
+        fputs("ind-if", out);
+        for (uint32_t c = 0; c < row->clause_count; c++) {
+          if (ind_clause_seen(row, c)) continue;
+          const IndClause *clause = &row->clauses[c];
+          fputs(shown == 0 ? " (" : " and (", out);
+          shown++;
+          for (uint32_t l = 0; l < clause->lit_count; l++) {
+            fputs(l == 0 ? "" : " or ", out);
+            ind_operand_print(&clause->lits[l].left, out);
+            fputs(" != ", out);
+            ind_operand_print(&clause->lits[l].right, out);
+          }
+          fputs(")", out);
+        }
+        break;
+    }
+    fputs("\n", out);
+  }
+  return ferror(out) ? 1 : 0;
 }
 
 static int run(const Options *opt, Arena *arena, Diag *diag) {
@@ -155,6 +244,8 @@ static int run(const Options *opt, Arena *arena, Diag *diag) {
       return 0;
     case CMD_EVAL:
       return eval_command(&machine, opt->entry, opt->args, opt->arg_count, stdout, stderr);
+    case CMD_IND:
+      return ind_print(&machine.ind, stdout);
     case CMD_IR:
     case CMD_ABI:
     case CMD_BUILD:

@@ -1,0 +1,2 @@
+-- Q-S5-12 (a): a footprint clause cannot go on the state form.
+state State := makeState (held : Nat) footprint b reads [Bal(b.held)] writes [Bal(b.held)]

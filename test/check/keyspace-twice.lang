@@ -1,0 +1,3 @@
+-- Q-S5-13 (a): a program declares a key space name one time only.
+keyspace Bal : Nat -> Key
+keyspace Bal : Nat -> Key

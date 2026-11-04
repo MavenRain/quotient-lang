@@ -85,3 +85,8 @@ partial-name.lang
 partial-option.lang
 partial-option-arg.lang
 partial-zero.lang
+keyspace-arg-order.lang
+keyspace-codomain.lang
+keyspace-def-name.lang
+keyspace-twice.lang
+footprint-arg-field.lang

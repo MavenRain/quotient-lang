@@ -1,0 +1,4 @@
+-- S5 (X17, u4 item 5): Bal has the arity 1, the pattern has 2
+-- arguments. REFUSE_KEYSPACE (Q-S5-16 (a)).
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) footprint b reads [Bal(b.from, b.from)] writes [Bal(b.from)]
