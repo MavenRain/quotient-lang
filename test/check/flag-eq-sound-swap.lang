@@ -1,0 +1,3 @@
+-- flagEqSound off the diagonal: flagEq flagYes flagNo is flagNo, so refl is not a proof.
+keyspace Bal : Size -> Key
+def bad : Path Flag flagYes flagNo := flagEqSound flagYes flagNo refl

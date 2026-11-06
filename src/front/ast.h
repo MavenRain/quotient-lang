@@ -22,7 +22,8 @@ typedef enum {
      (NULL in the cell of `[ ]`), right the next cell or NULL. Only the
      body of a `fun` can be a system (the tube of hcomp, S2 R2 (a)). */
   TERM_SYSTEM,
-  TERM_BRANCH /* left -> right: left the key, right the branch */
+  TERM_BRANCH, /* left -> right: left the key, right the branch */
+  TERM_APPEND  /* left ++ right: check.c selects the append def by the type of left (S6 u7, Q-S6-36 (a)) */
 } TermKind;
 
 typedef struct Term Term;

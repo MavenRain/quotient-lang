@@ -21,7 +21,7 @@ static const char *const OP_NAMES[] = {
   [OP_FILTER] = "filter", [OP_WITNESS] = "witness", [OP_PAYLOAD] = "payload",
   [OP_NAT_ADD] = "natAdd", [OP_NAT_SUB] = "natSub",
   [OP_AMOUNT] = "Amount", [OP_AMOUNT_ADD] = "amountAdd", [OP_AMOUNT_SUB] = "amountSub",
-  [OP_NAT_EQ] = "natEq", [OP_NAT_LE] = "natLe",
+  [OP_NAT_EQ] = "natEq", [OP_NAT_LE] = "natLe", [OP_NAT_SUCC] = "natSucc",
   [OP_FLAG_IF] = "flagIf",
   [OP_NAT_DIV] = "natDiv", [OP_NAT_MOD] = "natMod", [OP_FM_LEN] = "len", [OP_VALUE_COUNT] = "valueCount",
   [OP_PROJ] = "?", [OP_KMAP] = "Map", [OP_KMAP_OF] = "mapOf",
@@ -46,7 +46,7 @@ static const unsigned char OP_ARITY[] = {
   [OP_FOLD_FAMILY] = VARIES, [OP_UNFOLD] = 3, [OP_FILTER] = 2, [OP_WITNESS] = 1,
   [OP_PAYLOAD] = 1, [OP_NAT_ADD] = 2, [OP_NAT_SUB] = 2,
   [OP_AMOUNT] = 0, [OP_AMOUNT_ADD] = 2, [OP_AMOUNT_SUB] = 2,
-  [OP_NAT_EQ] = 2, [OP_NAT_LE] = 2, [OP_FLAG_IF] = 3,
+  [OP_NAT_EQ] = 2, [OP_NAT_LE] = 2, [OP_NAT_SUCC] = 1, [OP_FLAG_IF] = 3,
   [OP_NAT_DIV] = 2, [OP_NAT_MOD] = 2, [OP_FM_LEN] = 2, [OP_VALUE_COUNT] = 3,
   [OP_PROJ] = 1, [OP_KMAP] = 2, [OP_KMAP_OF] = VARIES, [OP_KMAP_GET] = 3, [OP_KMAP_SET] = 4,
   [OP_INTERVAL] = 0, [OP_TRANSP] = 3,
@@ -699,23 +699,92 @@ static const Value *reduce_either(Machine *m, const Value *const *a, uint32_t n)
    formal hcomp at Sum or Unit, elim stays neutral (O22). FIELD is 0 at Sum
    and Unit, and the family + 1 at a domain family (S7 B1). */
 static const Value *elim_family(Machine *m, uint32_t family, const Value *const *a, uint32_t n);
+static const Value *reduce_elim(Machine *m, uint32_t inst, uint32_t field, const Value *const *a, uint32_t n);
+
+/* 1 when V is an open natSucc head (S6 u4b1, Q-S6-15 (a)). */
+static int succ_head(const Value *v) {
+  return v != NULL && v->kind == VAL_STUCK && v->op == OP_NAT_SUCC;
+}
+
+/* elim P c0 c1 (natSucc x) on an open x (S6 u4b1): c1 x (elim P c0 c1 x). */
+static const Value *elim_succ(Machine *m, const Value *const *a, const Value *s) {
+  const Value *b[4];
+  const Value *ih;
+  b[0] = a[0];
+  b[1] = a[1];
+  b[2] = a[2];
+  b[3] = s->args[0];
+  ih = reduce_elim(m, 2u, 0u, b, 4u);
+  return ih == NULL ? NULL : apply_value(m, apply_value(m, a[2], s->args[0]), ih);
+}
+
+/* elim P c0 c1 k on a literal k (S6 u4b1): c0, then acc = c1 j acc for
+   j = 0 .. k - 1. Each step spends 1, as fold. */
+static const Value *elim_nat(Machine *m, const Value *const *a, uint64_t k) {
+  const Value *acc = a[1];
+  uint64_t j;
+  for (j = 0; j < k && acc != NULL; j++)
+    acc = spend(m, 1) ? apply_value(m, apply_value(m, a[2], val_nat(m, j)), acc) : NULL;
+  return acc;
+}
+
+/* elim P c0 c1 xs on a list (S6 u4b1), as reduce_fold_list: a neutral
+   tail gives a stuck elim on the tail, nil gives c0, then for each cell
+   from the end acc = c1 a l acc, with l the tail of that cell. */
+static const Value *elim_list(Machine *m, const Value *const *a, const Value *xs) {
+  const Value *acc = NULL;
+  const Value *b[4];
+  Spine s;
+  uint32_t i;
+  if (!spine_of(m, xs, &s))
+    return NULL;
+  b[0] = a[0];
+  b[1] = a[1];
+  b[2] = a[2];
+  b[3] = s.tail;
+  switch (scrut_of(s.tail)) {
+  case SCRUT_NEUTRAL:
+    acc = val_op(m, VAL_STUCK, OP_ELIM, 2u, 0, b, 4u);
+    break;
+  case SCRUT_VALUE:
+    acc = val_is(s.tail, OP_NIL) ? a[1] : internal(m, "a list that does not end in nil");
+    break;
+  }
+  for (i = s.count; i > 0 && acc != NULL; i--)
+    acc = spend(m, 1) ? apply_value(m, apply_value(m, apply_value(m, a[2], s.cells[i - 1u]->args[0]), s.cells[i - 1u]->args[1]), acc) : NULL;
+  return acc;
+}
 
 static const Value *reduce_elim(Machine *m, uint32_t inst, uint32_t field, const Value *const *a, uint32_t n) {
   const Value *x = a[n - 1u];
   const Value *out;
   if (field != 0u)
     return elim_family(m, field - 1u, a, n);
+  if (inst == 2u && succ_head(x))
+    return elim_succ(m, a, x);
   if (blocked(m, x, OP_ELIM, inst, 0, a, n, &out))
     return out;
   if (val_is(x, OP_HCOMP))
     return val_op(m, VAL_STUCK, OP_ELIM, inst, 0, a, n);
+  if (inst == 2u && x->kind == VAL_NAT)
+    return elim_nat(m, a, x->nat);
+  if (inst == 2u && (val_is(x, OP_NIL) || val_is(x, OP_CONS)))
+    return elim_list(m, a, x);
   if (inst == 2u && val_is(x, OP_INL))
     return apply_value(m, a[1], x->args[0]);
   if (inst == 2u && val_is(x, OP_INR))
     return apply_value(m, a[2], x->args[0]);
+  if (inst == 2u && val_is(x, OP_SOME))
+    return apply_value(m, a[2], x->args[0]);
+  if (inst == 2u && (val_is(x, OP_FLAG_YES) || val_is(x, OP_NONE)))
+    return a[1];
+  if (inst == 2u && val_is(x, OP_FLAG_NO))
+    return a[2];
   if (inst == 1u && val_is(x, OP_UNIT_VAL))
     return a[1];
-  return internal(m, "an elim of a value that is not a Sum or Unit");
+  if (inst == 1u && val_is(x, OP_PAIR))
+    return apply_value(m, apply_value(m, a[1], x->args[0]), x->args[1]);
+  return internal(m, "an elim of a value that is not a Sum, Unit, Flag, Option, Prod, Nat or List");
 }
 
 static const Value *reduce_option(Machine *m, const Value *const *a, uint32_t n) {
@@ -1496,10 +1565,50 @@ static const Value *fin_case(Machine *m, const Value *const *a, uint32_t n) {
   return a[a[0]->nat + 1u];
 }
 
+/* natSucc (S6 u4b1, Q-S6-15 (a)): k + 1 on a literal k, a stuck head on
+   an open term. A literal at 2^64 - 1 is an internal fault. */
+static const Value *nat_succ(Machine *m, const Value *const *a, uint32_t n) {
+  const Value *out;
+  if (blocked(m, a[0], OP_NAT_SUCC, 0, 0, a, n, &out))
+    return out;
+  if (a[0]->kind != VAL_NAT)
+    return internal(m, "a natSucc of a value that is not a Nat");
+  if (a[0]->nat == UINT64_MAX)
+    return internal(m, "a natSucc at 2^64 - 1");
+  return val_nat(m, a[0]->nat + 1u);
+}
+
+static const Value *nat_test(Machine *m, Op op, const Value *const *a, uint32_t n);
+
+/* natEq with an open natSucc head on side S (S6 u4b1, Q-S6-16 (a)):
+   natEq (natSucc x) (natSucc y) = natEq x y; natSucc x against 0 is
+   flagNo; natSucc x against k > 0 is natEq x (k - 1); the mirrors too.
+   NULL when no rule applies. */
+static const Value *nat_eq_open(Machine *m, const Value *const *a, uint32_t s) {
+  const Value *b[2];
+  const Value *k = a[1u - s];
+  if (succ_head(k)) {
+    b[0] = a[0]->args[0];
+    b[1] = a[1]->args[0];
+    return nat_test(m, OP_NAT_EQ, b, 2u);
+  }
+  if (k->kind != VAL_NAT)
+    return NULL;
+  if (k->nat == 0u)
+    return flag(m, 0);
+  b[s] = a[s]->args[0];
+  b[1u - s] = val_nat(m, k->nat - 1u);
+  return nat_test(m, OP_NAT_EQ, b, 2u);
+}
+
 static const Value *nat_test(Machine *m, Op op, const Value *const *a, uint32_t n) {
   const Value *out;
   uint64_t x = 0;
   uint64_t y = 0;
+  uint32_t s = succ_head(a[0]) ? 0u : 1u;
+  const Value *open = op == OP_NAT_EQ && succ_head(a[s]) ? nat_eq_open(m, a, s) : NULL;
+  if (open != NULL)
+    return open;
   if (!nat_args(m, op, a, n, &x, &y, &out))
     return out;
   return flag(m, op == OP_NAT_EQ ? x == y : x <= y);
@@ -2085,6 +2194,7 @@ static const Value *transp_data(Machine *m, const Value *head, const Value *line
   case OP_AMOUNT_SUB:
   case OP_NAT_EQ:
   case OP_NAT_LE:
+  case OP_NAT_SUCC:
   case OP_FLAG_IF:
   case OP_NAT_DIV:
   case OP_NAT_MOD:
@@ -3040,6 +3150,8 @@ static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, 
     return fin_neg(m, a, n);
   case OP_FIN_CASE:
     return fin_case(m, a, n);
+  case OP_NAT_SUCC:
+    return nat_succ(m, a, n);
   case OP_NAT_EQ:
   case OP_NAT_LE:
     return nat_test(m, op, a, n);

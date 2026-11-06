@@ -1,0 +1,8 @@
+-- A fold out of Trace needs the traceSwap case (S6 u3). This fold has
+-- three cases and no traceSwap case, so the kernel refuses it.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
+def f : Trace -> Trace := fun (t : Trace) => fold traceEps (fun (a : Body) (m : Trace) => traceCons a m) (fun (x : Trace) (y : Trace) (p : Path Trace x y) (q : Path Trace x y) => fun (i : I) => fun (j : I) => traceSquash x y p q i j) t

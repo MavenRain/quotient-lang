@@ -1,0 +1,14 @@
+-- traceEval applies the letters of a trace from the left, so the eval of
+-- the trace a b is effSeq (step a) (effSeq (step b) just). This row has the
+-- order reversed: the endpoints do not convert, and the check gives
+-- PATH_END at tEval2.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
+def tEff : isSet Eff := effIsSet
+def tTrace : isSet Trace := traceIsSet
+def tSize : isSet Size := sizeIsSet
+def tMaybe : isSet (Maybe Size) := maybeIsSet Size sizeIsSet
+def tEval2 : (a : Body) -> (b : Body) -> Path Eff (traceEval (traceCons a (traceCons b traceEps))) (effSeq (step b) (effSeq (step a) just)) := fun (a : Body) (b : Body) => fun (i : I) => effSeq (step b) (effSeq (step a) just)

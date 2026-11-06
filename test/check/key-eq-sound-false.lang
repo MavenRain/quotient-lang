@@ -1,0 +1,3 @@
+-- keyEqSound needs keyEq a b = flagYes: a hypothesis on flagNo does not give a path.
+keyspace Bal : Size -> Key
+def bad : (a : Key) -> (b : Key) -> Path Flag (keyEq a b) flagNo -> Path Key a b := keyEqSound

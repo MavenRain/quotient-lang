@@ -1,0 +1,2 @@
+-- elim refuses a wrong case count: Flag has two constructors, so elim on Flag needs a motive and two cases, here one case.
+def bad : Flag -> Nat := fun (f : Flag) => elim (fun (t : Flag) => Nat) 1 f

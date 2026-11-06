@@ -4,6 +4,7 @@
    hint) or its type is inferred. Two types are equal when their normal forms
    are equal (front/eval.c). The checker writes core terms (front/core.h). */
 #include "front/check.h"
+#include "front/front.h"
 #include "front/lexer.h"
 #include "front/parser.h"
 
@@ -185,6 +186,7 @@ static const Builtin BUILTINS[] = {
   {"natSub", 2, RULE_NAT2, OP_NAT_SUB, OP_NAT, 0, VIS_INTERNAL},
   {"natEq", 2, RULE_NAT2, OP_NAT_EQ, OP_FLAG, 0, VIS_INTERNAL},
   {"natLe", 2, RULE_NAT2, OP_NAT_LE, OP_FLAG, 0, VIS_INTERNAL},
+  {"natSucc", 1, RULE_NAT2, OP_NAT_SUCC, OP_NAT, 0, VIS_INTERNAL},
   {"flagIf", 3, RULE_FLAG_IF, OP_FLAG_IF, OP_FLAG, 0, VIS_INTERNAL},
   {"Map", 2, RULE_KMAP, OP_KMAP, OP_NAT, 0, VIS_INTERNAL},
   {"mapEmpty", 0, RULE_EMPTY, OP_KMAP_OF, OP_KMAP, 0, VIS_INTERNAL},
@@ -893,17 +895,67 @@ static const Core *rule_option(Call *k) {
 }
 
 /* The type of case I of elim with the motive PV on a value of type ST:
-   (a : A) -> P (inl a), (b : B) -> P (inr b), or P unit. */
+   (a : A) -> P (inl a), (b : B) -> P (inr b), or P unit. S6 u4b1
+   (Q-S6-14 (a)): P flagYes, P flagNo; P none, (a : A) -> P (some a);
+   (a : A) -> (b : B) -> P (pair a b); P 0, (n : Nat) -> P n ->
+   P (natSucc n); P nil, (a : A) -> (l : List A) -> P l -> P (cons a l). */
+/* natSucc on an open X as the evaluator gives it (S6 u4b1): a VAL_STUCK
+   head, as eval.c nat_succ gives through blocked(). tyop gives a value
+   that the Nat ops refuse. */
+static const Value *succ_open(Checker *c, const Value *x) {
+  const Value *a[1];
+  a[0] = x;
+  return val_op(c->m, VAL_STUCK, OP_NAT_SUCC, 0, 0, a, 1u);
+}
+
 static const Value *elim_case(Checker *c, const Value *pv, const Value *st, uint32_t i) {
   const Value *x = val_var(c->m, c->level);
+  const Value *y = val_var(c->m, c->level + 1u);
   if (val_is(st, OP_UNIT))
     return apply_value(c->m, pv, tyop(c, OP_UNIT_VAL, 0, NULL, NULL, NULL));
+  if (val_is(st, OP_FLAG))
+    return apply_value(c->m, pv, tyop(c, i == 0u ? OP_FLAG_YES : OP_FLAG_NO, 0, NULL, NULL, NULL));
+  if (val_is(st, OP_OPTION) && i == 0u)
+    return apply_value(c->m, pv, tyop(c, OP_NONE, 0, NULL, NULL, NULL));
+  if (val_is(st, OP_OPTION))
+    return here(c, core_bind(c, CORE_PI, "a", quote_value(c->m, c->level, st->args[0]),
+                             quote_value(c->m, c->level + 1u, apply_value(c->m, pv, tyop(c, OP_SOME, 1, x, NULL, NULL)))));
+  if (val_is(st, OP_PROD))
+    return here(c, core_bind(c, CORE_PI, "a", quote_value(c->m, c->level, st->args[0]),
+                             core_bind(c, CORE_PI, "b", quote_value(c->m, c->level + 1u, st->args[1]),
+                                       quote_value(c->m, c->level + 2u, apply_value(c->m, pv, tyop(c, OP_PAIR, 2, x, y, NULL))))));
+  if (val_is(st, OP_NAT) && i == 0u)
+    return apply_value(c->m, pv, val_nat(c->m, 0));
+  if (val_is(st, OP_NAT))
+    return here(c, core_bind(c, CORE_PI, "n", quote_value(c->m, c->level, st),
+                             core_bind(c, CORE_PI, "ih", quote_value(c->m, c->level + 1u, apply_value(c->m, pv, x)),
+                                       quote_value(c->m, c->level + 2u, apply_value(c->m, pv, succ_open(c, x))))));
+  if (val_is(st, OP_LIST) && i == 0u)
+    return apply_value(c->m, pv, tyop(c, OP_NIL, 0, NULL, NULL, NULL));
+  if (val_is(st, OP_LIST))
+    return here(c, core_bind(c, CORE_PI, "a", quote_value(c->m, c->level, st->args[0]),
+                             core_bind(c, CORE_PI, "l", quote_value(c->m, c->level + 1u, st),
+                                       core_bind(c, CORE_PI, "ih", quote_value(c->m, c->level + 2u, apply_value(c->m, pv, y)),
+                                                 quote_value(c->m, c->level + 3u, apply_value(c->m, pv, tyop(c, OP_CONS, 2, x, y, NULL)))))));
   return here(c, core_bind(c, CORE_PI, i == 0u ? "a" : "b", quote_value(c->m, c->level, st->args[i]),
                            quote_value(c->m, c->level + 1u, apply_value(c->m, pv, tyop(c, i == 0u ? OP_INL : OP_INR, 1, x, NULL, NULL)))));
 }
 
+/* The case count of elim on ST (S6 u4b1, Q-S6-14 (a)): 2 on Sum, Flag,
+   Option, Nat and List; 1 on Unit and Prod; 0 when ST has no elim. */
+static uint32_t elim_want(const Value *st) {
+  static const Op ops[7] = {OP_SUM, OP_FLAG, OP_OPTION, OP_NAT, OP_LIST, OP_UNIT, OP_PROD};
+  uint32_t i;
+  for (i = 0; i < 7u; i++) {
+    if (val_is(st, ops[i]))
+      return i < 5u ? 2u : 1u;
+  }
+  return 0u;
+}
+
 /* A printed motive has no binder annotation. Its domain can instead come
-   from the scrutinee at the Unit or Sum argument position. */
+   from the scrutinee: at i = 3 for a 2-case elim, at i = 2 for a 1-case
+   elim. Try i = 3 first: a 2-case elim can have a Prod case at i = 2. */
 static const Value *elim_domain(Checker *c, const Term *const *args, uint32_t argc) {
   const Value *dom = lam_domain(c, args[0]);
   uint32_t i;
@@ -915,10 +967,10 @@ static const Value *elim_domain(Checker *c, const Term *const *args, uint32_t ar
     if (try_infer(c, args[i], &dom) != NULL && val_is(dom, OP_FAMILY) && c->m->families[dom->inst].block_count == 1u && i == c->m->families[dom->inst].ctor_count + 1u)
       return dom;
   }
-  for (i = 2u; i < argc && i < 4u; i++) {
-    if (try_infer(c, args[i], &dom) != NULL && val_is(dom, i == 2u ? OP_UNIT : OP_SUM))
-      return dom;
-  }
+  if (argc > 3u && try_infer(c, args[3], &dom) != NULL && elim_want(dom) == 2u)
+    return dom;
+  if (argc > 2u && try_infer(c, args[2], &dom) != NULL && elim_want(dom) == 1u)
+    return dom;
   return NULL;
 }
 
@@ -975,7 +1027,9 @@ static const Core *elim_on_family(Call *k, const Core *motive, const Value *pt, 
 /* elim P c1 .. cn x (USER ruling S4): the dependent eliminator of Sum A B
    (two cases) and Unit (one case), with the motive P : X -> Type k and the
    type P x. A domain family outside a block goes to elim_on_family (S7
-   B1, O21). Nat, List or a Path has no elim (no K). */
+   B1, O21). S6 u4b1 (Q-S6-13 (b), Q-S6-14 (a)): also Flag, Option A, Nat
+   and List A (two cases) and Prod A B (one case); Nat and List get
+   dependent induction. A Path has no elim (no K). */
 static const Core *rule_elim(Call *k) {
   Checker *c = k->c;
   const Value *st = elim_domain(c, k->args, k->argc);
@@ -1012,9 +1066,9 @@ static const Core *rule_elim(Call *k) {
     return NULL;
   if (val_is(st, OP_FAMILY) && c->m->families[st->inst].block_count == 1u)
     return elim_on_family(k, cores[0], pt, st, d);
-  if (d != 0u || (!val_is(st, OP_SUM) && !val_is(st, OP_UNIT)))
-    return nul(FAIL(c, "TYPE_MISMATCH", "elim needs a motive on Sum A B, Unit or a domain family outside a block, found a motive of type %s", show(c, pt)));
-  want = val_is(st, OP_SUM) ? 2u : 1u;
+  want = elim_want(st);
+  if (d != 0u || want == 0u)
+    return nul(FAIL(c, "TYPE_MISMATCH", "elim needs a motive on Sum A B, Unit, Flag, Option A, Prod A B, Nat, List A or a domain family outside a block, found a motive of type %s", show(c, pt)));
   if (k->argc < want + 2u)
     return nul(FAIL(c, "TYPE_MISMATCH", "elim on %s needs a motive, %u cases and a scrutinee", show(c, st), want));
   s = check(c, k->args[want + 1u], st);
@@ -1443,15 +1497,16 @@ static uint32_t find_family(const Machine *m, const char *name);
    ruling Q-S2-4 (a)). A fold or elim out of Bag or Pfin with a wrong
    count of cases gives REFUSE_BAG_NONCOMM: the comm case is the
    commutative clause (law L1) and, at Pfin, the pfinIdem case is the
-   idempotent clause (law L2). Other families keep TYPE_MISMATCH. */
+   idempotent clause (law L2). At Trace (S6 u3), the traceSwap case is
+   the swap clause of the ind pairs. Other families keep TYPE_MISMATCH. */
 static int bag_family(const Machine *m, uint32_t fam) {
-  return fam != NO_FAMILY && (fam == find_family(m, "Bag") || fam == find_family(m, "Pfin"));
+  return fam != NO_FAMILY && (fam == find_family(m, "Bag") || fam == find_family(m, "Pfin") || fam == find_family(m, "Trace"));
 }
 
 /* The clause text of REFUSE_BAG_NONCOMM at FAM (S3): Pfin adds the idem
    case (law L2). */
 static const char *bag_clause(const Machine *m, uint32_t fam) {
-  return fam == find_family(m, "Pfin") ? "the pfinComm case is the commutative clause (law L1) and the pfinIdem case is the idempotent clause (law L2)" : "the bagComm case is the commutative clause (law L1)";
+  return fam == find_family(m, "Pfin") ? "the pfinComm case is the commutative clause (law L1) and the pfinIdem case is the idempotent clause (law L2)" : fam == find_family(m, "Trace") ? "the traceSwap case is the swap clause of the ind pairs (S6 u3)" : "the bagComm case is the commutative clause (law L1)";
 }
 
 /* elim P c1 .. cn x over the domain family of ST outside a block (S7 B1,
@@ -3169,6 +3224,56 @@ static const Core *elab_ival(Checker *c, const Term *t, CoreKind kind, const Val
   return finish(c, core_iop(c, kind, a, b), hint, type);
 }
 
+/* The append defs of `c ++ d` (S6 u7, USER ruling Q-S6-36 (a)), in the
+   order of the test. */
+static const char *const APPEND_DEFS[] = {"traceAppend", "chainAppend"};
+
+/* A copy of AT with the kind KIND, the name NAME and the parts LEFT and
+   RIGHT. The line and the column of AT stay. */
+static Term *append_term(Checker *c, const Term *at, TermKind kind, const char *name, const Term *left, const Term *right) {
+  Term *t = arena_alloc(c->m->arena, sizeof *t);
+  if (t == NULL) {
+    FAIL(c, "OOM", "out of memory");
+    return NULL;
+  }
+  *t = *at;
+  t->kind = kind;
+  t->name = name;
+  t->left = left;
+  t->right = right;
+  return t;
+}
+
+/* `c ++ d` (S6 u7, USER ruling Q-S6-36 (a)): the type of c selects the
+   def. A def of APPEND_DEFS applies when the domain of its type converts
+   with the type of c: a Trace gives traceAppend and a Blockchain gives
+   chainAppend. The core gets the app `def c d`, so eval, ir and wasm do
+   not change. When no def applies, the result is REFUSE_APPEND. */
+static const Core *elab_append(Checker *c, const Term *t, const Value *hint, const Value **type) {
+  const Value *left = NULL;
+  const char *def = NULL;
+  const Term *fn;
+  const Term *head;
+  const Term *app;
+  uint32_t i;
+  if (infer(c, t->left, &left) == NULL || left == NULL)
+    return NULL;
+  for (i = 0; def == NULL && i < sizeof APPEND_DEFS / sizeof APPEND_DEFS[0]; i++) {
+    const Value *ft = NULL;
+    const Term *name = append_term(c, t, TERM_VAR, APPEND_DEFS[i], NULL, NULL);
+    if (name == NULL)
+      return NULL;
+    if (try_infer(c, name, &ft) != NULL && ft != NULL && ft->kind == VAL_PI && conv_values(c->m, c->level, ft->dom, left))
+      def = APPEND_DEFS[i];
+  }
+  if (def == NULL)
+    return nul(FAIL(c, "REFUSE_APPEND", "the left side of ++ is not a Trace or a Blockchain, so no append def applies (S6 u7)"));
+  fn = append_term(c, t, TERM_VAR, def, NULL, NULL);
+  head = fn == NULL ? NULL : append_term(c, t, TERM_APP, NULL, fn, t->left);
+  app = head == NULL ? NULL : append_term(c, t, TERM_APP, NULL, head, t->right);
+  return app == NULL ? NULL : elab(c, app, hint, type);
+}
+
 static const Core *elab_inner(Checker *c, const Term *t, const Value *hint, const Value **type) {
   switch (t->kind) {
   case TERM_VAR:
@@ -3219,6 +3324,8 @@ static const Core *elab_inner(Checker *c, const Term *t, const Value *hint, cons
     return elab_ival(c, t, CORE_IMEET, hint, type);
   case TERM_IJOIN:
     return elab_ival(c, t, CORE_IJOIN, hint, type);
+  case TERM_APPEND:
+    return elab_append(c, t, hint, type);
   case TERM_SYSTEM:
   case TERM_BRANCH:
     return nul(FAIL(c, "TYPE_MISMATCH", "a system [ phi -> t, ... ] is only the tube of hcomp, fun (i : I) => [ ... ]"));
@@ -4165,6 +4272,69 @@ static const Value *sig_arrow(Checker *c, const Value *tv, uint32_t level, const
   return closure_apply(m, tv, val_var(m, level));
 }
 
+/* REFUSE_EQ_UNDECIDABLE (quotient-lang S6 u8, N7, USER rulings Q-S6-6
+   (a), Q-S6-39 (b) and Q-S6-40 (a)): a program def of the type
+   A -> A -> C, with A one of EQ_UNDECIDABLE and C one of EQ_CODOMAINS, is
+   an equality test on A, and equality on A is not decidable. The test
+   reads the type value, so an alias of A and the form
+   (a : A) -> (b : A) -> C give the same code. Only the curried form has
+   the test (Q-S6-40 (a)). A name that is not in scope (Blockchain with no
+   Trace) has no test. Flag, Sum and Unit are core names, not defs or
+   families, so sig_name_value gives NULL for them: the codomain values
+   come from check_type of a made term. */
+static const char *const EQ_UNDECIDABLE[] = {"Eff", "Blockchain"};
+static const char *const EQ_CODOMAINS[] = {"Flag", "Sum Unit Unit"};
+
+/* The type value of the closed type term T, as check_type gives it; NULL
+   if T does not check. The diagnostic of a failed check is not kept. */
+static const Value *eq_type_value(Checker *c, const Term *t) {
+  Diag saved = *c->m->diag;
+  uint64_t level = 0;
+  const Core *k = check_type(c, t, &level);
+  if (k == NULL)
+    *c->m->diag = saved;
+  return k == NULL ? NULL : here(c, k);
+}
+
+static int eq_decidable(Checker *c, const Decl *d, const Value *tv) {
+  Term flag;
+  Term sum;
+  Term unit;
+  Term half;
+  Term either;
+  const Value *cods[2];
+  size_t i;
+  size_t j;
+  memset(&flag, 0, sizeof flag);
+  memset(&sum, 0, sizeof sum);
+  memset(&unit, 0, sizeof unit);
+  memset(&half, 0, sizeof half);
+  memset(&either, 0, sizeof either);
+  flag.kind = TERM_VAR;
+  flag.name = "Flag";
+  sum.kind = TERM_VAR;
+  sum.name = "Sum";
+  unit.kind = TERM_VAR;
+  unit.name = "Unit";
+  half.kind = TERM_APP;
+  half.left = &sum;
+  half.right = &unit;
+  either.kind = TERM_APP;
+  either.left = &half;
+  either.right = &unit;
+  cods[0] = eq_type_value(c, &flag);
+  cods[1] = eq_type_value(c, &either);
+  for (i = 0u; i < sizeof EQ_UNDECIDABLE / sizeof EQ_UNDECIDABLE[0]; i++) {
+    const char *a = EQ_UNDECIDABLE[i];
+    const Value *rest = sig_arrow(c, tv, c->level, a);
+    const Value *cod = rest == NULL ? NULL : sig_arrow(c, rest, c->level + 1u, a);
+    for (j = 0u; cod != NULL && j < sizeof cods / sizeof cods[0]; j++)
+      if (cods[j] != NULL && conv_values(c->m, c->level + 2u, cod, cods[j]))
+        return FAIL(c, "REFUSE_EQ_UNDECIDABLE", "%s has the type %s -> %s -> %s: equality on %s is not decidable, so a program cannot test it (N7, USER rulings Q-S6-6 (a), Q-S6-39 (b))", d->name, a, a, EQ_CODOMAINS[j], a);
+  }
+  return 1;
+}
+
 /* The bagFold arguments after A and M, in the bagFold order (USER
    rulings Q-S4-4 (a) and Q-S4-6 (a)). A program with the slot Sig gives
    each of them, and the front end gives agg after the last of them. */
@@ -4309,6 +4479,8 @@ static int program_type(Checker *c, const char *name, const Value *tv) {
    kernel_sig refuses it before the name check. */
 static int check_sig(Checker *c, const Decl *d, const Value *tv, const Core *body) {
   uint32_t i = sig_row(d->name);
+  if (d->origin == ORIGIN_PROGRAM && !eq_decidable(c, d, tv))
+    return 0;
   if (d->origin != ORIGIN_PROGRAM || i == SIG_COUNT)
     return 1;
   switch (SIGNATURE[i].kind) {
@@ -5497,6 +5669,8 @@ static int ind_meet(Checker *c, const KeyPat *ka, const KeyPat *kb, IndClause *c
     row->dep_space = ka->space;
   clauses[*n].lits = lits;
   clauses[*n].lit_count = k;
+  clauses[*n].ka = ka;
+  clauses[*n].kb = kb;
   (*n)++;
   return 1;
 }
@@ -5551,6 +5725,126 @@ static int ind_matrix(Checker *c) {
   return 1;
 }
 
+/* The placeholder def ind of front.c (USER ruling Q-S6-11 (a)). */
+static int ind_site(const Decl *d) {
+  return d->kind == DECL_DEF && d->origin == ORIGIN_DOMAIN && d->body == NULL && d->name != NULL && strcmp(d->name, "ind") == 0;
+}
+
+/* The def ind at its placeholder (quotient-lang S6, USER ruling Q-S6-11
+   (a)). The footprint families are earlier and are checked, so the Ind
+   matrix is made here (not after all the decls). The body comes from the
+   matrix (front_ind_body) and the def checks as a normal def. */
+static int check_ind(Checker *c, const Decl *d) {
+  Decl *def = arena_alloc(c->m->arena, sizeof *def);
+  if (def == NULL)
+    return diag_fail(c->m->diag, "OOM", NULL, "out of memory");
+  if (!ind_matrix(c))
+    return 0;
+  c->m->ind.built = 1u;
+  *def = *d;
+  def->body = front_ind_body(c->m->arena, c->decls, &c->m->ind, d->line, d->col);
+  if (def->body == NULL)
+    return diag_fail(c->m->diag, "OOM", NULL, "out of memory");
+  return check_decl(c, def);
+}
+
+/* A generated def of front.c body_commute whose name has PREFIX
+   (com#leaf or com#slot, USER ruling Q-S6-12 (b)). */
+static int commute_site(const Decl *d, const char *prefix) {
+  return d->kind == DECL_DEF && d->origin == ORIGIN_DOMAIN && d->name != NULL && strncmp(d->name, prefix, strlen(prefix)) == 0;
+}
+
+/* The name of the K-th Pi domain of T (the family F or G of a commute
+   leaf), or "?" when T has another form. */
+static const char *pi_dom(const Term *t, unsigned k) {
+  if (t == NULL || t->kind != TERM_PI)
+    return "?";
+  if (k > 0u)
+    return pi_dom(t->right, k - 1u);
+  return t->left != NULL && t->left->kind == TERM_VAR ? t->left->name : "?";
+}
+
+/* 1 when the diag is set and is OOM: that diag stays. */
+static int diag_oom(const Diag *diag) {
+  return diag->set && diag->code != NULL && strcmp(diag->code, "OOM") == 0;
+}
+
+/* 1 when the matrix row of the footprint families F and G is IND_IF
+   (quotient-lang S6 u4c2, USER rulings Q-S6-22 (a) and Q-S6-25 (b)). At
+   that row the slot and the leaf check with the h forms of front.c. */
+static int commute_if_row(const Checker *c, const char *f, const char *g) {
+  int swap = 0;
+  const IndRow *row = front_ind_row(&c->m->ind, f, g, &swap);
+  return row != NULL && row->verdict == IND_IF;
+}
+
+/* A copy of D in the arena, or NULL when it is out of memory. */
+static Decl *decl_copy(Checker *c, const Decl *d) {
+  Decl *e = arena_alloc(c->m->arena, sizeof *e);
+  if (e != NULL)
+    *e = *d;
+  return e;
+}
+
+/* A leaf com#leafN of the def commute at its pair (F, G) (quotient-lang
+   S6 u4a, USER ruling Q-S6-12 (b)). A leaf that does not check gives
+   REFUSE_COMMUTE at the pair and names the slot def commute<F><G>. */
+static int check_commute_leaf(Checker *c, const Decl *d) {
+  const char *f = pi_dom(d->type, 0u);
+  const char *g = pi_dom(d->type, 1u);
+  const Decl *use = d;
+  if (commute_if_row(c, f, g)) {
+    Decl *e = decl_copy(c, d);
+    if (e == NULL)
+      return diag_fail(c->m->diag, "OOM", NULL, "out of memory");
+    e->body = front_leaf_h_body(c->m->arena, d->body);
+    if (e->body == NULL)
+      return diag_fail(c->m->diag, "OOM", NULL, "out of memory");
+    use = e;
+  }
+  if (check_decl(c, use) || diag_oom(c->m->diag))
+    return !c->m->diag->set;
+  c->m->diag->set = 0;
+  return diag_fail(c->m->diag, "REFUSE_COMMUTE", "commute", "the steps of %s and %s do not commute: at f : %s and g : %s, ind (body%s f) (body%s g) is not flagNo and effSeq (step (body%s f)) (step (body%s g)) does not convert to effSeq (step (body%s g)) (step (body%s f)); write the slot def commute%s%s : (f : %s) -> (g : %s) -> (s : State) -> Path (Maybe State) (effSeq (step (body%s f)) (step (body%s g)) s) (effSeq (step (body%s g)) (step (body%s f)) s) (USER ruling Q-S6-12 (b))", f, g, f, g, f, g, f, g, g, f, f, g, f, g, f, g, g, f);
+}
+
+/* The slot check com#slotN := commute<F><G> (USER ruling Q-S6-12 (b)): a
+   slot with another type gives TYPE_MISMATCH at the slot. */
+static int check_commute_slot(Checker *c, const Decl *d) {
+  const char *f = pi_dom(d->type, 0u);
+  const char *g = pi_dom(d->type, 1u);
+  const char *slot = d->body != NULL && d->body->kind == TERM_VAR ? d->body->name : "?";
+  int h = commute_if_row(c, f, g);
+  const Decl *use = d;
+  if (h) {
+    Decl *e = decl_copy(c, d);
+    if (e == NULL)
+      return diag_fail(c->m->diag, "OOM", NULL, "out of memory");
+    e->type = front_slot_h_type(c->m->arena, d->type);
+    if (e->type == NULL)
+      return diag_fail(c->m->diag, "OOM", NULL, "out of memory");
+    use = e;
+  }
+  if (check_decl(c, use) || diag_oom(c->m->diag))
+    return !c->m->diag->set;
+  c->m->diag->set = 0;
+  if (h)
+    return diag_fail(c->m->diag, "TYPE_MISMATCH", slot, "the slot %s must have the type (f : %s) -> (g : %s) -> (h : Path Flag (ind (body%s f) (body%s g)) flagYes) -> (s : State) -> Path (Maybe State) (effSeq (step (body%s f)) (step (body%s g)) s) (effSeq (step (body%s g)) (step (body%s f)) s) (USER ruling Q-S6-12 (b))", slot, f, g, f, g, f, g, g, f);
+  return diag_fail(c->m->diag, "TYPE_MISMATCH", slot, "the slot %s must have the type (f : %s) -> (g : %s) -> (s : State) -> Path (Maybe State) (effSeq (step (body%s f)) (step (body%s g)) s) (effSeq (step (body%s g)) (step (body%s f)) s) (USER ruling Q-S6-12 (b))", slot, f, g, f, g, g, f);
+}
+
+/* The check of one decl: the ind placeholder, a commute leaf or slot
+   check, or a normal decl. */
+static int check_site(Checker *c, const Decl *d) {
+  if (ind_site(d))
+    return check_ind(c, d);
+  if (commute_site(d, "com#leaf"))
+    return check_commute_leaf(c, d);
+  if (commute_site(d, "com#slot"))
+    return check_commute_slot(c, d);
+  return check_decl(c, d);
+}
+
 int check_program(Arena *arena, const DeclList *decls, Machine *m, Diag *diag, CheckMode mode) {
   Checker c;
   size_t ctors = 0;
@@ -5584,13 +5878,14 @@ int check_program(Arena *arena, const DeclList *decls, Machine *m, Diag *diag, C
   c.mode = mode;
   for (i = 0; i < decls->count; i++) {
     checker_reset(&c, i, decls->items[i].name);
-    if (!check_decl(&c, &decls->items[i]))
+    if (!check_site(&c, &decls->items[i]))
       return 0;
     /* The other sorts of a block are checked with its first sort (S6). */
     i += decls->items[i].kind == DECL_FAMILY && decls->items[i].block_count > 1u ? decls->items[i].block_count - 1u : 0u;
   }
-  /* The Ind matrix of the footprint families (S5 unit 5). */
-  if (!ind_matrix(&c))
+  /* The Ind matrix of the footprint families (S5 unit 5), when the def
+     ind did not make it (Q-S6-11 (a)). */
+  if (!m->ind.built && !ind_matrix(&c))
     return 0;
   m->def = NULL;
   return 1;

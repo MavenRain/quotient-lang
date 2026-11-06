@@ -1,0 +1,7 @@
+-- Program family names keep their spelling in the generated proofs.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+family comxPay := mk (owner : Size) footprint b reads [Bal(b.owner)] writes []
+family comxf := mkf (ownerF : Size) footprint b reads [Bal(b.ownerF)] writes []
+def hygieneCommute : (f : comxPay) -> (g : comxf) -> Path Eff (effSeq (step (bodycomxPay f)) (step (bodycomxf g))) (effSeq (step (bodycomxf g)) (step (bodycomxPay f))) :=
+  fun (f : comxPay) (g : comxf) => commute (bodycomxPay f) (bodycomxf g) refl

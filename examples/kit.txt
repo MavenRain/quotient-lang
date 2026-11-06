@@ -17,6 +17,7 @@ equiv.lang
 glue.lang
 univ.lang
 elim.lang
+elim-builtin.lang
 history-bind.lang
 keyspace-two.lang
 keyspace-size-kit.lang
@@ -24,3 +25,13 @@ footprint-decl-nat.lang
 step-abort.lang
 key-eq.lang
 step-hygiene.lang
+trace.lang
+commute.lang
+commute-if.lang
+commute-slot.lang
+sets.lang
+key-eq-sound.lang
+eval.lang
+eval-append.lang
+chain.lang
+sugar.lang

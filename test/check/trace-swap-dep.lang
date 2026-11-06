@@ -1,0 +1,12 @@
+-- traceSwap needs a proof that ind a b is flagYes (S6 u3). Each Pay
+-- writes the one Total key, so Pay Pay is a dep pair, ind gives flagNo,
+-- refl does not check and the swap path is refused.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Total : Size -> Key
+def gen : Size := sz0
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from), Total(gen)] writes [Bal(b.to), Total(gen)]
+def p0 : Body := bodyPay (mk sz0 (szS sz0))
+def p1 : Body := bodyPay (mk (szS sz0) sz0)
+def bad : Path Trace (traceCons p0 (traceCons p1 traceEps)) (traceCons p1 (traceCons p0 traceEps)) :=
+  fun (i : I) => traceSwap p0 p1 traceEps refl i

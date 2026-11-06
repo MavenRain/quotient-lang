@@ -1,0 +1,9 @@
+-- pStable has the ~j and j faces swapped, so two faces of its hcomp
+-- system do not agree where they overlap (SYSTEM_OVERLAP). The text is
+-- in the base span, so the gate checks this row without --kit.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+def pStable : (A : Type 0) -> (F : (a : A) -> (x : A) -> Path A a x -> Path A a x) -> ((a : A) -> (x : A) -> (p : Path A a x) -> (q : Path A a x) -> Path (Path A a x) (F a x p) (F a x q)) -> isSet A :=
+  fun (A : Type 0) (F : (a : A) -> (x : A) -> Path A a x -> Path A a x) (C : (a : A) -> (x : A) -> (p : Path A a x) -> (q : Path A a x) -> Path (Path A a x) (F a x p) (F a x q)) (a : A) (b : A) (p : Path A a b) (q : Path A a b) =>
+    fun (j : I) => fun (i : I) => hcomp A (~i \/ i \/ ~j \/ j) (fun (k : I) => [ ~i -> F a a (fun (l : I) => a) @ k, i -> (C a b (fun (l : I) => p @ l) (fun (l : I) => q @ l) @ j) @ k, ~j -> F a (q @ i) (fun (l : I) => q @ (l /\ i)) @ k, j -> F a (p @ i) (fun (l : I) => p @ (l /\ i)) @ k ]) a

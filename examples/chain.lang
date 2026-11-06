@@ -1,0 +1,25 @@
+-- Blockchain (S6 u6, Q-S6-34 (a)): the prelude text has Blockchain,
+-- chainOf, chainEval, trunc1Map2, chainAppend and chainPath. A chain is
+-- an effect and a truncated trace fiber over it. cABpath is the closed
+-- path from chainAppend cA cB to chainOf (traceAppend tA tB).
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
+def pay0 : Body := bodyPay (mk sz0 (szS sz0))
+def cast0 : Body := bodyCast (mkcast sz0)
+def s0 : State := fun (k : Key) => sz0
+def tA : Trace := traceOne pay0
+def tB : Trace := traceOne cast0
+def cA : Blockchain := chainOf tA
+def cB : Blockchain := chainOf tB
+def eA : Path Eff (chainEval cA) (traceEval tA) := refl
+def cAB : Blockchain := chainAppend cA cB
+def l9 : (t : Trace) -> Path Eff (chainEval (chainOf t)) (traceEval t) := fun (t : Trace) => refl
+def l9App : (c : Blockchain) -> (d : Blockchain) -> Path Eff (chainEval (chainAppend c d)) (effSeq (chainEval c) (chainEval d)) := fun (c : Blockchain) (d : Blockchain) => refl
+def l9A : Path Eff (chainEval cA) (traceEval tA) := l9 tA
+def l9AB : Path Eff (chainEval cAB) (effSeq (traceEval tA) (traceEval tB)) := refl
+def l9Seq : Path Eff (chainEval cAB) (traceEval (traceAppend tA tB)) := fun (i : I) => evalAppend tA tB @ (~i)
+def rC : Val := effRun (chainEval cAB) s0 (Bal sz0)
+def cABpath : Path Blockchain cAB (chainOf (traceAppend tA tB)) := chainPath (effSeq (traceEval tA) (traceEval tB)) (traceEval (traceAppend tA tB)) (fun (i : I) => evalAppend tA tB @ (~i)) (payload cAB) (payload (chainOf (traceAppend tA tB)))

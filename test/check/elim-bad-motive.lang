@@ -1,0 +1,2 @@
+-- elim refuses a motive on Fin: Fin has no elim.
+def bad : Fin 2 -> Nat := fun (f : Fin 2) => elim (fun (t : Fin 2) => Nat) 0 1 f

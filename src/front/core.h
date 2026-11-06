@@ -58,6 +58,8 @@ typedef enum {
   OP_NAT_SUB,
   OP_NAT_EQ,
   OP_NAT_LE,
+  /* S6 u4b1 (Q-S6-15 (a)): the open Nat successor head (internal). */
+  OP_NAT_SUCC,
   OP_FLAG_IF,
   /* sealed-lang S2 (R14, R20): the base span. */
   OP_NAT_DIV,
@@ -341,10 +343,14 @@ typedef struct {
 } IndLit;
 
 /* A clause: the OR of its literals. An empty clause is false: the two keys
-   are always equal. */
+   are always equal. ka and kb are the key patterns of the pair (left and
+   right family) that gave the clause; the ind-if leaf of front.c uses them
+   (quotient-lang S6 u4c2, USER ruling Q-S6-20 (a)). */
 typedef struct {
   const IndLit *lits;
   uint32_t lit_count;
+  const KeyPat *ka;
+  const KeyPat *kb;
 } IndClause;
 
 /* A row of the matrix: the footprint families a <= b (declaration order)
@@ -366,6 +372,7 @@ typedef struct {
   uint32_t row_count;
   uint32_t row_cap;
   uint32_t body_count;
+  uint32_t built; /* 1 when the def ind made the matrix (Q-S6-11 (a)) */
 } IndMatrix;
 
 /* The checked program and the evaluation state. No global state: every

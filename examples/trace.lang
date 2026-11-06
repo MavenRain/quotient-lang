@@ -1,0 +1,30 @@
+-- The trace monoid (S6 u3, Q-S6-10 (a)): the front end puts the fixed
+-- family Trace over Body and traceFold directly after ind. A trace is a
+-- word over Body up to a swap of two letters that ind marks independent.
+-- Pay and Cast use different key spaces, so ind gives flagYes for the
+-- pair and refl is the swap proof.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
+def pay0 : Body := bodyPay (mk sz0 (szS sz0))
+def cast0 : Body := bodyCast (mkcast sz0)
+def tEps : Trace := traceEps
+def tTwo : Trace := traceCons pay0 (traceCons cast0 tEps)
+def tSwap : Path Trace tTwo (traceCons cast0 (traceCons pay0 tEps)) :=
+  fun (i : I) => traceSwap pay0 cast0 tEps refl i
+-- succ0 is szS on Trunc0 Size, a set.
+def succ0 : Trunc0 Size -> Trunc0 Size :=
+  fun (m : Trunc0 Size) => fold (fun (n : Size) => trunc0 Size (szS n))
+    (fun (x : Trunc0 Size) (y : Trunc0 Size) (p : Path (Trunc0 Size) x y) (q : Path (Trunc0 Size) x y) => fun (i : I) => fun (j : I) => squash0 Size x y p q i j) m
+def trunc0IsSet : isSet (Trunc0 Size) :=
+  fun (x : Trunc0 Size) (y : Trunc0 Size) (p : Path (Trunc0 Size) x y) (q : Path (Trunc0 Size) x y) => fun (i : I) => fun (j : I) => squash0 Size x y p q i j
+-- The length of a trace: the swap case is refl, because a swap keeps the
+-- length.
+def traceLen : Trace -> Trunc0 Size :=
+  traceFold (Trunc0 Size) trunc0IsSet (trunc0 Size sz0) (fun (a : Body) (m : Trunc0 Size) => succ0 m)
+    (fun (a : Body) (b : Body) (m : Trunc0 Size) (p : Path Flag (ind a b) flagYes) => fun (i : I) => succ0 (succ0 m))
+def lenEps : Trunc0 Size := traceLen tEps
+def lenTwo : Trunc0 Size := traceLen tTwo
+def lenSwap : Trunc0 Size := traceLen (tSwap @ i1)

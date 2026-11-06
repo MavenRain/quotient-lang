@@ -1,0 +1,12 @@
+-- traceSwap at an IND_IF pair needs a proof that ind a b is flagYes (S6
+-- u4c2). The first Pay writes Bal(1) and the second Pay reads Bal(1). Thus
+-- one key clause is flagNo, ind gives flagNo and refl does not check.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+def commutePayPay : (f : Pay) -> (g : Pay) -> Path Flag (ind (bodyPay f) (bodyPay g)) flagYes -> (s : State) -> Path (Maybe State) (effSeq (step (bodyPay f)) (step (bodyPay g)) s) (effSeq (step (bodyPay g)) (step (bodyPay f)) s) :=
+  fun (f : Pay) (g : Pay) (h : Path Flag (ind (bodyPay f) (bodyPay g)) flagYes) (s : State) => refl
+def payA : Body := bodyPay (mk sz0 (szS sz0))
+def payC : Body := bodyPay (mk (szS sz0) (szS (szS sz0)))
+def bad : Path Trace (traceCons payA (traceCons payC traceEps)) (traceCons payC (traceCons payA traceEps)) :=
+  fun (i : I) => traceSwap payA payC traceEps refl i

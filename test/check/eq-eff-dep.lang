@@ -1,0 +1,37 @@
+-- N7 (quotient-lang S6 u8, USER ruling Q-S6-6 (a)): the dependent form (a : Eff) -> (b : Eff) -> Flag gives REFUSE_EQ_UNDECIDABLE.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
+def pay0 : Body := bodyPay (mk sz0 (szS sz0))
+def cast0 : Body := bodyCast (mkcast sz0)
+def tA : Trace := traceOne pay0
+def sOne : Path Trace [pay0] (traceOne pay0) := refl
+def sCons : Path Trace (pay0 <| cast0 <| traceEps) (traceCons pay0 (traceCons cast0 traceEps)) := refl
+def sConsOne : Path Trace (pay0 <| [cast0]) (traceCons pay0 (traceOne cast0)) := refl
+def sEval : Path Eff [[tA]] (traceEval tA) := refl
+def sEvalCons : Path Eff [[pay0 <| [cast0]]] (traceEval (traceCons pay0 (traceOne cast0))) := refl
+def sApp : Path Trace (traceAppend [pay0] [cast0]) (traceCons pay0 (traceCons cast0 traceEps)) := refl
+def sLam : Trace -> Trace := fun (t : Trace) => pay0 <| t
+def sLamOne : Body -> Trace := fun (a : Body) => ([a])
+def sAppend : Trace := tA ++ tA
+def sAppendEq : Path Trace sAppend (traceAppend tA tA) := refl
+def sAppendR : Path Trace (tA ++ tA ++ tA) (traceAppend tA (traceAppend tA tA)) := refl
+def cA : Blockchain := chainOf tA
+def cAA : Blockchain := cA ++ cA
+def cAAEq : Path Blockchain cAA (chainAppend cA cA) := refl
+def vOne : Trace := [pay0]
+def vOneN : Trace := traceOne pay0
+def vCons : Trace := pay0 <| [cast0]
+def vConsN : Trace := traceCons pay0 (traceOne cast0)
+def vEval : Eff := [[pay0 <| [cast0]]]
+def vEvalN : Eff := traceEval (traceCons pay0 (traceOne cast0))
+def vApp : Trace := [pay0] ++ [cast0]
+def vAppN : Trace := traceAppend (traceOne pay0) (traceOne cast0)
+def vApp3 : Trace := [pay0] ++ [cast0] ++ [pay0]
+def vApp3N : Trace := traceAppend (traceOne pay0) (traceAppend (traceOne cast0) (traceOne pay0))
+def vChain : Blockchain := cA ++ cA
+def vChainN : Blockchain := chainAppend cA cA
+
+def effEqD : (a : Eff) -> (b : Eff) -> Flag := fun (a : Eff) => fun (b : Eff) => flagYes

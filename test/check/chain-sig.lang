@@ -1,0 +1,12 @@
+-- Blockchain is a domain definition: the prelude chain text has it
+-- (S6 u6). A user def with the same name gives REFUSE_SIG.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
+def tEff : isSet Eff := effIsSet
+def tTrace : isSet Trace := traceIsSet
+def tSize : isSet Size := sizeIsSet
+def tMaybe : isSet (Maybe Size) := maybeIsSet Size sizeIsSet
+def Blockchain : Type 0 := Size

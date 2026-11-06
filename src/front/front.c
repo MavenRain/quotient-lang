@@ -1,3 +1,5 @@
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "front/front.h"
@@ -167,7 +169,19 @@ static const char step_source[] =
   "def Eff : Type 0 := State -> Maybe State\n"
   "def just : Eff := fun (s : State) => some s\n"
   "def effSeq : Eff -> Eff -> Eff := fun (f : Eff) (g : Eff) (s : State) => bind (f s) (fun (t : State) => g t)\n"
-  "def effRun : Eff -> State -> State := fun (f : Eff) (s : State) => option s (fun (t : State) => t) (f s)\n";
+  "def effRun : Eff -> State -> State := fun (f : Eff) (s : State) => option s (fun (t : State) => t) (f s)\n"
+  /* effTrans is the double composite of three paths by one hcomp
+     (Q-S6-28 (a)). effAssoc is by funext over State and the Maybe elim on
+     f s (S6 u5b). Both are fixed text and proofs only. */
+  "def effTrans : (a : Eff) -> (b : Eff) -> (c : Eff) -> (d : Eff) -> Path Eff a b -> Path Eff b c -> Path Eff c d -> Path Eff a d :=\n"
+  "  fun (a : Eff) (b : Eff) (c : Eff) (d : Eff) (p : Path Eff a b) (q : Path Eff b c) (r : Path Eff c d) =>\n"
+  "    fun (i : I) => hcomp Eff (~i \\/ i) (fun (k : I) => [ ~i -> p @ (~k), i -> r @ k ]) (q @ i)\n"
+  "def effAssoc : (f : Eff) -> (g : Eff) -> (h : Eff) -> Path Eff (effSeq (effSeq f g) h) (effSeq f (effSeq g h)) :=\n"
+  "  fun (f : Eff) (g : Eff) (h : Eff) => fun (i : I) => fun (s : State) =>\n"
+  "    elim (fun (z : Maybe State) => Path (Maybe State) (bind (bind z (fun (t : State) => g t)) (fun (t : State) => h t)) (bind z (fun (t : State) => bind (g t) (fun (u : State) => h u))))\n"
+  "      (fun (j : I) => none)\n"
+  "      (fun (c : State) => fun (j : I) => bind (g c) (fun (u : State) => h u))\n"
+  "      (f s) @ i\n";
 
 static const char *const STEP_AFTER[] = {"Key", "Val"};
 
@@ -175,6 +189,79 @@ static const char *const STEP_AFTER[] = {"Key", "Val"};
    and Val. */
 static int step_after_val(Arena *arena, size_t first, DeclList *out, Diag *diag) {
   return splice_after(arena, first, STEP_AFTER, 2u, STEP_SOURCE_NAME, step_source, sizeof step_source - 1u, out, diag);
+}
+
+/* The set prelude (quotient-lang S6 unit 5a, USER rulings Q-S6-26 (a)
+   and Q-S6-29 (a)). The fixed defs give isSet by kernel proofs, with no
+   trust point. stableIsSet makes isSet A from a path map and its
+   constancy (one hcomp); piIsSet, maybeIsSet, sizeIsSet and natIsSet
+   use it. setAbsurd has the flagAbsurd form, so the set prelude does not
+   need the key-eq prelude. The front end puts these defs directly after
+   effRun, the last def of the step prelude. */
+#define SET_SOURCE_NAME "kernel/set.lang"
+
+static const char set_source[] =
+  "def setAbsurd : (X : Type 0) -> (u : X) -> (v : X) -> Path Flag flagNo flagYes -> Path X u v := fun (X : Type 0) (u : X) (v : X) (h : Path Flag flagNo flagYes) => fun (i : I) => elim (fun (f : Flag) => X) v u (h @ i)\n"
+  "def stableIsSet : (A : Type 0) -> (F : (a : A) -> (x : A) -> Path A a x -> Path A a x) -> ((a : A) -> (x : A) -> (p : Path A a x) -> (q : Path A a x) -> Path (Path A a x) (F a x p) (F a x q)) -> isSet A := fun (A : Type 0) (F : (a : A) -> (x : A) -> Path A a x -> Path A a x) (C : (a : A) -> (x : A) -> (p : Path A a x) -> (q : Path A a x) -> Path (Path A a x) (F a x p) (F a x q)) (a : A) (b : A) (p : Path A a b) (q : Path A a b) => fun (j : I) => fun (i : I) => hcomp A (~i \\/ i \\/ ~j \\/ j) (fun (k : I) => [ ~i -> F a a (fun (l : I) => a) @ k, i -> (C a b (fun (l : I) => p @ l) (fun (l : I) => q @ l) @ j) @ k, ~j -> F a (p @ i) (fun (l : I) => p @ (l /\\ i)) @ k, j -> F a (q @ i) (fun (l : I) => q @ (l /\\ i)) @ k ]) a\n"
+  "def piIsSet : (A : Type 0) -> (B : Type 0) -> isSet B -> isSet (A -> B) := fun (A : Type 0) (B : Type 0) (sB : isSet B) (f : A -> B) (g : A -> B) (p : Path (A -> B) f g) (q : Path (A -> B) f g) => fun (i : I) => fun (j : I) => fun (x : A) => (sB (f x) (g x) (fun (k : I) => (p @ k) x) (fun (k : I) => (q @ k) x) @ i) @ j\n"
+  "def maybeIsNone : (X : Type 0) -> Maybe X -> Flag := fun (X : Type 0) (y : Maybe X) => elim (fun (z : Maybe X) => Flag) flagYes (fun (c : X) => flagNo) y\n"
+  "def maybeIsSome : (X : Type 0) -> Maybe X -> Flag := fun (X : Type 0) (y : Maybe X) => elim (fun (z : Maybe X) => Flag) flagNo (fun (c : X) => flagYes) y\n"
+  "def maybeGet : (X : Type 0) -> X -> Maybe X -> X := fun (X : Type 0) (d : X) (y : Maybe X) => elim (fun (z : Maybe X) => X) d (fun (c : X) => c) y\n"
+  "def maybeNorm : (X : Type 0) -> (u : Maybe X) -> (x : Maybe X) -> Path (Maybe X) u x -> Path (Maybe X) u x := fun (X : Type 0) (u : Maybe X) => elim (fun (v : Maybe X) => (x : Maybe X) -> Path (Maybe X) v x -> Path (Maybe X) v x) (fun (x : Maybe X) (p : Path (Maybe X) none x) => (elim (fun (y : Maybe X) => Path Flag flagNo (maybeIsSome X y) -> Path (Maybe X) none y) (fun (e : Path Flag flagNo flagNo) => fun (i : I) => none) (fun (c : X) => fun (e : Path Flag flagNo flagYes) => setAbsurd (Maybe X) none (some c) e) x) (fun (i : I) => maybeIsSome X (p @ i))) (fun (a : X) => fun (x : Maybe X) (p : Path (Maybe X) (some a) x) => (elim (fun (y : Maybe X) => Path Flag flagNo (maybeIsNone X y) -> Path X a (maybeGet X a y) -> Path (Maybe X) (some a) y) (fun (e : Path Flag flagNo flagYes) (r : Path X a a) => setAbsurd (Maybe X) (some a) none e) (fun (c : X) => fun (e : Path Flag flagNo flagNo) (r : Path X a c) => fun (i : I) => some (r @ i)) x) (fun (i : I) => maybeIsNone X (p @ i)) (fun (i : I) => maybeGet X a (p @ i))) u\n"
+  "def maybeNormConst : (X : Type 0) -> isSet X -> (u : Maybe X) -> (x : Maybe X) -> (p : Path (Maybe X) u x) -> (q : Path (Maybe X) u x) -> Path (Path (Maybe X) u x) (maybeNorm X u x p) (maybeNorm X u x q) := fun (X : Type 0) (sX : isSet X) (u : Maybe X) => elim (fun (v : Maybe X) => (x : Maybe X) -> (p : Path (Maybe X) v x) -> (q : Path (Maybe X) v x) -> Path (Path (Maybe X) v x) (maybeNorm X v x p) (maybeNorm X v x q)) (fun (x : Maybe X) => elim (fun (y : Maybe X) => (p : Path (Maybe X) none y) -> (q : Path (Maybe X) none y) -> Path (Path (Maybe X) none y) (maybeNorm X none y p) (maybeNorm X none y q)) (fun (p : Path (Maybe X) none none) (q : Path (Maybe X) none none) => fun (j : I) => fun (i : I) => none) (fun (c : X) => fun (p : Path (Maybe X) none (some c)) (q : Path (Maybe X) none (some c)) => setAbsurd (Path (Maybe X) none (some c)) (maybeNorm X none (some c) p) (maybeNorm X none (some c) q) (fun (i : I) => maybeIsSome X (p @ i))) x) (fun (a : X) => fun (x : Maybe X) => elim (fun (y : Maybe X) => (p : Path (Maybe X) (some a) y) -> (q : Path (Maybe X) (some a) y) -> Path (Path (Maybe X) (some a) y) (maybeNorm X (some a) y p) (maybeNorm X (some a) y q)) (fun (p : Path (Maybe X) (some a) none) (q : Path (Maybe X) (some a) none) => setAbsurd (Path (Maybe X) (some a) none) (maybeNorm X (some a) none p) (maybeNorm X (some a) none q) (fun (i : I) => maybeIsNone X (p @ i))) (fun (c : X) => fun (p : Path (Maybe X) (some a) (some c)) (q : Path (Maybe X) (some a) (some c)) => fun (j : I) => fun (i : I) => some ((sX a c (fun (k : I) => maybeGet X a (p @ k)) (fun (k : I) => maybeGet X a (q @ k)) @ j) @ i)) x) u\n"
+  "def maybeIsSet : (X : Type 0) -> isSet X -> isSet (Maybe X) := fun (X : Type 0) (sX : isSet X) => stableIsSet (Maybe X) (maybeNorm X) (maybeNormConst X sX)\n"
+  "def sizeIsZero : Size -> Flag := fun (n : Size) => elim (fun (t : Size) => Flag) flagYes (fun (k : Size) (ih : Flag) => flagNo) n\n"
+  "def sizeIsPos : Size -> Flag := fun (n : Size) => elim (fun (t : Size) => Flag) flagNo (fun (k : Size) (ih : Flag) => flagYes) n\n"
+  "def sizeDec : Size -> Size := fun (n : Size) => elim (fun (t : Size) => Size) sz0 (fun (k : Size) (ih : Size) => k) n\n"
+  "def sizeNorm : (a : Size) -> (x : Size) -> Path Size a x -> Path Size a x := fun (a : Size) => elim (fun (t : Size) => (x : Size) -> Path Size t x -> Path Size t x) (fun (x : Size) => elim (fun (y : Size) => Path Size sz0 y -> Path Size sz0 y) (fun (p : Path Size sz0 sz0) => fun (i : I) => sz0) (fun (n : Size) (ihy : Path Size sz0 n -> Path Size sz0 n) => fun (p : Path Size sz0 (szS n)) => setAbsurd Size sz0 (szS n) (fun (i : I) => sizeIsPos (p @ i))) x) (fun (m : Size) (ih : (x : Size) -> Path Size m x -> Path Size m x) => fun (x : Size) => elim (fun (y : Size) => Path Size (szS m) y -> Path Size (szS m) y) (fun (p : Path Size (szS m) sz0) => setAbsurd Size (szS m) sz0 (fun (i : I) => sizeIsZero (p @ i))) (fun (n : Size) (ihy : Path Size (szS m) n -> Path Size (szS m) n) => fun (p : Path Size (szS m) (szS n)) => fun (i : I) => szS ((ih n (fun (k : I) => sizeDec (p @ k))) @ i)) x) a\n"
+  "def sizeNormConst : (a : Size) -> (x : Size) -> (p : Path Size a x) -> (q : Path Size a x) -> Path (Path Size a x) (sizeNorm a x p) (sizeNorm a x q) := fun (a : Size) => elim (fun (t : Size) => (x : Size) -> (p : Path Size t x) -> (q : Path Size t x) -> Path (Path Size t x) (sizeNorm t x p) (sizeNorm t x q)) (fun (x : Size) => elim (fun (y : Size) => (p : Path Size sz0 y) -> (q : Path Size sz0 y) -> Path (Path Size sz0 y) (sizeNorm sz0 y p) (sizeNorm sz0 y q)) (fun (p : Path Size sz0 sz0) (q : Path Size sz0 sz0) => fun (j : I) => fun (i : I) => sz0) (fun (n : Size) (ihy : (p : Path Size sz0 n) -> (q : Path Size sz0 n) -> Path (Path Size sz0 n) (sizeNorm sz0 n p) (sizeNorm sz0 n q)) => fun (p : Path Size sz0 (szS n)) (q : Path Size sz0 (szS n)) => setAbsurd (Path Size sz0 (szS n)) (sizeNorm sz0 (szS n) p) (sizeNorm sz0 (szS n) q) (fun (i : I) => sizeIsPos (p @ i))) x) (fun (m : Size) (ih : (x : Size) -> (p : Path Size m x) -> (q : Path Size m x) -> Path (Path Size m x) (sizeNorm m x p) (sizeNorm m x q)) => fun (x : Size) => elim (fun (y : Size) => (p : Path Size (szS m) y) -> (q : Path Size (szS m) y) -> Path (Path Size (szS m) y) (sizeNorm (szS m) y p) (sizeNorm (szS m) y q)) (fun (p : Path Size (szS m) sz0) (q : Path Size (szS m) sz0) => setAbsurd (Path Size (szS m) sz0) (sizeNorm (szS m) sz0 p) (sizeNorm (szS m) sz0 q) (fun (i : I) => sizeIsZero (p @ i))) (fun (n : Size) (ihy : (p : Path Size (szS m) n) -> (q : Path Size (szS m) n) -> Path (Path Size (szS m) n) (sizeNorm (szS m) n p) (sizeNorm (szS m) n q)) => fun (p : Path Size (szS m) (szS n)) (q : Path Size (szS m) (szS n)) => fun (j : I) => fun (i : I) => szS (((ih n (fun (k : I) => sizeDec (p @ k)) (fun (k : I) => sizeDec (q @ k))) @ j) @ i)) x) a\n"
+  "def sizeIsSet : isSet Size := stableIsSet Size sizeNorm sizeNormConst\n"
+  "def natIsZero : Nat -> Flag := fun (n : Nat) => elim (fun (t : Nat) => Flag) flagYes (fun (k : Nat) (ih : Flag) => flagNo) n\n"
+  "def natIsPos : Nat -> Flag := fun (n : Nat) => elim (fun (t : Nat) => Flag) flagNo (fun (k : Nat) (ih : Flag) => flagYes) n\n"
+  "def natPred : Nat -> Nat := fun (n : Nat) => elim (fun (t : Nat) => Nat) 0 (fun (k : Nat) (ih : Nat) => k) n\n"
+  "def natNorm : (a : Nat) -> (x : Nat) -> Path Nat a x -> Path Nat a x := fun (a : Nat) => elim (fun (t : Nat) => (x : Nat) -> Path Nat t x -> Path Nat t x) (fun (x : Nat) => elim (fun (y : Nat) => Path Nat 0 y -> Path Nat 0 y) (fun (p : Path Nat 0 0) => fun (i : I) => 0) (fun (n : Nat) (ihy : Path Nat 0 n -> Path Nat 0 n) => fun (p : Path Nat 0 (natSucc n)) => setAbsurd Nat 0 (natSucc n) (fun (i : I) => natIsPos (p @ i))) x) (fun (m : Nat) (ih : (x : Nat) -> Path Nat m x -> Path Nat m x) => fun (x : Nat) => elim (fun (y : Nat) => Path Nat (natSucc m) y -> Path Nat (natSucc m) y) (fun (p : Path Nat (natSucc m) 0) => setAbsurd Nat (natSucc m) 0 (fun (i : I) => natIsZero (p @ i))) (fun (n : Nat) (ihy : Path Nat (natSucc m) n -> Path Nat (natSucc m) n) => fun (p : Path Nat (natSucc m) (natSucc n)) => fun (i : I) => natSucc ((ih n (fun (k : I) => natPred (p @ k))) @ i)) x) a\n"
+  "def natNormConst : (a : Nat) -> (x : Nat) -> (p : Path Nat a x) -> (q : Path Nat a x) -> Path (Path Nat a x) (natNorm a x p) (natNorm a x q) := fun (a : Nat) => elim (fun (t : Nat) => (x : Nat) -> (p : Path Nat t x) -> (q : Path Nat t x) -> Path (Path Nat t x) (natNorm t x p) (natNorm t x q)) (fun (x : Nat) => elim (fun (y : Nat) => (p : Path Nat 0 y) -> (q : Path Nat 0 y) -> Path (Path Nat 0 y) (natNorm 0 y p) (natNorm 0 y q)) (fun (p : Path Nat 0 0) (q : Path Nat 0 0) => fun (j : I) => fun (i : I) => 0) (fun (n : Nat) (ihy : (p : Path Nat 0 n) -> (q : Path Nat 0 n) -> Path (Path Nat 0 n) (natNorm 0 n p) (natNorm 0 n q)) => fun (p : Path Nat 0 (natSucc n)) (q : Path Nat 0 (natSucc n)) => setAbsurd (Path Nat 0 (natSucc n)) (natNorm 0 (natSucc n) p) (natNorm 0 (natSucc n) q) (fun (i : I) => natIsPos (p @ i))) x) (fun (m : Nat) (ih : (x : Nat) -> (p : Path Nat m x) -> (q : Path Nat m x) -> Path (Path Nat m x) (natNorm m x p) (natNorm m x q)) => fun (x : Nat) => elim (fun (y : Nat) => (p : Path Nat (natSucc m) y) -> (q : Path Nat (natSucc m) y) -> Path (Path Nat (natSucc m) y) (natNorm (natSucc m) y p) (natNorm (natSucc m) y q)) (fun (p : Path Nat (natSucc m) 0) (q : Path Nat (natSucc m) 0) => setAbsurd (Path Nat (natSucc m) 0) (natNorm (natSucc m) 0 p) (natNorm (natSucc m) 0 q) (fun (i : I) => natIsZero (p @ i))) (fun (n : Nat) (ihy : (p : Path Nat (natSucc m) n) -> (q : Path Nat (natSucc m) n) -> Path (Path Nat (natSucc m) n) (natNorm (natSucc m) n p) (natNorm (natSucc m) n q)) => fun (p : Path Nat (natSucc m) (natSucc n)) (q : Path Nat (natSucc m) (natSucc n)) => fun (j : I) => fun (i : I) => natSucc (((ih n (fun (k : I) => natPred (p @ k)) (fun (k : I) => natPred (q @ k))) @ j) @ i)) x) a\n"
+  "def natIsSet : isSet Nat := stableIsSet Nat natNorm natNormConst\n";
+
+/* valIsSet is by the form of the program def Val: Size gives sizeIsSet
+   and Nat gives natIsSet. With another form there is no valIsSet and no
+   effIsSet (Q-S6-29 (a)). These defs go directly after natIsSet. */
+static const char val_size_source[] =
+  "def valIsSet : isSet Val := sizeIsSet\n"
+  "def effIsSet : isSet Eff := piIsSet State (Maybe State) (maybeIsSet State (piIsSet Key Val valIsSet))\n";
+
+static const char val_nat_source[] =
+  "def valIsSet : isSet Val := natIsSet\n"
+  "def effIsSet : isSet Eff := piIsSet State (Maybe State) (maybeIsSet State (piIsSet Key Val valIsSet))\n";
+
+static const char *const SET_AFTER[] = {"effRun"};
+static const char *const VAL_SET_AFTER[] = {"natIsSet"};
+
+/* The form of the def Val in OUT from FIRST on: 1 for Size, 2 for Nat, 0
+   for another form or no def Val. */
+static int val_form(const DeclList *out, size_t first) {
+  size_t k = def_at(out, first, "Val");
+  const Term *t;
+  if (k == out->count)
+    return 0;
+  t = out->items[k].body;
+  if (t == NULL || t->kind != TERM_VAR || t->name == NULL)
+    return 0;
+  if (strcmp(t->name, "Size") == 0)
+    return 1;
+  return strcmp(t->name, "Nat") == 0 ? 2 : 0;
+}
+
+static int set_after_step(Arena *arena, size_t first, DeclList *out, Diag *diag) {
+  int form;
+  if (!splice_after(arena, first, SET_AFTER, 1u, SET_SOURCE_NAME, set_source, sizeof set_source - 1u, out, diag))
+    return 0;
+  form = val_form(out, first);
+  if (form == 1)
+    return splice_after(arena, first, VAL_SET_AFTER, 1u, SET_SOURCE_NAME, val_size_source, sizeof val_size_source - 1u, out, diag);
+  if (form == 2)
+    return splice_after(arena, first, VAL_SET_AFTER, 1u, SET_SOURCE_NAME, val_nat_source, sizeof val_nat_source - 1u, out, diag);
+  return 1;
 }
 
 /* The auth prelude (quotient-lang S4, USER rulings Q-S4-1 (a) and Q-S4-7
@@ -291,7 +378,26 @@ static const char key_eq_source[] =
   "def sizeEq : Size -> Size -> Flag := fun (a : Size) => fold (fun (b : Size) => elim (fun (t : Size) => Flag) flagYes (fun (k : Size) (ih : Flag) => flagNo) b) (fun (r : Size -> Flag) (b : Size) => elim (fun (t : Size) => Flag) flagNo (fun (k : Size) (ih : Flag) => r k) b) a\n"
   "def optionEq : (A : Type 0) -> (A -> A -> Flag) -> Option A -> Option A -> Flag := fun (A : Type 0) (eqA : A -> A -> Flag) (x : Option A) (y : Option A) => option (option flagYes (fun (b : A) => flagNo) y) (fun (a : A) => option flagNo (fun (b : A) => eqA a b) y) x\n"
   "def prodEq : (A : Type 0) -> (B : Type 0) -> (A -> A -> Flag) -> (B -> B -> Flag) -> Prod A B -> Prod A B -> Flag := fun (A : Type 0) (B : Type 0) (eqA : A -> A -> Flag) (eqB : B -> B -> Flag) (x : Prod A B) (y : Prod A B) => flagIf (eqA (first x) (first y)) (eqB (second x) (second y)) flagNo\n"
-  "def listEq : (A : Type 0) -> (A -> A -> Flag) -> List A -> List A -> Flag := fun (A : Type 0) (eqA : A -> A -> Flag) (xs : List A) (ys : List A) => (fun (un : List A -> Option (Prod A (List A))) => fold (fun (h : A) (r : List A -> Flag) (zs : List A) => option flagNo (fun (p : Prod A (List A)) => flagIf (eqA h (first p)) (r (second p)) flagNo) (un zs)) (fun (zs : List A) => option flagYes (fun (p : Prod A (List A)) => flagNo) (un zs)) xs ys) (fun (l : List A) => fold (fun (g : A) (acc : Option (Prod A (List A))) => some (pair g (option nil (fun (q : Prod A (List A)) => cons (first q) (second q)) acc))) none l)\n";
+  "def listEq : (A : Type 0) -> (A -> A -> Flag) -> List A -> List A -> Flag := fun (A : Type 0) (eqA : A -> A -> Flag) (xs : List A) (ys : List A) => (fun (un : List A -> Option (Prod A (List A))) => fold (fun (h : A) (r : List A -> Flag) (zs : List A) => option flagNo (fun (p : Prod A (List A)) => flagIf (eqA h (first p)) (r (second p)) flagNo) (un zs)) (fun (zs : List A) => option flagYes (fun (p : Prod A (List A)) => flagNo) (un zs)) xs ys) (fun (l : List A) => fold (fun (g : A) (acc : Option (Prod A (List A))) => some (pair g (option nil (fun (q : Prod A (List A)) => cons (first q) (second q)) acc))) none l)\n"
+  "def flagAbsurd : (X : Type 0) -> (u : X) -> (v : X) -> Path Flag flagNo flagYes -> Path X u v := fun (X : Type 0) (u : X) (v : X) (h : Path Flag flagNo flagYes) => fun (i : I) => elim (fun (f : Flag) => X) v u (h @ i)\n"
+  "def flagAndLeft : (p : Flag) -> (q : Flag) -> Path Flag (flagIf p q flagNo) flagYes -> Path Flag p flagYes := fun (p : Flag) (q : Flag) => elim (fun (t : Flag) => Path Flag (flagIf t q flagNo) flagYes -> Path Flag t flagYes) (fun (h : Path Flag (flagIf flagYes q flagNo) flagYes) => refl) (fun (h : Path Flag (flagIf flagNo q flagNo) flagYes) => flagAbsurd Flag flagNo flagYes h) p\n"
+  "def flagAndRight : (p : Flag) -> (q : Flag) -> Path Flag (flagIf p q flagNo) flagYes -> Path Flag q flagYes := fun (p : Flag) (q : Flag) => elim (fun (t : Flag) => Path Flag (flagIf t q flagNo) flagYes -> Path Flag q flagYes) (fun (h : Path Flag (flagIf flagYes q flagNo) flagYes) => h) (fun (h : Path Flag (flagIf flagNo q flagNo) flagYes) => flagAbsurd Flag q flagYes h) p\n"
+  "def flagEqSound : (a : Flag) -> (b : Flag) -> Path Flag (flagEq a b) flagYes -> Path Flag a b := fun (a : Flag) => elim (fun (s : Flag) => (b : Flag) -> Path Flag (flagEq s b) flagYes -> Path Flag s b) (fun (b : Flag) => elim (fun (t : Flag) => Path Flag (flagEq flagYes t) flagYes -> Path Flag flagYes t) (fun (h : Path Flag (flagEq flagYes flagYes) flagYes) => refl) (fun (h : Path Flag (flagEq flagYes flagNo) flagYes) => flagAbsurd Flag flagYes flagNo h) b) (fun (b : Flag) => elim (fun (t : Flag) => Path Flag (flagEq flagNo t) flagYes -> Path Flag flagNo t) (fun (h : Path Flag (flagEq flagNo flagYes) flagYes) => flagAbsurd Flag flagNo flagYes h) (fun (h : Path Flag (flagEq flagNo flagNo) flagYes) => refl) b) a\n"
+  "def natEqSound : (a : Nat) -> (b : Nat) -> Path Flag (natEq a b) flagYes -> Path Nat a b := fun (a : Nat) => elim (fun (s : Nat) => (b : Nat) -> Path Flag (natEq s b) flagYes -> Path Nat s b) (fun (b : Nat) => elim (fun (t : Nat) => Path Flag (natEq 0 t) flagYes -> Path Nat 0 t) (fun (h : Path Flag (natEq 0 0) flagYes) => refl) (fun (j : Nat) (jh : Path Flag (natEq 0 j) flagYes -> Path Nat 0 j) (h : Path Flag (natEq 0 (natSucc j)) flagYes) => flagAbsurd Nat 0 (natSucc j) h) b) (fun (k : Nat) (ih : (b : Nat) -> Path Flag (natEq k b) flagYes -> Path Nat k b) (b : Nat) => elim (fun (t : Nat) => Path Flag (natEq (natSucc k) t) flagYes -> Path Nat (natSucc k) t) (fun (h : Path Flag (natEq (natSucc k) 0) flagYes) => flagAbsurd Nat (natSucc k) 0 h) (fun (j : Nat) (jh : Path Flag (natEq (natSucc k) j) flagYes -> Path Nat (natSucc k) j) (h : Path Flag (natEq (natSucc k) (natSucc j)) flagYes) => cong (fun (n : Nat) => natSucc n) (ih j h)) b) a\n"
+  "def sizeEqSound : (a : Size) -> (b : Size) -> Path Flag (sizeEq a b) flagYes -> Path Size a b := fun (a : Size) => elim (fun (s : Size) => (b : Size) -> Path Flag (sizeEq s b) flagYes -> Path Size s b) (fun (b : Size) => elim (fun (t : Size) => Path Flag (sizeEq sz0 t) flagYes -> Path Size sz0 t) (fun (h : Path Flag (sizeEq sz0 sz0) flagYes) => refl) (fun (j : Size) (jh : Path Flag (sizeEq sz0 j) flagYes -> Path Size sz0 j) (h : Path Flag (sizeEq sz0 (szS j)) flagYes) => flagAbsurd Size sz0 (szS j) h) b) (fun (k : Size) (ih : (b : Size) -> Path Flag (sizeEq k b) flagYes -> Path Size k b) (b : Size) => elim (fun (t : Size) => Path Flag (sizeEq (szS k) t) flagYes -> Path Size (szS k) t) (fun (h : Path Flag (sizeEq (szS k) sz0) flagYes) => flagAbsurd Size (szS k) sz0 h) (fun (j : Size) (jh : Path Flag (sizeEq (szS k) j) flagYes -> Path Size (szS k) j) (h : Path Flag (sizeEq (szS k) (szS j)) flagYes) => cong (fun (n : Size) => szS n) (ih j h)) b) a\n"
+  "def optionEqSound : (A : Type 0) -> (eqA : A -> A -> Flag) -> ((a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> (x : Option A) -> (y : Option A) -> Path Flag (optionEq A eqA x y) flagYes -> Path (Option A) x y := fun (A : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (x : Option A) => elim (fun (s : Option A) => (y : Option A) -> Path Flag (optionEq A eqA s y) flagYes -> Path (Option A) s y) (fun (y : Option A) => elim (fun (t : Option A) => Path Flag (optionEq A eqA none t) flagYes -> Path (Option A) none t) (fun (h : Path Flag (optionEq A eqA none none) flagYes) => refl) (fun (b : A) (h : Path Flag (optionEq A eqA none (some b)) flagYes) => flagAbsurd (Option A) none (some b) h) y) (fun (a : A) (y : Option A) => elim (fun (t : Option A) => Path Flag (optionEq A eqA (some a) t) flagYes -> Path (Option A) (some a) t) (fun (h : Path Flag (optionEq A eqA (some a) none) flagYes) => flagAbsurd (Option A) (some a) none h) (fun (b : A) (h : Path Flag (optionEq A eqA (some a) (some b)) flagYes) => cong (fun (z : A) => some z) (sA a b h)) y) x\n"
+  "def prodEqSound : (A : Type 0) -> (B : Type 0) -> (eqA : A -> A -> Flag) -> (eqB : B -> B -> Flag) -> ((a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> ((a : B) -> (b : B) -> Path Flag (eqB a b) flagYes -> Path B a b) -> (x : Prod A B) -> (y : Prod A B) -> Path Flag (prodEq A B eqA eqB x y) flagYes -> Path (Prod A B) x y := fun (A : Type 0) (B : Type 0) (eqA : A -> A -> Flag) (eqB : B -> B -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (sB : (a : B) -> (b : B) -> Path Flag (eqB a b) flagYes -> Path B a b) (x : Prod A B) => elim (fun (s : Prod A B) => (y : Prod A B) -> Path Flag (prodEq A B eqA eqB s y) flagYes -> Path (Prod A B) s y) (fun (a1 : A) (b1 : B) (y : Prod A B) => elim (fun (t : Prod A B) => Path Flag (prodEq A B eqA eqB (pair a1 b1) t) flagYes -> Path (Prod A B) (pair a1 b1) t) (fun (a2 : A) (b2 : B) (h : Path Flag (prodEq A B eqA eqB (pair a1 b1) (pair a2 b2)) flagYes) => fun (i : I) => pair ((sA a1 a2 (flagAndLeft (eqA a1 a2) (eqB b1 b2) h)) @ i) ((sB b1 b2 (flagAndRight (eqA a1 a2) (eqB b1 b2) h)) @ i)) y) x\n"
+  "def listUncons : (A : Type 0) -> List A -> Option (Prod A (List A)) := fun (A : Type 0) (l : List A) => fold (fun (g : A) (acc : Option (Prod A (List A))) => some (pair g (option nil (fun (q : Prod A (List A)) => cons (first q) (second q)) acc))) none l\n"
+  "def listRebuild : (A : Type 0) -> Option (Prod A (List A)) -> List A := fun (A : Type 0) (o : Option (Prod A (List A))) => option nil (fun (q : Prod A (List A)) => cons (first q) (second q)) o\n"
+  "def listRound : (A : Type 0) -> (l : List A) -> Path (List A) (listRebuild A (listUncons A l)) l := fun (A : Type 0) (l : List A) => elim (fun (m : List A) => Path (List A) (listRebuild A (listUncons A m)) m) refl (fun (a : A) (m : List A) (ih : Path (List A) (listRebuild A (listUncons A m)) m) => fun (i : I) => cons a (ih @ i)) l\n"
+  "def listEqSound : (A : Type 0) -> (eqA : A -> A -> Flag) -> ((a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> (xs : List A) -> (ys : List A) -> Path Flag (listEq A eqA xs ys) flagYes -> Path (List A) xs ys := fun (A : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (xs : List A) => elim (fun (s : List A) => (ys : List A) -> Path Flag (listEq A eqA s ys) flagYes -> Path (List A) s ys) (fun (ys : List A) => elim (fun (t : List A) => Path Flag (listEq A eqA nil t) flagYes -> Path (List A) nil t) (fun (h : Path Flag (listEq A eqA nil nil) flagYes) => refl) (fun (b : A) (m : List A) (jh : Path Flag (listEq A eqA nil m) flagYes -> Path (List A) nil m) (h : Path Flag (listEq A eqA nil (cons b m)) flagYes) => flagAbsurd (List A) nil (cons b m) h) ys) (fun (a : A) (xs1 : List A) (ih : (ys : List A) -> Path Flag (listEq A eqA xs1 ys) flagYes -> Path (List A) xs1 ys) (ys : List A) => elim (fun (t : List A) => Path Flag (listEq A eqA (cons a xs1) t) flagYes -> Path (List A) (cons a xs1) t) (fun (h : Path Flag (listEq A eqA (cons a xs1) nil) flagYes) => flagAbsurd (List A) (cons a xs1) nil h) (fun (b : A) (ys1 : List A) (jh : Path Flag (listEq A eqA (cons a xs1) ys1) flagYes -> Path (List A) (cons a xs1) ys1) (h : Path Flag (listEq A eqA (cons a xs1) (cons b ys1)) flagYes) => fun (i : I) => cons ((sA a b (flagAndLeft (eqA a b) (listEq A eqA xs1 (listRebuild A (listUncons A ys1))) h)) @ i) ((transp (fun (j : I) => Path (List A) xs1 ((listRound A ys1) @ j)) i0 (ih (listRebuild A (listUncons A ys1)) (flagAndRight (eqA a b) (listEq A eqA xs1 (listRebuild A (listUncons A ys1))) h))) @ i)) ys) xs\n"
+  "def flagAndIntro : (p : Flag) -> (q : Flag) -> Path Flag p flagYes -> Path Flag q flagYes -> Path Flag (flagIf p q flagNo) flagYes := fun (p : Flag) (q : Flag) => elim (fun (t : Flag) => Path Flag t flagYes -> Path Flag q flagYes -> Path Flag (flagIf t q flagNo) flagYes) (fun (hp : Path Flag flagYes flagYes) (hq : Path Flag q flagYes) => hq) (fun (hp : Path Flag flagNo flagYes) (hq : Path Flag q flagYes) => flagAbsurd Flag flagNo flagYes hp) p\n"
+  "def flagEqRefl : (a : Flag) -> Path Flag (flagEq a a) flagYes := fun (a : Flag) => elim (fun (s : Flag) => Path Flag (flagEq s s) flagYes) refl refl a\n"
+  "def natEqRefl : (a : Nat) -> Path Flag (natEq a a) flagYes := fun (a : Nat) => elim (fun (s : Nat) => Path Flag (natEq s s) flagYes) refl (fun (k : Nat) (ih : Path Flag (natEq k k) flagYes) => ih) a\n"
+  "def sizeEqRefl : (a : Size) -> Path Flag (sizeEq a a) flagYes := fun (a : Size) => elim (fun (s : Size) => Path Flag (sizeEq s s) flagYes) refl (fun (k : Size) (ih : Path Flag (sizeEq k k) flagYes) => ih) a\n"
+  "def optionEqRefl : (A : Type 0) -> (eqA : A -> A -> Flag) -> ((a : A) -> Path Flag (eqA a a) flagYes) -> (x : Option A) -> Path Flag (optionEq A eqA x x) flagYes := fun (A : Type 0) (eqA : A -> A -> Flag) (rA : (a : A) -> Path Flag (eqA a a) flagYes) (x : Option A) => elim (fun (s : Option A) => Path Flag (optionEq A eqA s s) flagYes) refl (fun (a : A) => rA a) x\n"
+  "def prodEqRefl : (A : Type 0) -> (B : Type 0) -> (eqA : A -> A -> Flag) -> (eqB : B -> B -> Flag) -> ((a : A) -> Path Flag (eqA a a) flagYes) -> ((b : B) -> Path Flag (eqB b b) flagYes) -> (x : Prod A B) -> Path Flag (prodEq A B eqA eqB x x) flagYes := fun (A : Type 0) (B : Type 0) (eqA : A -> A -> Flag) (eqB : B -> B -> Flag) (rA : (a : A) -> Path Flag (eqA a a) flagYes) (rB : (b : B) -> Path Flag (eqB b b) flagYes) (x : Prod A B) => flagAndIntro (eqA (first x) (first x)) (eqB (second x) (second x)) (rA (first x)) (rB (second x))\n"
+  "def listEqRefl : (A : Type 0) -> (eqA : A -> A -> Flag) -> ((a : A) -> Path Flag (eqA a a) flagYes) -> (xs : List A) -> Path Flag (listEq A eqA xs xs) flagYes := fun (A : Type 0) (eqA : A -> A -> Flag) (rA : (a : A) -> Path Flag (eqA a a) flagYes) (xs : List A) => elim (fun (s : List A) => Path Flag (listEq A eqA s s) flagYes) refl (fun (a : A) (m : List A) (ih : Path Flag (listEq A eqA m m) flagYes) => flagAndIntro (eqA a a) (listEq A eqA m (listRebuild A (listUncons A m))) (rA a) (transp (fun (j : I) => Path Flag (listEq A eqA m ((listRound A m) @ (~j))) flagYes) i0 ih)) xs\n";
 
 /* Q-S5-25 (a): the same test as key_arg_form in check.c (the rule
    REFUSE_KEYSPACE). The key-eq prelude prints only these forms. */
@@ -419,31 +525,40 @@ static void key_put_eq(KeyText *b, const Term *t) {
   key_put(b, ")");
 }
 
-/* The eq term of the field J: (EQ keyEqAJ keyEqBJ). */
-static void key_put_field_eq(KeyText *b, const Term *type, size_t j) {
+/* The eq term of the field J: (EQ keyEqAJ SECONDJ). SECOND is " keyEqB"
+   for keyEq and " keyEqA" for keyEqRefl (u4c1). */
+static void key_put_field_eq_with(KeyText *b, const Term *type, size_t j, const char *second) {
   key_put(b, "(");
   key_put_eq(b, type);
   key_put_index(b, " keyEqA", j);
-  key_put_index(b, " keyEqB", j);
+  key_put_index(b, second, j);
   key_put(b, ")");
+}
+
+static void key_put_field_eq(KeyText *b, const Term *type, size_t j) {
+  key_put_field_eq_with(b, type, j, " keyEqB");
 }
 
 /* The conjunction of the field eq terms from the Pi T (the field J) on:
    flagYes for no field, the term for one field, else flagIf. */
-static void key_put_conj(KeyText *b, const Term *t, size_t j) {
+static void key_put_conj_with(KeyText *b, const Term *t, size_t j, const char *second) {
   if (t == NULL || t->kind != TERM_PI) {
     key_put(b, "flagYes");
     return;
   }
   if (t->right == NULL || t->right->kind != TERM_PI) {
-    key_put_field_eq(b, t->left, j);
+    key_put_field_eq_with(b, t->left, j, second);
     return;
   }
   key_put(b, "(flagIf ");
-  key_put_field_eq(b, t->left, j);
+  key_put_field_eq_with(b, t->left, j, second);
   key_put(b, " ");
-  key_put_conj(b, t->right, j + 1u);
+  key_put_conj_with(b, t->right, j + 1u, second);
   key_put(b, " flagNo)");
+}
+
+static void key_put_conj(KeyText *b, const Term *t, size_t j) {
+  key_put_conj_with(b, t, j, " keyEqB");
 }
 
 /* "fun (NAME1 : T1) ... (NAMEm : Tm) => " for the arguments of the key
@@ -486,6 +601,244 @@ static void key_put_case(KeyText *b, const DeclList *out, size_t first, size_t i
   key_put(b, " keyEqY");
 }
 
+/* u4b2 (Q-S6-17..19 (a)): the sound lemma for a key argument type, the
+   mirror of key_put_eq: natEqSound, sizeEqSound, flagEqSound,
+   (optionEqSound T eqT sT), (listEqSound T eqT sT) and
+   (prodEqSound A B eqA eqB sA sB). */
+static const char *key_sound_name(const char *name) {
+  if (strcmp(name, "Nat") == 0)
+    return "natEqSound";
+  if (strcmp(name, "Size") == 0)
+    return "sizeEqSound";
+  if (strcmp(name, "Flag") == 0)
+    return "flagEqSound";
+  if (strcmp(name, "Option") == 0)
+    return "optionEqSound";
+  return "listEqSound";
+}
+
+static void key_put_sound(KeyText *b, const Term *t) {
+  if (t->kind == TERM_VAR) {
+    key_put(b, key_sound_name(t->name));
+    return;
+  }
+  if (t->left->kind == TERM_VAR) {
+    key_put(b, "(");
+    key_put(b, key_sound_name(t->left->name));
+    key_put(b, " ");
+    key_put_type(b, t->right);
+    key_put(b, " ");
+    key_put_eq(b, t->right);
+    key_put(b, " ");
+    key_put_sound(b, t->right);
+    key_put(b, ")");
+    return;
+  }
+  key_put(b, "(prodEqSound ");
+  key_put_type(b, t->left->right);
+  key_put(b, " ");
+  key_put_type(b, t->right);
+  key_put(b, " ");
+  key_put_eq(b, t->left->right);
+  key_put(b, " ");
+  key_put_eq(b, t->right);
+  key_put(b, " ");
+  key_put_sound(b, t->left->right);
+  key_put(b, " ");
+  key_put_sound(b, t->right);
+  key_put(b, ")");
+}
+
+/* The key term (NAME P1 .. Pm) of a key space with the type TYPE and the
+   field names PREFIX (with a leading space), or NAME when m is 0. */
+static void key_put_key(KeyText *b, const char *name, const char *prefix, const Term *type) {
+  const Term *t;
+  size_t m = 0;
+  if (type == NULL || type->kind != TERM_PI) {
+    key_put(b, name);
+    return;
+  }
+  key_put(b, "(");
+  key_put(b, name);
+  for (t = type; t != NULL && t->kind == TERM_PI; t = t->right) {
+    m++;
+    key_put_index(b, prefix, m);
+  }
+  key_put(b, ")");
+}
+
+/* The proof of Path Flag C_k flagYes, with C_k the conjunction from the
+   field k: keyEqH for k = 1, else flagAndRight on the proof for k - 1.
+   HEAD is the type of the key space (the node of the field 1). */
+static void key_put_rest(KeyText *b, const Term *head, size_t k) {
+  const Term *t = head;
+  size_t i;
+  if (k <= 1u) {
+    key_put(b, "keyEqH");
+    return;
+  }
+  for (i = 1u; i + 1u < k; i++)
+    t = t->right;
+  key_put(b, "(flagAndRight ");
+  key_put_field_eq(b, t->left, k - 1u);
+  key_put(b, " ");
+  key_put_conj(b, t->right, k);
+  key_put(b, " ");
+  key_put_rest(b, head, k - 1u);
+  key_put(b, ")");
+}
+
+/* The path on the diagonal: refl for no field, else a path lambda with
+   the field paths (SOUND keyEqAj keyEqBj Hj) @ keyEqI. Hj is flagAndLeft
+   on the proof for the field j, the last field takes that proof. */
+static void key_put_diag(KeyText *b, const char *name, const Term *type) {
+  const Term *t;
+  size_t j = 0;
+  if (type == NULL || type->kind != TERM_PI) {
+    key_put(b, "refl");
+    return;
+  }
+  key_put(b, "fun (keyEqI : I) => ");
+  key_put(b, name);
+  for (t = type; t != NULL && t->kind == TERM_PI; t = t->right) {
+    j++;
+    key_put(b, " ((");
+    key_put_sound(b, t->left);
+    key_put_index(b, " keyEqA", j);
+    key_put_index(b, " keyEqB", j);
+    key_put(b, " ");
+    if (t->right != NULL && t->right->kind == TERM_PI) {
+      key_put(b, "(flagAndLeft ");
+      key_put_field_eq(b, t->left, j);
+      key_put(b, " ");
+      key_put_conj(b, t->right, j + 1u);
+      key_put(b, " ");
+      key_put_rest(b, type, j);
+      key_put(b, ")");
+    } else {
+      key_put_rest(b, type, j);
+    }
+    key_put(b, ") @ keyEqI)");
+  }
+}
+
+/* The keyEqSound case for the key space i (the mirror of key_put_case):
+   an elim on keyEqY, flagAbsurd off the diagonal, the field paths on it. */
+static void key_put_sound_case(KeyText *b, const DeclList *out, size_t first, size_t i) {
+  size_t k;
+  const Decl *d = &out->items[i];
+  key_put_fun(b, "keyEqA", d->type);
+  key_put(b, "fun (keyEqY : Key) => elim (fun (keyEqU : Key) => Path Flag (keyEq ");
+  key_put_key(b, d->name, " keyEqA", d->type);
+  key_put(b, " keyEqU) flagYes -> Path Key ");
+  key_put_key(b, d->name, " keyEqA", d->type);
+  key_put(b, " keyEqU)");
+  for (k = first; k < out->count; k++) {
+    const Decl *e = &out->items[k];
+    if (!key_space(e))
+      continue;
+    key_put(b, " (");
+    key_put_fun(b, "keyEqB", e->type);
+    key_put(b, "fun (keyEqH : Path Flag (keyEq ");
+    key_put_key(b, d->name, " keyEqA", d->type);
+    key_put(b, " ");
+    key_put_key(b, e->name, " keyEqB", e->type);
+    key_put(b, ") flagYes) => ");
+    if (k == i) {
+      key_put_diag(b, d->name, d->type);
+    } else {
+      key_put(b, "flagAbsurd Key ");
+      key_put_key(b, d->name, " keyEqA", d->type);
+      key_put(b, " ");
+      key_put_key(b, e->name, " keyEqB", e->type);
+      key_put(b, " keyEqH");
+    }
+    key_put(b, ")");
+  }
+  key_put(b, " keyEqY");
+}
+
+/* u4c1 (Q-S6-24 (a)): the refl lemma for a key argument type, the
+   mirror of key_put_sound: natEqRefl, sizeEqRefl, flagEqRefl,
+   (optionEqRefl T eqT rT), (listEqRefl T eqT rT) and
+   (prodEqRefl A B eqA eqB rA rB). */
+static const char *key_refl_name(const char *name) {
+  if (strcmp(name, "Nat") == 0)
+    return "natEqRefl";
+  if (strcmp(name, "Size") == 0)
+    return "sizeEqRefl";
+  if (strcmp(name, "Flag") == 0)
+    return "flagEqRefl";
+  if (strcmp(name, "Option") == 0)
+    return "optionEqRefl";
+  return "listEqRefl";
+}
+
+static void key_put_refl(KeyText *b, const Term *t) {
+  if (t->kind == TERM_VAR) {
+    key_put(b, key_refl_name(t->name));
+    return;
+  }
+  if (t->left->kind == TERM_VAR) {
+    key_put(b, "(");
+    key_put(b, key_refl_name(t->left->name));
+    key_put(b, " ");
+    key_put_type(b, t->right);
+    key_put(b, " ");
+    key_put_eq(b, t->right);
+    key_put(b, " ");
+    key_put_refl(b, t->right);
+    key_put(b, ")");
+    return;
+  }
+  key_put(b, "(prodEqRefl ");
+  key_put_type(b, t->left->right);
+  key_put(b, " ");
+  key_put_type(b, t->right);
+  key_put(b, " ");
+  key_put_eq(b, t->left->right);
+  key_put(b, " ");
+  key_put_eq(b, t->right);
+  key_put(b, " ");
+  key_put_refl(b, t->left->right);
+  key_put(b, " ");
+  key_put_refl(b, t->right);
+  key_put(b, ")");
+}
+
+/* The refl proof of the field conjunction (key_put_conj with keyEqA for
+   both keys) from the Pi T (the field J) on: refl for no field,
+   (REFL keyEqAJ) for one field, else flagAndIntro. */
+static void key_put_refl_conj(KeyText *b, const Term *t, size_t j) {
+  if (t == NULL || t->kind != TERM_PI) {
+    key_put(b, "refl");
+    return;
+  }
+  if (t->right == NULL || t->right->kind != TERM_PI) {
+    key_put(b, "(");
+    key_put_refl(b, t->left);
+    key_put_index(b, " keyEqA", j);
+    key_put(b, ")");
+    return;
+  }
+  key_put(b, "(flagAndIntro ");
+  key_put_field_eq_with(b, t->left, j, " keyEqA");
+  key_put(b, " ");
+  key_put_conj_with(b, t->right, j + 1u, " keyEqA");
+  key_put(b, " (");
+  key_put_refl(b, t->left);
+  key_put_index(b, " keyEqA", j);
+  key_put(b, ") ");
+  key_put_refl_conj(b, t->right, j + 1u);
+  key_put(b, ")");
+}
+
+/* The keyEqRefl case for the key space with the type TYPE. */
+static void key_put_refl_case(KeyText *b, const Term *type) {
+  key_put_fun(b, "keyEqA", type);
+  key_put_refl_conj(b, type, 1u);
+}
+
 /* With a key space in the program, put the key-eq prelude directly after
    the generated family Key, with the trusted origin ORIGIN_DOMAIN. With
    an argument type outside the six forms there is no prelude: check.c
@@ -520,6 +873,24 @@ static int key_eq_after_key(Arena *arena, size_t first, DeclList *out, Diag *dia
       continue;
     key_put(&b, " (");
     key_put_case(&b, out, first, i);
+    key_put(&b, ")");
+  }
+  key_put(&b, " keyEqX\n");
+  key_put(&b, "def keyEqSound : (keyEqX : Key) -> (keyEqY : Key) -> Path Flag (keyEq keyEqX keyEqY) flagYes -> Path Key keyEqX keyEqY := fun (keyEqX : Key) => elim (fun (keyEqT : Key) => (keyEqY : Key) -> Path Flag (keyEq keyEqT keyEqY) flagYes -> Path Key keyEqT keyEqY)");
+  for (i = first; i < out->count; i++) {
+    if (!key_space(&out->items[i]))
+      continue;
+    key_put(&b, " (");
+    key_put_sound_case(&b, out, first, i);
+    key_put(&b, ")");
+  }
+  key_put(&b, " keyEqX\n");
+  key_put(&b, "def keyEqRefl : (keyEqX : Key) -> Path Flag (keyEq keyEqX keyEqX) flagYes := fun (keyEqX : Key) => elim (fun (keyEqT : Key) => Path Flag (keyEq keyEqT keyEqT) flagYes)");
+  for (i = first; i < out->count; i++) {
+    if (!key_space(&out->items[i]))
+      continue;
+    key_put(&b, " (");
+    key_put_refl_case(&b, out->items[i].type);
     key_put(&b, ")");
   }
   key_put(&b, " keyEqX\n");
@@ -705,6 +1076,7 @@ static const Term *step_term(StepBuild *b, const Term *t, const StepLocal *scope
   case TERM_INEG:
   case TERM_IMEET:
   case TERM_IJOIN:
+  case TERM_APPEND:
   case TERM_SYSTEM:
   case TERM_BRANCH:
     break;
@@ -714,11 +1086,12 @@ static const Term *step_term(StepBuild *b, const Term *t, const StepLocal *scope
   return copy;
 }
 
-/* A key pattern argument: `b.f` is `f b`. */
-static const Term *step_key_arg(StepBuild *b, const PatArg *a) {
+/* A key pattern argument: `b.f` is `f VAR` (VAR is step#body in a step and
+   ind#x or ind#y in an ind-if leaf). */
+static const Term *step_key_arg(StepBuild *b, const PatArg *a, const char *var) {
   switch (a->kind) {
   case PAT_ARG_FIELD:
-    return step_app(b, step_var(b, a->name), step_var(b, "step#body"));
+    return step_app(b, step_var(b, a->name), step_var(b, var));
   case PAT_ARG_NAT:
     return step_node(b, TERM_NAT, NULL, a->nat, NULL, NULL);
   case PAT_ARG_NAME:
@@ -728,13 +1101,18 @@ static const Term *step_key_arg(StepBuild *b, const PatArg *a) {
   return NULL;
 }
 
-/* A key pattern: the space applied to each argument. */
-static const Term *step_key(StepBuild *b, const KeyPat *pat) {
+/* A key pattern: the space applied to each argument, the fields of VAR. */
+static const Term *step_key_on(StepBuild *b, const KeyPat *pat, const char *var) {
   const Term *t = step_var(b, pat->space);
   size_t i;
   for (i = 0; i < pat->arg_count; i++)
-    t = step_app(b, t, step_key_arg(b, &pat->args[i]));
+    t = step_app(b, t, step_key_arg(b, &pat->args[i], var));
   return t;
+}
+
+/* A key pattern of a step: the fields of step#body. */
+static const Term *step_key(StepBuild *b, const KeyPat *pat) {
+  return step_key_on(b, pat, "step#body");
 }
 
 /* The item IT in front of the term REST of the next items. */
@@ -999,6 +1377,495 @@ static int body_step(Arena *arena, size_t first, DeclList *out) {
   return 1;
 }
 
+/* The trace monoid (quotient-lang S6 u3, USER ruling Q-S6-10 (a)): a
+   fixed family Trace over Body, not a domain family with a relation
+   parameter (R1 refuses one). The interval fields have new names, so a
+   program field i or j does not hit them (rule R4). The front end puts it and traceFold
+   directly after the placeholder def ind, so traceSwap can take the
+   proof that ind a b is flagYes. With no ind (no Body), it adds nothing. */
+#define TRACE_SOURCE_NAME "kernel/trace.lang"
+
+static const char *const TRACE_AFTER[] = {"ind"};
+
+static const char trace_source[] =
+  "family Trace := traceEps\n"
+  "  | traceCons (consHead : Body) (consTail : Trace)\n"
+  "  | traceSwap (swapA : Body) (swapB : Body) (swapTail : Trace) (swapInd : Path Flag (ind swapA swapB) flagYes) (swapI : I)\n"
+  "    [ ~swapI -> traceCons swapA (traceCons swapB swapTail), swapI -> traceCons swapB (traceCons swapA swapTail) ]\n"
+  "  | traceSquash (traceFrom : Trace) (traceTo : Trace) (traceLeft : Path Trace traceFrom traceTo) (traceRight : Path Trace traceFrom traceTo) (squashI : I) (squashJ : I)\n"
+  "    [ ~squashI -> traceLeft @ squashJ, squashI -> traceRight @ squashJ, ~squashJ -> traceFrom, squashJ -> traceTo ]\n"
+  "def traceFold : (M : Type 0) -> isSet M -> (e : M) -> (push : Body -> M -> M) -> ((a : Body) -> (b : Body) -> (m : M) -> Path Flag (ind a b) flagYes -> Path M (push a (push b m)) (push b (push a m))) -> Trace -> M :=\n"
+  "  fun (M : Type 0) (s : isSet M) (e : M) (push : Body -> M -> M) (sw : (a : Body) -> (b : Body) -> (m : M) -> Path Flag (ind a b) flagYes -> Path M (push a (push b m)) (push b (push a m))) (t : Trace) =>\n"
+  "    fold e (fun (a : Body) (m : M) => push a m)\n"
+  "      (fun (a : Body) (b : Body) (m : M) (p : Path Flag (ind a b) flagYes) => fun (swapI : I) => sw a b m p @ swapI)\n"
+  "      (fun (x : M) (y : M) (p : Path M x y) (q : Path M x y) => fun (squashI : I) => fun (squashJ : I) => (s x y p q @ squashI) @ squashJ) t\n"
+  "def traceIsSet : isSet Trace := fun (x : Trace) (y : Trace) (p : Path Trace x y) (q : Path Trace x y) => fun (i : I) => fun (j : I) => traceSquash x y p q i j\n"
+  "def traceOne : Body -> Trace := fun (a : Body) => traceCons a traceEps\n"
+  "def traceAppend : Trace -> Trace -> Trace :=\n"
+  "  fun (t : Trace) (u : Trace) => traceFold Trace traceIsSet u (fun (a : Body) (r : Trace) => traceCons a r)\n"
+  "    (fun (a : Body) (b : Body) (r : Trace) (p : Path Flag (ind a b) flagYes) => fun (i : I) => traceSwap a b r p i) t\n";
+
+static int trace_after_ind(Arena *arena, size_t first, DeclList *out, Diag *diag) {
+  return splice_after(arena, first, TRACE_AFTER, 1u, TRACE_SOURCE_NAME, trace_source, sizeof trace_source - 1u, out, diag);
+}
+
+/* The def ind (quotient-lang S6, USER ruling Q-S6-11 (a)) is a
+   placeholder here: the type Body -> Body -> Flag and no body. The Ind
+   matrix is check-time, so check.c makes the body at this def
+   (front_ind_body). The def goes directly after the def step; with no def
+   step (no Eff), directly after the family Body. No Body, no def.
+   Directly after ind, the front puts the generated def D (quotient-lang
+   S6 u8, USER ruling Q-S6-7 (a)), the negation of ind: `D : Body -> Body
+   -> Flag := fun (dep#a : Body) (dep#b : Body) => flagIf (ind dep#a
+   dep#b) flagNo flagYes`. The binders have the prefix dep#, so a program
+   name does not hit them. */
+static int ind_placeholder(Arena *arena, size_t first, DeclList *out) {
+  StepBuild b = {arena, 0, 0, 1};
+  size_t at = out->count;
+  size_t i;
+  Decl *items;
+  Decl def;
+  Decl dep;
+  for (i = first; i < out->count; i++) {
+    const Decl *d = &out->items[i];
+    int is_body = d->kind == DECL_FAMILY && d->origin == ORIGIN_DOMAIN && strcmp(d->name, "Body") == 0;
+    int is_step = d->kind == DECL_DEF && d->origin == ORIGIN_DOMAIN && strcmp(d->name, "step") == 0;
+    at = (is_body || is_step) ? i : at;
+  }
+  if (at == out->count)
+    return 1;
+  b.line = out->items[at].line;
+  b.col = out->items[at].col;
+  items = arena_alloc(arena, (out->count + 2u) * sizeof *items);
+  if (items == NULL)
+    return 0;
+  memset(&def, 0, sizeof def);
+  def.kind = DECL_DEF;
+  def.origin = ORIGIN_DOMAIN;
+  def.line = b.line;
+  def.col = b.col;
+  def.name = "ind";
+  def.type = step_node(&b, TERM_PI, NULL, 0u, step_var(&b, "Body"), step_node(&b, TERM_PI, NULL, 0u, step_var(&b, "Body"), step_var(&b, "Flag")));
+  def.body = NULL;
+  def.block_first = at + 1u;
+  def.block_count = 1u;
+  dep = def;
+  dep.name = "D";
+  dep.type = step_node(&b, TERM_PI, NULL, 0u, step_var(&b, "Body"), step_node(&b, TERM_PI, NULL, 0u, step_var(&b, "Body"), step_var(&b, "Flag")));
+  dep.body = step_lam(&b, "dep#a", step_var(&b, "Body"), step_lam(&b, "dep#b", step_var(&b, "Body"), step_app(&b, step_app(&b, step_app(&b, step_var(&b, "flagIf"), step_app(&b, step_app(&b, step_var(&b, "ind"), step_var(&b, "dep#a")), step_var(&b, "dep#b"))), step_var(&b, "flagNo")), step_var(&b, "flagYes"))));
+  dep.block_first = at + 2u;
+  if (!b.ok)
+    return 0;
+  memcpy(items, out->items, (at + 1u) * sizeof *items);
+  items[at + 1u] = def;
+  items[at + 2u] = dep;
+  memcpy(items + at + 3u, out->items + at + 1u, (out->count - at - 1u) * sizeof *items);
+  out->items = items;
+  out->count += 2u;
+  out->cap = out->count;
+  return 1;
+}
+
+/* The generated def commute (quotient-lang S6 u4a, USER rulings Q-S6-3
+   (b), Q-S6-8 (a) and Q-S6-12 (b)): `commute : (a : Body) -> (b : Body)
+   -> Path Flag (ind a b) flagYes -> Path Eff (effSeq (step a) (step b))
+   (effSeq (step b) (step a))`, a nested elim on a and b in the body_step
+   order. The leaf at each pair (F, G) is a def com#leafN, so the checker
+   can give REFUSE_COMMUTE at the first pair that fails. With no program
+   slot def commute<F><G>, the leaf is `fun (com#h : Path Flag (ind A B)
+   flagYes) => cong (fun (com#k : Flag) => flagIf com#k Y X) com#h` (X =
+   effSeq (step A) (step B), Y = effSeq (step B) (step A)); it checks only
+   when ind A B is flagNo or X and Y convert. With the slot, a def
+   com#slotN checks the slot type and the leaf is `funExt (com#slotN com#f
+   com#g)`. The front makes the text with the binder prefix com., parses
+   it with lex_internal and changes com. to com#. A program name cannot
+   contain a dot, so it cannot hit a binder or be changed by the rewrite.
+   The defs go directly after the last of traceFold and the slot defs.
+   With no Body, Eff, step or traceFold, the front adds nothing. */
+#define COMMUTE_SOURCE_NAME "kernel/commute.lang"
+
+typedef struct {
+  char *s;
+  size_t len;
+  size_t cap;
+  int ok;
+} ComText;
+
+static void com_put(ComText *t, const char *fmt, ...) {
+  va_list args;
+  int n;
+  if (!t->ok)
+    return;
+  va_start(args, fmt);
+  n = vsnprintf(t->s + t->len, t->cap - t->len, fmt, args);
+  va_end(args);
+  t->ok = n >= 0 && (size_t)n < t->cap - t->len;
+  t->len += t->ok ? (size_t)n : 0u;
+}
+
+/* NAME with the prefix com. changed to com#; other names stay. */
+static const char *com_name(Arena *arena, const char *name, int *ok) {
+  const char *r;
+  if (name == NULL || strncmp(name, "com.", 4u) != 0)
+    return name;
+  r = front_prefixed(arena, "com#", name + 4);
+  *ok = *ok && r != NULL;
+  return r != NULL ? r : name;
+}
+
+/* A copy of T with each com. name changed to com#. */
+static const Term *com_term(Arena *arena, const Term *t, int *ok) {
+  Term *n;
+  if (t == NULL || !*ok)
+    return t;
+  n = arena_alloc(arena, sizeof *n);
+  if (n == NULL) {
+    *ok = 0;
+    return t;
+  }
+  *n = *t;
+  n->name = com_name(arena, t->name, ok);
+  n->left = com_term(arena, t->left, ok);
+  n->right = com_term(arena, t->right, ok);
+  return n;
+}
+
+/* The index of the program def NAME at FIRST or after it, or OUT->count. */
+static size_t program_def_at(const DeclList *out, size_t first, const char *name) {
+  size_t at;
+  for (at = first; at < out->count && !(out->items[at].kind == DECL_DEF && out->items[at].origin == ORIGIN_PROGRAM && strcmp(out->items[at].name, name) == 0); at++)
+    ;
+  return at;
+}
+
+/* The program slot def commute<F><G>, or NULL when it is out of memory. */
+static const char *com_slot(Arena *arena, const char *f, const char *g) {
+  const char *pre = front_prefixed(arena, "commute", f);
+  return pre != NULL ? front_prefixed(arena, pre, g) : NULL;
+}
+
+static int body_commute(Arena *arena, size_t first, DeclList *out, Diag *diag) {
+  ComText t = {NULL, 0u, 0u, 1};
+  DeclList kernel = {NULL, 0, 0};
+  TokenList toks;
+  size_t last = def_at(out, first, "traceFold");
+  size_t set = def_at(out, first, "effIsSet");
+  size_t fams = 0;
+  size_t names = 0;
+  size_t leaf = 0;
+  size_t i;
+  size_t j;
+  int ok = 1;
+  Decl *items;
+  if (last == out->count || def_at(out, first, "Body") == out->count || def_at(out, first, "Eff") == out->count || def_at(out, first, "step") == out->count)
+    return 1;
+  for (i = first; i < out->count; i++) {
+    fams += footprint_family(&out->items[i]) ? 1u : 0u;
+    names += footprint_family(&out->items[i]) ? strlen(out->items[i].name) : 0u;
+  }
+  t.cap = 16384u + fams * fams * (2048u + 64u * names);
+  t.s = arena_alloc(arena, t.cap);
+  if (t.s == NULL)
+    return 0;
+  for (i = first; i < out->count; i++) {
+    for (j = first; j < out->count; j++) {
+      const char *f = out->items[i].name;
+      const char *g = out->items[j].name;
+      const char *slot;
+      size_t at;
+      if (!footprint_family(&out->items[i]) || !footprint_family(&out->items[j]))
+        continue;
+      slot = com_slot(arena, f, g);
+      if (slot == NULL)
+        return 0;
+      at = program_def_at(out, first, slot);
+      last = at != out->count && at > last ? at : last;
+      if (at != out->count)
+        com_put(&t, "def com.slot%zu : (com.f : %s) -> (com.g : %s) -> (com.s : State) -> Path (Maybe State) (effSeq (step (body%s com.f)) (step (body%s com.g)) com.s) (effSeq (step (body%s com.g)) (step (body%s com.f)) com.s) := %s\n", leaf, f, g, f, g, g, f, slot);
+      com_put(&t, "def com.leaf%zu : (com.f : %s) -> (com.g : %s) -> Path Flag (ind (body%s com.f) (body%s com.g)) flagYes -> Path Eff (effSeq (step (body%s com.f)) (step (body%s com.g))) (effSeq (step (body%s com.g)) (step (body%s com.f))) :=\n", leaf, f, g, f, g, f, g, g, f);
+      com_put(&t, "  fun (com.f : %s) (com.g : %s) (com.h : Path Flag (ind (body%s com.f) (body%s com.g)) flagYes) => ", f, g, f, g);
+      if (at != out->count)
+        com_put(&t, "funExt (com.slot%zu com.f com.g)\n", leaf);
+      else
+        com_put(&t, "cong (fun (com.k : Flag) => flagIf com.k (effSeq (step (body%s com.g)) (step (body%s com.f))) (effSeq (step (body%s com.f)) (step (body%s com.g)))) com.h\n", g, f, f, g);
+      leaf++;
+    }
+  }
+  com_put(&t, "def commute : (com.a : Body) -> (com.b : Body) -> Path Flag (ind com.a com.b) flagYes -> Path Eff (effSeq (step com.a) (step com.b)) (effSeq (step com.b) (step com.a)) :=\n");
+  com_put(&t, "  fun (com.a : Body) => elim (fun (com.u : Body) => (com.b : Body) -> Path Flag (ind com.u com.b) flagYes -> Path Eff (effSeq (step com.u) (step com.b)) (effSeq (step com.b) (step com.u)))");
+  leaf = 0;
+  for (i = first; i < out->count; i++) {
+    const char *f = out->items[i].name;
+    if (!footprint_family(&out->items[i]))
+      continue;
+    com_put(&t, "\n    (fun (com.f : %s) (com.b : Body) => elim (fun (com.v : Body) => Path Flag (ind (body%s com.f) com.v) flagYes -> Path Eff (effSeq (step (body%s com.f)) (step com.v)) (effSeq (step com.v) (step (body%s com.f))))", f, f, f, f);
+    for (j = first; j < out->count; j++) {
+      if (!footprint_family(&out->items[j]))
+        continue;
+      com_put(&t, " (fun (com.g : %s) => com.leaf%zu com.f com.g)", out->items[j].name, leaf);
+      leaf++;
+    }
+    com_put(&t, " com.b)");
+  }
+  com_put(&t, "\n    com.a\n");
+  /* effSwap (Q-S6-28 (a)): two independent letters commute in front of a
+     tail m. traceEval (Q-S6-29 (a)) only with a def effIsSet; then the
+     text goes after the later of traceFold and effIsSet. evalAppend
+     (Q-S6-27 (a)) and its two prop lemmas go with traceEval, also after
+     traceAppend. */
+  com_put(&t, "def effSwap : (a : Body) -> (b : Body) -> (m : Eff) -> Path Flag (ind a b) flagYes -> Path Eff (effSeq (step a) (effSeq (step b) m)) (effSeq (step b) (effSeq (step a) m)) :=\n");
+  com_put(&t, "  fun (a : Body) (b : Body) (m : Eff) (p : Path Flag (ind a b) flagYes) =>\n");
+  com_put(&t, "    effTrans (effSeq (step a) (effSeq (step b) m)) (effSeq (effSeq (step a) (step b)) m) (effSeq (effSeq (step b) (step a)) m) (effSeq (step b) (effSeq (step a) m))\n");
+  com_put(&t, "      (fun (i : I) => effAssoc (step a) (step b) m @ (~i))\n");
+  com_put(&t, "      (fun (i : I) => effSeq (commute a b p @ i) m)\n");
+  com_put(&t, "      (effAssoc (step b) (step a) m)\n");
+  if (set != out->count) {
+    size_t app = def_at(out, first, "traceAppend");
+    com_put(&t, "def traceEval : Trace -> Eff := traceFold Eff effIsSet just (fun (a : Body) (m : Eff) => effSeq (step a) m) effSwap\n");
+    com_put(&t, "def tracePropLine : (X : Type 0) -> (P : X -> Type 0) -> ((x : X) -> isProp (P x)) -> (x : X) -> (y : X) -> (p : Path X x y) -> (ex : P x) -> (ey : P y) -> PathP (fun (i : I) => P (p @ i)) ex ey :=\n");
+    com_put(&t, "  fun (X : Type 0) (P : X -> Type 0) (hP : (x : X) -> isProp (P x)) (x : X) (y : X) (p : Path X x y) (ex : P x) (ey : P y) =>\n");
+    com_put(&t, "    fun (i : I) => hcomp (P (p @ i)) (~i \\/ i) (fun (k : I) => [\n");
+    com_put(&t, "      ~i -> hP (p @ i) (transp (fun (m : I) => P (p @ (i /\\ m))) i0 ex) ex @ k,\n");
+    com_put(&t, "      i -> hP (p @ i) (transp (fun (m : I) => P (p @ (i /\\ m))) i0 ex) ey @ k ])\n");
+    com_put(&t, "      (transp (fun (m : I) => P (p @ (i /\\ m))) i0 ex)\n");
+    com_put(&t, "def tracePropSquare : (X : Type 0) -> (P : X -> Type 0) -> ((x : X) -> isProp (P x)) -> (x : X) -> (y : X) -> (p : Path X x y) -> (q : Path X x y) -> (s : Path (Path X x y) p q) ->\n");
+    com_put(&t, "  (ihx : P x) -> (ihy : P y) -> (ihp : PathP (fun (j : I) => P (p @ j)) ihx ihy) -> (ihq : PathP (fun (j : I) => P (q @ j)) ihx ihy) ->\n");
+    com_put(&t, "  PathP (fun (i : I) => PathP (fun (j : I) => P ((s @ i) @ j)) ihx ihy) ihp ihq :=\n");
+    com_put(&t, "  fun (X : Type 0) (P : X -> Type 0) (hP : (x : X) -> isProp (P x)) (x : X) (y : X) (p : Path X x y) (q : Path X x y) (s : Path (Path X x y) p q)\n");
+    com_put(&t, "    (ihx : P x) (ihy : P y) (ihp : PathP (fun (j : I) => P (p @ j)) ihx ihy) (ihq : PathP (fun (j : I) => P (q @ j)) ihx ihy) =>\n");
+    com_put(&t, "    fun (i : I) => fun (j : I) => hcomp (P ((s @ i) @ j)) (~i \\/ i \\/ ~j \\/ j) (fun (k : I) => [\n");
+    com_put(&t, "      ~i -> hP ((s @ i) @ j) (transp (fun (m : I) => P ((s @ (i /\\ m)) @ (j /\\ m))) i0 ihx) (ihp @ j) @ k,\n");
+    com_put(&t, "      i -> hP ((s @ i) @ j) (transp (fun (m : I) => P ((s @ (i /\\ m)) @ (j /\\ m))) i0 ihx) (ihq @ j) @ k,\n");
+    com_put(&t, "      ~j -> hP ((s @ i) @ j) (transp (fun (m : I) => P ((s @ (i /\\ m)) @ (j /\\ m))) i0 ihx) ihx @ k,\n");
+    com_put(&t, "      j -> hP ((s @ i) @ j) (transp (fun (m : I) => P ((s @ (i /\\ m)) @ (j /\\ m))) i0 ihx) ihy @ k ])\n");
+    com_put(&t, "      (transp (fun (m : I) => P ((s @ (i /\\ m)) @ (j /\\ m))) i0 ihx)\n");
+    com_put(&t, "def traceEvalGen : (sE : isSet Eff) -> (f : Body -> Eff) -> (fs : (a : Body) -> (b : Body) -> (m : Eff) -> Path Flag (ind a b) flagYes -> Path Eff (effSeq (f a) (effSeq (f b) m)) (effSeq (f b) (effSeq (f a) m))) -> Trace -> Eff :=\n");
+    com_put(&t, "  fun (sE : isSet Eff) (f : Body -> Eff) (fs : (a : Body) -> (b : Body) -> (m : Eff) -> Path Flag (ind a b) flagYes -> Path Eff (effSeq (f a) (effSeq (f b) m)) (effSeq (f b) (effSeq (f a) m))) => traceFold Eff sE just (fun (a : Body) (m : Eff) => effSeq (f a) m) fs\n");
+    com_put(&t, "def evalAppendConsGen : (sE : isSet Eff) -> (f : Body -> Eff) -> (fs : (a : Body) -> (b : Body) -> (m : Eff) -> Path Flag (ind a b) flagYes -> Path Eff (effSeq (f a) (effSeq (f b) m)) (effSeq (f b) (effSeq (f a) m))) -> (u : Trace) -> (a : Body) -> (r : Trace) -> Path Eff (traceEvalGen sE f fs (traceAppend r u)) (effSeq (traceEvalGen sE f fs r) (traceEvalGen sE f fs u)) -> Path Eff (traceEvalGen sE f fs (traceAppend (traceCons a r) u)) (effSeq (traceEvalGen sE f fs (traceCons a r)) (traceEvalGen sE f fs u)) :=\n");
+    com_put(&t, "  fun (sE : isSet Eff) (f : Body -> Eff) (fs : (a : Body) -> (b : Body) -> (m : Eff) -> Path Flag (ind a b) flagYes -> Path Eff (effSeq (f a) (effSeq (f b) m)) (effSeq (f b) (effSeq (f a) m))) (u : Trace) (a : Body) (r : Trace) (ih : Path Eff (traceEvalGen sE f fs (traceAppend r u)) (effSeq (traceEvalGen sE f fs r) (traceEvalGen sE f fs u))) =>\n");
+    com_put(&t, "    effTrans (effSeq (f a) (traceEvalGen sE f fs (traceAppend r u))) (effSeq (f a) (effSeq (traceEvalGen sE f fs r) (traceEvalGen sE f fs u)))\n");
+    com_put(&t, "      (effSeq (effSeq (f a) (traceEvalGen sE f fs r)) (traceEvalGen sE f fs u)) (effSeq (effSeq (f a) (traceEvalGen sE f fs r)) (traceEvalGen sE f fs u))\n");
+    com_put(&t, "      (fun (i : I) => effSeq (f a) (ih @ i)) (fun (i : I) => effAssoc (f a) (traceEvalGen sE f fs r) (traceEvalGen sE f fs u) @ (~i)) refl\n");
+    com_put(&t, "def evalAppendGen : (sE : isSet Eff) -> (f : Body -> Eff) -> (fs : (a : Body) -> (b : Body) -> (m : Eff) -> Path Flag (ind a b) flagYes -> Path Eff (effSeq (f a) (effSeq (f b) m)) (effSeq (f b) (effSeq (f a) m))) -> (t : Trace) -> (u : Trace) -> Path Eff (traceEvalGen sE f fs (traceAppend t u)) (effSeq (traceEvalGen sE f fs t) (traceEvalGen sE f fs u)) :=\n");
+    com_put(&t, "  fun (sE : isSet Eff) (f : Body -> Eff) (fs : (a : Body) -> (b : Body) -> (m : Eff) -> Path Flag (ind a b) flagYes -> Path Eff (effSeq (f a) (effSeq (f b) m)) (effSeq (f b) (effSeq (f a) m))) (t : Trace) (u : Trace) => elim (fun (z : Trace) => Path Eff (traceEvalGen sE f fs (traceAppend z u)) (effSeq (traceEvalGen sE f fs z) (traceEvalGen sE f fs u)))\n");
+    com_put(&t, "    refl\n");
+    com_put(&t, "    (fun (a : Body) (r : Trace) (ih : Path Eff (traceEvalGen sE f fs (traceAppend r u)) (effSeq (traceEvalGen sE f fs r) (traceEvalGen sE f fs u))) => evalAppendConsGen sE f fs u a r ih)\n");
+    com_put(&t, "    (fun (a : Body) (b : Body) (r : Trace) (ih : Path Eff (traceEvalGen sE f fs (traceAppend r u)) (effSeq (traceEvalGen sE f fs r) (traceEvalGen sE f fs u))) (h : Path Flag (ind a b) flagYes) =>\n");
+    com_put(&t, "      fun (i : I) => tracePropLine Trace (fun (z : Trace) => Path Eff (traceEvalGen sE f fs (traceAppend z u)) (effSeq (traceEvalGen sE f fs z) (traceEvalGen sE f fs u))) (fun (z : Trace) => sE (traceEvalGen sE f fs (traceAppend z u)) (effSeq (traceEvalGen sE f fs z) (traceEvalGen sE f fs u)))\n");
+    com_put(&t, "        (traceCons a (traceCons b r)) (traceCons b (traceCons a r)) (fun (j : I) => traceSwap a b r h j)\n");
+    com_put(&t, "        (evalAppendConsGen sE f fs u a (traceCons b r) (evalAppendConsGen sE f fs u b r ih)) (evalAppendConsGen sE f fs u b (traceCons a r) (evalAppendConsGen sE f fs u a r ih)) @ i)\n");
+    com_put(&t, "    (fun (x : Trace) (ihx : Path Eff (traceEvalGen sE f fs (traceAppend x u)) (effSeq (traceEvalGen sE f fs x) (traceEvalGen sE f fs u))) (y : Trace) (ihy : Path Eff (traceEvalGen sE f fs (traceAppend y u)) (effSeq (traceEvalGen sE f fs y) (traceEvalGen sE f fs u))) (p : Path Trace x y) (ihp : PathP (fun (j : I) => Path Eff (traceEvalGen sE f fs (traceAppend (p @ j) u)) (effSeq (traceEvalGen sE f fs (p @ j)) (traceEvalGen sE f fs u))) ihx ihy)\n");
+    com_put(&t, "      (q : Path Trace x y) (ihq : PathP (fun (j : I) => Path Eff (traceEvalGen sE f fs (traceAppend (q @ j) u)) (effSeq (traceEvalGen sE f fs (q @ j)) (traceEvalGen sE f fs u))) ihx ihy) =>\n");
+    com_put(&t, "      fun (i : I) => fun (j : I) => (tracePropSquare Trace (fun (z : Trace) => Path Eff (traceEvalGen sE f fs (traceAppend z u)) (effSeq (traceEvalGen sE f fs z) (traceEvalGen sE f fs u))) (fun (z : Trace) => sE (traceEvalGen sE f fs (traceAppend z u)) (effSeq (traceEvalGen sE f fs z) (traceEvalGen sE f fs u)))\n");
+    com_put(&t, "        x y p q (fun (c : I) => fun (d : I) => traceSquash x y p q c d) ihx ihy ihp ihq @ i) @ j) t\n");
+    com_put(&t, "def evalAppend : (t : Trace) -> (u : Trace) -> Path Eff (traceEval (traceAppend t u)) (effSeq (traceEval t) (traceEval u)) :=\n");
+    com_put(&t, "  fun (t : Trace) (u : Trace) => evalAppendGen effIsSet step effSwap t u\n");
+    com_put(&t, "def Blockchain : Type 0 := Sigma (f : Eff) (Trunc1 (fiber Trace Eff traceEval f))\n");
+    com_put(&t, "def chainOf : Trace -> Blockchain := fun (t : Trace) => pack (traceEval t) (trunc1 (fiber Trace Eff traceEval (traceEval t)) (pack t refl))\n");
+    com_put(&t, "def chainEval : Blockchain -> Eff := fun (c : Blockchain) => witness c\n");
+    com_put(&t, "def trunc1Map2 : (A : Type 0) -> (B : Type 0) -> (C : Type 0) -> (A -> B -> C) -> Trunc1 A -> Trunc1 B -> Trunc1 C :=\n");
+    com_put(&t, "  fun (A : Type 0) (B : Type 0) (C : Type 0) (h : A -> B -> C) (x : Trunc1 A) (y : Trunc1 B) =>\n");
+    com_put(&t, "    fold (fun (a : A) =>\n");
+    com_put(&t, "        fold (fun (b : B) => trunc1 C (h a b))\n");
+    com_put(&t, "          (fun (u : Trunc1 C) (v : Trunc1 C) => fun (i : I) => squash1 C u v i)\n");
+    com_put(&t, "          y)\n");
+    com_put(&t, "      (fun (u : Trunc1 C) (v : Trunc1 C) => fun (i : I) => squash1 C u v i)\n");
+    com_put(&t, "      x\n");
+    com_put(&t, "def chainAppend : Blockchain -> Blockchain -> Blockchain :=\n");
+    com_put(&t, "  fun (c : Blockchain) (d : Blockchain) =>\n");
+    com_put(&t, "    pack (effSeq (witness c) (witness d))\n");
+    com_put(&t, "      (trunc1Map2 (fiber Trace Eff traceEval (witness c)) (fiber Trace Eff traceEval (witness d)) (fiber Trace Eff traceEval (effSeq (witness c) (witness d)))\n");
+    com_put(&t, "        (fun (p : fiber Trace Eff traceEval (witness c)) (q : fiber Trace Eff traceEval (witness d)) =>\n");
+    com_put(&t, "          pack (traceAppend (witness p) (witness q))\n");
+    com_put(&t, "            (effTrans (traceEval (traceAppend (witness p) (witness q))) (effSeq (traceEval (witness p)) (traceEval (witness q))) (effSeq (witness c) (traceEval (witness q))) (effSeq (witness c) (witness d))\n");
+    com_put(&t, "              (evalAppend (witness p) (witness q))\n");
+    com_put(&t, "              (fun (i : I) => effSeq (payload p @ i) (traceEval (witness q)))\n");
+    com_put(&t, "              (fun (i : I) => effSeq (witness c) (payload q @ i))))\n");
+    com_put(&t, "        (payload c) (payload d))\n");
+    com_put(&t, "def chainPath : (f : Eff) -> (g : Eff) -> (p : Path Eff f g) -> (x : Trunc1 (fiber Trace Eff traceEval f)) -> (y : Trunc1 (fiber Trace Eff traceEval g)) -> Path Blockchain (pack f x) (pack g y) :=\n");
+    com_put(&t, "  fun (f : Eff) (g : Eff) (p : Path Eff f g) (x : Trunc1 (fiber Trace Eff traceEval f)) (y : Trunc1 (fiber Trace Eff traceEval g)) =>\n");
+    com_put(&t, "    fun (i : I) =>\n");
+    com_put(&t, "      pack (p @ i)\n");
+    com_put(&t, "        (squash1 (fiber Trace Eff traceEval (p @ i))\n");
+    com_put(&t, "          (transp (fun (j : I) => Trunc1 (fiber Trace Eff traceEval (p @ (i /\\ j)))) (~i) x)\n");
+    com_put(&t, "          (transp (fun (j : I) => Trunc1 (fiber Trace Eff traceEval (p @ (i \\/ ~j)))) i y)\n");
+    com_put(&t, "          i)\n");
+    last = set > last ? set : last;
+    last = app != out->count && app > last ? app : last;
+  }
+  if (!t.ok)
+    return diag_fail(diag, "OOM", NULL, "the generated text of commute is too long");
+  if (!lex_internal(arena, COMMUTE_SOURCE_NAME, t.s, t.len, &toks, diag)
+      || !parse_source(arena, COMMUTE_SOURCE_NAME, ORIGIN_DOMAIN, &toks, &kernel, diag))
+    return 0;
+  for (i = 0; i < kernel.count; i++) {
+    kernel.items[i].name = com_name(arena, kernel.items[i].name, &ok);
+    kernel.items[i].type = com_term(arena, kernel.items[i].type, &ok);
+    kernel.items[i].body = com_term(arena, kernel.items[i].body, &ok);
+  }
+  items = ok ? arena_alloc(arena, (out->count + kernel.count) * sizeof *items) : NULL;
+  if (items == NULL)
+    return 0;
+  memcpy(items, out->items, (last + 1u) * sizeof *items);
+  memcpy(items + last + 1u, kernel.items, kernel.count * sizeof *items);
+  memcpy(items + last + 1u + kernel.count, out->items + last + 1u, (out->count - last - 1u) * sizeof *items);
+  out->items = items;
+  out->count += kernel.count;
+  out->cap = out->count;
+  return 1;
+}
+
+/* The matrix row of the footprint families A and B, or NULL. The rows have
+   a <= b only and ind is symmetric, so the row (B, A) also gives (A, B);
+   then *SWAP is 1 (when A and B differ). A row is found by its names, not
+   by its index. */
+const IndRow *front_ind_row(const IndMatrix *ind, const char *a, const char *b, int *swap) {
+  uint32_t r;
+  *swap = 0;
+  for (r = 0; r < ind->row_count; r++) {
+    const IndRow *row = &ind->rows[r];
+    int ab = strcmp(row->a, a) == 0 && strcmp(row->b, b) == 0;
+    int ba = strcmp(row->a, b) == 0 && strcmp(row->b, a) == 0;
+    if (ab || ba) {
+      *swap = !ab;
+      return row;
+    }
+  }
+  return NULL;
+}
+
+/* 1 when the matrix row of the footprint families A and B is IND_ALWAYS. */
+static int ind_always(const IndMatrix *ind, const char *a, const char *b) {
+  int swap = 0;
+  const IndRow *row = front_ind_row(ind, a, b, &swap);
+  return row != NULL && row->verdict == IND_ALWAYS;
+}
+
+/* The case of ind at x : F (ind#x) and y : G (ind#y) (quotient-lang S6
+   u4c2, USER rulings Q-S6-20 (a) and Q-S6-21 (a)). An IND_ALWAYS row gives
+   flagYes. An IND_IF row with the slot def commute<F><G> gives the AND,
+   nested to the right, of `flagIf (keyEq KF KG) flagNo flagYes` over all
+   the clauses of the row, in their order: KF is the key of x and KG the
+   key of y. At a row stored as (G, F), the pattern ka is the key of y and
+   kb the key of x. The other rows give flagNo. */
+static const Term *ind_leaf(StepBuild *b, const DeclList *decls, const IndMatrix *ind, const char *f, const char *g) {
+  int swap = 0;
+  const IndRow *row = front_ind_row(ind, f, g, &swap);
+  const char *slot;
+  const Term *acc = NULL;
+  uint32_t k;
+  if (ind_always(ind, f, g))
+    return step_var(b, "flagYes");
+  if (row == NULL || row->verdict != IND_IF || row->clause_count == 0u)
+    return step_var(b, "flagNo");
+  slot = com_slot(b->arena, f, g);
+  if (slot == NULL) {
+    b->ok = 0;
+    return NULL;
+  }
+  if (program_def_at(decls, 0u, slot) == decls->count)
+    return step_var(b, "flagNo");
+  for (k = 0; k < row->clause_count; k++) {
+    if (row->clauses[k].ka == NULL || row->clauses[k].kb == NULL)
+      return step_var(b, "flagNo");
+  }
+  for (k = row->clause_count; k > 0u; k--) {
+    const IndClause *cl = &row->clauses[k - 1u];
+    const Term *kf = step_key_on(b, swap ? cl->kb : cl->ka, "ind#x");
+    const Term *kg = step_key_on(b, swap ? cl->ka : cl->kb, "ind#y");
+    const Term *ne = step_app(b, step_app(b, step_app(b, step_var(b, "flagIf"), step_app(b, step_app(b, step_var(b, "keyEq"), kf), kg)), step_var(b, "flagNo")), step_var(b, "flagYes"));
+    acc = acc == NULL ? ne : step_app(b, step_app(b, step_app(b, step_var(b, "flagIf"), ne), acc), step_var(b, "flagNo"));
+  }
+  return acc;
+}
+
+const Term *front_ind_body(Arena *arena, const DeclList *decls, const IndMatrix *ind, int line, int col) {
+  StepBuild b = {arena, 0, 0, 1};
+  const Term *e;
+  size_t i;
+  size_t j;
+  b.line = line;
+  b.col = col;
+  e = step_app(&b, step_var(&b, "elim"), step_lam(&b, "ind#u", step_var(&b, "Body"), step_var(&b, "Flag")));
+  for (i = 0; i < decls->count; i++) {
+    const Decl *fi = &decls->items[i];
+    const Term *v;
+    if (!footprint_family(fi))
+      continue;
+    v = step_app(&b, step_var(&b, "elim"), step_lam(&b, "ind#v", step_var(&b, "Body"), step_var(&b, "Flag")));
+    for (j = 0; j < decls->count; j++) {
+      const Decl *fj = &decls->items[j];
+      if (!footprint_family(fj))
+        continue;
+      v = step_app(&b, v, step_lam(&b, "ind#y", step_var(&b, fj->name), ind_leaf(&b, decls, ind, fi->name, fj->name)));
+    }
+    v = step_app(&b, v, step_var(&b, "ind#b"));
+    e = step_app(&b, e, step_lam(&b, "ind#x", step_var(&b, fi->name), v));
+  }
+  e = step_app(&b, e, step_var(&b, "ind#a"));
+  e = step_lam(&b, "ind#a", step_var(&b, "Body"), step_lam(&b, "ind#b", step_var(&b, "Body"), e));
+  return b.ok ? e : NULL;
+}
+
+const Term *front_slot_h_type(Arena *arena, const Term *type) {
+  StepBuild b = {arena, 0, 0, 1};
+  const Term *g = type != NULL && type->kind == TERM_PI ? type->right : NULL;
+  const char *bf;
+  const char *bg;
+  const Term *h;
+  Term *outer;
+  Term *inner;
+  if (g == NULL || g->kind != TERM_PI || type->name == NULL || g->name == NULL || type->left == NULL || type->left->kind != TERM_VAR || g->left == NULL || g->left->kind != TERM_VAR)
+    return type;
+  bf = front_prefixed(arena, "body", type->left->name);
+  bg = front_prefixed(arena, "body", g->left->name);
+  if (bf == NULL || bg == NULL)
+    return NULL;
+  b.line = type->line;
+  b.col = type->col;
+  h = step_app(&b, step_app(&b, step_var(&b, "ind"), step_app(&b, step_var(&b, bf), step_var(&b, type->name))), step_app(&b, step_var(&b, bg), step_var(&b, g->name)));
+  h = step_app(&b, step_app(&b, step_app(&b, step_var(&b, "Path"), step_var(&b, "Flag")), h), step_var(&b, "flagYes"));
+  outer = b.ok ? arena_alloc(arena, sizeof *outer) : NULL;
+  inner = outer != NULL ? arena_alloc(arena, sizeof *inner) : NULL;
+  if (inner == NULL)
+    return NULL;
+  *outer = *type;
+  *inner = *g;
+  inner->right = step_node(&b, TERM_PI, "com#h", 0u, h, g->right);
+  outer->right = inner;
+  return b.ok ? outer : NULL;
+}
+
+const Term *front_leaf_h_body(Arena *arena, const Term *body) {
+  StepBuild b = {arena, 0, 0, 1};
+  const Term *l2 = body != NULL && body->kind == TERM_LAM ? body->right : NULL;
+  const Term *l3 = l2 != NULL && l2->kind == TERM_LAM ? l2->right : NULL;
+  const Term *fx = l3 != NULL && l3->kind == TERM_LAM ? l3->right : NULL;
+  Term *c1;
+  Term *c2;
+  Term *c3;
+  Term *c4;
+  if (fx == NULL || fx->kind != TERM_APP || l3->name == NULL || fx->left == NULL || fx->left->kind != TERM_VAR || fx->left->name == NULL || strcmp(fx->left->name, "funExt") != 0)
+    return body;
+  b.line = fx->line;
+  b.col = fx->col;
+  c1 = arena_alloc(arena, sizeof *c1);
+  c2 = c1 != NULL ? arena_alloc(arena, sizeof *c2) : NULL;
+  c3 = c2 != NULL ? arena_alloc(arena, sizeof *c3) : NULL;
+  c4 = c3 != NULL ? arena_alloc(arena, sizeof *c4) : NULL;
+  if (c4 == NULL)
+    return NULL;
+  *c1 = *body;
+  *c2 = *l2;
+  *c3 = *l3;
+  *c4 = *fx;
+  c4->right = step_app(&b, fx->right, step_var(&b, l3->name));
+  c3->right = c4;
+  c2->right = c3;
+  c1->right = c2;
+  return b.ok ? c1 : NULL;
+}
+
 int front_load(Arena *arena, const char *source, const char *text, size_t len, DeclList *out, Diag *diag) {
   size_t first;
   out->items = NULL;
@@ -1013,9 +1880,13 @@ int front_load(Arena *arena, const char *source, const char *text, size_t len, D
       && value_after_asset(arena, first, out, diag)
       && key_after_key(arena, first, out, diag)
       && step_after_val(arena, first, out, diag)
+      && set_after_step(arena, first, out, diag)
       && step_defs(arena, first, out)
       && body_family(arena, first, out)
       && body_step(arena, first, out)
+      && ind_placeholder(arena, first, out)
+      && trace_after_ind(arena, first, out, diag)
+      && body_commute(arena, first, out, diag)
       && auth_after_witness(arena, first, out, diag)
       && agg_after_sig(arena, first, out, diag)
       && qc_after_signs(arena, first, out, diag);
@@ -1036,9 +1907,13 @@ int front_load_domain(Arena *arena, const char *source, const char *domain, cons
       && value_after_asset(arena, first, out, diag)
       && key_after_key(arena, first, out, diag)
       && step_after_val(arena, first, out, diag)
+      && set_after_step(arena, first, out, diag)
       && step_defs(arena, first, out)
       && body_family(arena, first, out)
       && body_step(arena, first, out)
+      && ind_placeholder(arena, first, out)
+      && trace_after_ind(arena, first, out, diag)
+      && body_commute(arena, first, out, diag)
       && auth_after_witness(arena, first, out, diag)
       && agg_after_sig(arena, first, out, diag)
       && qc_after_signs(arena, first, out, diag);

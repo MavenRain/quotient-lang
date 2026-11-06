@@ -1,0 +1,14 @@
+-- The set proofs (S6 u5, Q-S6-26 (a)): the front end puts the isSet
+-- proofs in the prelude. stableIsSet, piIsSet, maybeIsSet, sizeIsSet and
+-- natIsSet are fixed text. traceIsSet comes after the Trace family.
+-- valIsSet and effIsSet come after natIsSet when Val is Size or Nat.
+-- These defs are proofs only: they give no ir lines.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
+def tEff : isSet Eff := effIsSet
+def tTrace : isSet Trace := traceIsSet
+def tSize : isSet Size := sizeIsSet
+def tMaybe : isSet (Maybe Size) := maybeIsSet Size sizeIsSet

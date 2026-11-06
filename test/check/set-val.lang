@@ -1,0 +1,9 @@
+-- Val is not Size or Nat, so the prelude has no valIsSet and no
+-- effIsSet (Q-S6-29 (a)). Size -> Size is in the base span, so the gate
+-- checks this row without --kit.
+def Val : Type 0 := Size -> Size
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
+def tEff : isSet Eff := effIsSet

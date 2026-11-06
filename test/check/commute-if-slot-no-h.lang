@@ -1,0 +1,8 @@
+-- At an IND_IF pair the slot type needs the binder h (S6 u4c2, Q-S6-22
+-- (a)). This slot has the type of an IND_ALWAYS slot with no h, so the
+-- check refuses it.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+def commutePayPay : (f : Pay) -> (g : Pay) -> (s : State) -> Path (Maybe State) (effSeq (step (bodyPay f)) (step (bodyPay g)) s) (effSeq (step (bodyPay g)) (step (bodyPay f)) s) :=
+  fun (f : Pay) (g : Pay) (s : State) => refl

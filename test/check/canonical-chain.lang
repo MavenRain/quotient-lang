@@ -1,0 +1,2 @@
+-- X10 (quotient-lang S6 u8): CanonicalChain is not in the design, so the checker gives REFUSE_NOT_IN_DESIGN.
+def CanonicalChain : Nat := 0

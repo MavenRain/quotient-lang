@@ -1,0 +1,24 @@
+-- The kernel elim on the builtin types Flag, Option, Prod, Nat and List
+-- (S6 u4b1, Q-S6-15 (a), Q-S6-16 (a)). The motive takes the value. Flag
+-- has the cases flagYes and flagNo, Option has the cases none and some, and
+-- Prod has one case for pair. The Nat case for natSucc and the List case
+-- for cons also take the induction hypothesis.
+def elimFlag : Nat := elim (fun (f : Flag) => Nat) 1 2 flagNo
+def elimOption : Nat := elim (fun (o : Option Nat) => Nat) 0 (fun (a : Nat) => a) (some 4)
+def elimProd : Nat := elim (fun (p : Prod Nat Nat) => Nat) (fun (a : Nat) (b : Nat) => b) (pair 1 2)
+-- A count: the elim on the literal 3 adds 1 for each step.
+def elimNat : Nat := elim (fun (t : Nat) => Nat) 0 (fun (k : Nat) (ih : Nat) => natSucc ih) 3
+-- A length: the elim on a list adds 1 for each cell.
+def elimList : Nat := elim (fun (l : List Nat) => Nat) 0 (fun (a : Nat) (l : List Nat) (ih : Nat) => natSucc ih) (cons 1 (cons 2 nil))
+-- A proof by Nat induction: natEq n n is flagYes. The natSucc case uses
+-- the kernel rule natEq (natSucc k) (natSucc k) = natEq k k.
+def natEqRefl : (n : Nat) -> Path Flag (natEq n n) flagYes :=
+  fun (n : Nat) => elim (fun (t : Nat) => Path Flag (natEq t t) flagYes) refl
+    (fun (k : Nat) (ih : Path Flag (natEq k k) flagYes) => ih) n
+-- A proof by List induction: the fold that builds the list again gives the
+-- same list.
+def listId : List Nat -> List Nat :=
+  fun (l : List Nat) => fold (fun (a : Nat) (r : List Nat) => cons a r) nil l
+def listIdPath : (l : List Nat) -> Path (List Nat) (listId l) l :=
+  fun (l : List Nat) => elim (fun (m : List Nat) => Path (List Nat) (listId m) m) refl
+    (fun (a : Nat) (m : List Nat) (ih : Path (List Nat) (listId m) m) => fun (i : I) => cons a (ih @ i)) l

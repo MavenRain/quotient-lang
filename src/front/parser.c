@@ -156,6 +156,8 @@ static int starts_atom(TokKind kind) {
     case TOK_RBRACKET:
     case TOK_COMMA:
     case TOK_DOT:
+    case TOK_CONS:
+    case TOK_APPEND:
     case TOK_KW_DEF:
     case TOK_KW_REC:
     case TOK_KW_FUN:
@@ -369,6 +371,40 @@ static const Term *parse_neg(Parser *p) {
   return term;
 }
 
+/* S6 u7 sugar (Q-S6-5 (a)): each form goes to a prelude def by its name,
+   so the checker sees only the named def. */
+static const Term *sugar_name(Parser *p, const Token *tok, const char *name) {
+  Term *var = make_term(p, TERM_VAR, tok->line, tok->col);
+  if (var == NULL) return NULL;
+  var->nat = tok->nat;
+  var->name = name;
+  return var;
+}
+
+static const Term *sugar_app(Parser *p, const Token *tok, const Term *fn, const Term *arg) {
+  Term *app = fn == NULL || arg == NULL ? NULL : make_term(p, TERM_APP, tok->line, tok->col);
+  if (app == NULL) return NULL;
+  app->left = fn;
+  app->right = arg;
+  return app;
+}
+
+static const Term *parse_cons(Parser *p);
+
+/* `[t]` is `traceOne t` and `[[t]]` is `traceEval t`. A `[` directly after
+   `=>` stays a system (Q-S6-9 (a)): parse_lambda_tail takes it first.
+   The inner term is at the level of `<|` (USER ruling Q-S6-37 (a)), so a
+   Pi type or a `fun` in `[t]` needs parentheses. */
+static const Term *parse_bracket(Parser *p) {
+  const Token *tok = cur(p);
+  bump(p);
+  int twice = eat(p, TOK_LBRACKET);
+  const Term *inner = enter(p) ? parse_cons(p) : NULL;
+  p->depth--;
+  if (inner == NULL || !expect(p, TOK_RBRACKET, "']'") || (twice && !expect(p, TOK_RBRACKET, "']'"))) return NULL;
+  return sugar_app(p, tok, sugar_name(p, tok, twice ? "traceEval" : "traceOne"), inner);
+}
+
 static const Term *parse_atom(Parser *p) {
   const Token *tok = cur(p);
   switch (tok->kind) {
@@ -378,6 +414,7 @@ static const Term *parse_atom(Parser *p) {
     case TOK_KW_TYPE: return parse_universe(p);
     case TOK_KW_SIGMA: return parse_sigma(p);
     case TOK_TILDE: return parse_neg(p);
+    case TOK_LBRACKET: return parse_bracket(p);
     case TOK_EOF:
     case TOK_RPAREN:
     case TOK_COLON:
@@ -389,10 +426,11 @@ static const Term *parse_atom(Parser *p) {
     case TOK_AT:
     case TOK_MEET:
     case TOK_JOIN:
-    case TOK_LBRACKET:
     case TOK_RBRACKET:
     case TOK_COMMA:
     case TOK_DOT:
+    case TOK_CONS:
+    case TOK_APPEND:
     case TOK_KW_DEF:
     case TOK_KW_REC:
     case TOK_KW_FUN:
@@ -411,7 +449,7 @@ static const Term *parse_atom(Parser *p) {
 
 static const Term *parse_app(Parser *p) {
   const Term *head = parse_atom(p);
-  while (head != NULL && starts_atom(cur(p)->kind) && !(p->stop_footprint && at_word(p, "footprint")) && !at_decl_word(p)) {
+  while (head != NULL && (starts_atom(cur(p)->kind) || (at(p, TOK_LBRACKET) && !p->stop_footprint)) && !(p->stop_footprint && at_word(p, "footprint")) && !at_decl_word(p)) {
     const Term *arg = parse_atom(p);
     Term *app = arg == NULL ? NULL : make_term(p, TERM_APP, head->line, head->col);
     if (app == NULL) return NULL;
@@ -452,10 +490,41 @@ static const Term *parse_join(Parser *p) {
   return parse_chain(p, TOK_JOIN, TERM_IJOIN, parse_meet);
 }
 
+
+/* `c ++ d` (S6 u7, USER ruling Q-S6-36 (a)): right-associative, looser
+   than `\/` and tighter than `<|`. The parser has no types: check.c
+   selects the append def by the type of c (TERM_APPEND). */
+static const Term *parse_append(Parser *p) {
+  const Term *head = parse_join(p);
+  if (head == NULL || !at(p, TOK_APPEND)) return head;
+  const Token *tok = cur(p);
+  bump(p);
+  const Term *rest = enter(p) ? parse_append(p) : NULL;
+  p->depth--;
+  Term *app = rest == NULL ? NULL : make_term(p, TERM_APPEND, tok->line, tok->col);
+  if (app == NULL) return NULL;
+  app->name = NULL;
+  app->left = head;
+  app->right = rest;
+  return app;
+}
+
+/* `a <| t` is `traceCons a t` (S6 u7 sugar). It is looser than `\\/` and
+   right-associative: `a <| b <| t` is `a <| (b <| t)`. */
+static const Term *parse_cons(Parser *p) {
+  const Term *head = parse_append(p);
+  if (head == NULL || !at(p, TOK_CONS)) return head;
+  const Token *tok = cur(p);
+  bump(p);
+  const Term *rest = enter(p) ? parse_cons(p) : NULL;
+  p->depth--;
+  return rest == NULL ? NULL : sugar_app(p, tok, sugar_app(p, tok, sugar_name(p, tok, "traceCons"), head), rest);
+}
+
 static const Term *parse_term_body(Parser *p) {
   if (at(p, TOK_KW_FUN)) return parse_fun(p);
   if (at_binder_group(p)) return parse_binder_type(p);
-  const Term *head = parse_join(p);
+  const Term *head = parse_cons(p);
   if (head == NULL || !at(p, TOK_ARROW)) return head;
   const Token *arrow = cur(p);
   bump(p);
@@ -820,6 +889,8 @@ static int parse_decl(Parser *p, Decl *d) {
     case TOK_RBRACKET:
     case TOK_COMMA:
     case TOK_DOT:
+    case TOK_CONS:
+    case TOK_APPEND:
     case TOK_KW_REC:
     case TOK_KW_FUN:
     case TOK_KW_TYPE:

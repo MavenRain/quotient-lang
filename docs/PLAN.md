@@ -17,14 +17,19 @@ file gives the readings of that request, the route, the slices and the open
 items. The USER ruled Q-R1 to Q-R8 before S0 (section 14). So sections 2 to
 5 are RULED, not proposals.
 
-Status: S4 DONE (2026-11-03): the slots `Body`, `Witness`, `Digest`
+Status: S6 DONE (2026-11-06): `Trace` over `Body`, the generated `ind`,
+`commute` and `D`, `[[ ]]` (`traceEval`), `Blockchain`, the sugar `<|`,
+`++`, `[t]` and `[[t]]`, REFUSE_EQ_UNDECIDABLE, L4 and L9. S5
+(2026-11-04) gave footprint families, key spaces, `step`, the `ind`
+verb, the REFUSE_FOOTPRINT codes and L3. S4 (2026-11-03) gave the
+slots `Body`, `Witness`, `Digest`
 and `Sig`, the auth, agg and QC preludes (section 4),
 REFUSE_WITNESS_READ, REFUSE_BAG_NONCOMM at `Bag Sig` (section 7) and
 L5 (section 6). S3 (2026-11-03) gave `Pfin`, `in`, `union`, the slot
 `Key`, `Footprint = Pfin Key`, REFUSE_BAG_NONCOMM at `Pfin` and L2. S2
 (2026-11-02) gave `Amount`, `Bag`, `Value`, `Balance`, `[[ ]]v`,
 `Delta`, `neg`, `Balanced`, REFUSE_OVERFLOW and REFUSE_BAG_NONCOMM at
-`Bag`, with L1 and L8, on the S1 kernel (section 8.1). Next: S5
+`Bag`, with L1 and L8, on the S1 kernel (section 8.1). Next: S7
 (section 12).
 
 ## 1. Rulings
@@ -65,7 +70,7 @@ the result type. An abort is a value, never a trap. The step type is
 | N4 | Recursion is structural only: the eliminators of the base types. There is no general fixpoint. | kernel, `REFUSE_PARTIAL` |
 | N5 | The Wasm writer emits no `unreachable` and no trap form, and uses static memory only. `test/notraptool.c` checks each built module (relay-lang 5c386bb, permit-lang S3). | S1, S9 |
 | N6 | The C node never gives an error to a program. Bytes that it cannot decode, a bad witness and a bad signature are values: `rejected malformed`, `rejected badWitness`, `rejected badSig`. | S10 |
-| N7 | No equality test on `Eff` or on `Blockchain`. Equality of two effects over an infinite `State` is not decidable (X6). The checker refuses the test. | S6 |
+| N7 | No equality test on `Eff` or on `Blockchain`. Equality of two effects over an infinite `State` is not decidable (X6). The checker refuses the test. S6 DONE: a two-argument test on `Eff` or on `Blockchain` gives `REFUSE_EQ_UNDECIDABLE`, also through an alias (Q-S6-6 (a)); eq-eff.lang, eq-eff-alias.lang, eq-chain.lang. | S6 |
 
 Refusals at run time are values. Refusals at check time are `REFUSE_*`
 codes (section 7).
@@ -104,14 +109,14 @@ name: a program that uses it gets a refusal (section 7).
 |---|---|---|---|---|---|
 | X1 | `Body`, `Witness`, `Authorized b`, `AuthTx` | sec 4 | Semantic domain (Tx) | CORRECT: D2 Tx is `Body` with a truncated witness; txid and effect read `Body` only. S4 DONE: the slots `Body` and `Witness`, `witnessOk`, `Authorized b` and `AuthTx` (auth prelude, Q-S4-1 (a)); `txid : Body -> Digest` (Q-S4-2 (a)) | S4 |
 | X2 | `Ind a b` (Bernstein) | sec 7 | Semantic domain (t1 perp t2) | CORRECT: shared reads are allowed; D2 "etc." is not a definition | S5 |
-| X3 | `Trace` (`eps`, `<|`, `swap` on `Ind`, trunc) | sec 8 | CTT realisation (generators) | KEEP: the only generator is commutation | S6 |
-| X4 | (absorption path) | sec 6 note | CTT realisation ("absorption of invalid or no-op transactions") | DROP, refused: "invalid" depends on the state, so it is no path on histories; replay counts | S6 |
-| X5 | `eval` = `[[ ]] : Trace -> Eff`, `Eff`, `;`, `just` | secs 7, 8 | Semantic domain (eval); Operations (eval factors) | KEEP: `nothing` is the abort value | S5, S6 |
-| X6 | `Blockchain = Im [[ ]]` | secs 9, 13 | Semantic domain (List Tx / ~) | CORRECT: `List Tx / ~` = `Im eval`, built by image factorization with no decision procedure; a function out of `Blockchain` factors through `eval` | S6 |
-| X7 | `++`, `[t]` (monoid on `Trace` and `Blockchain`) | sec 8 | Operations | KEEP: one spelling for append, `c ++ [t]` (Q-R4 (a)) | S6 |
+| X3 | `Trace` (`eps`, `<|`, `swap` on `Ind`, trunc) | sec 8 | CTT realisation (generators) | KEEP: the only generator is commutation. S6 DONE: front.c generates `Trace` over `Body` with `traceEps`, `traceCons`, `traceSwap` on a pair with `ind a b` = `flagYes`, `traceSquash` and `traceFold`; `ind : Body -> Body -> Flag` comes from the Ind matrix (Q-S6-10 (a), Q-S6-11 (a)); `commute` for each pair of `Body` constructors gives the kernel path from `effSeq (step a) (step b)` to `effSeq (step b) (step a)` (Q-S6-3 (b), Q-S6-8 (a)); examples/trace.lang, examples/commute.lang | S6 |
+| X4 | (absorption path) | sec 6 note | CTT realisation ("absorption of invalid or no-op transactions") | DROP, refused: "invalid" depends on the state, so it is no path on histories; replay counts. S6 DONE: `REFUSE_NOT_IN_DESIGN` (the S1 code; design-x4.lang) | S6 |
+| X5 | `eval` = `[[ ]] : Trace -> Eff`, `Eff`, `;`, `just` | secs 7, 8 | Semantic domain (eval); Operations (eval factors) | KEEP: `nothing` is the abort value. S6 DONE: `traceEval` is `traceFold` into `Eff` (unit `just`, op `effSeq`, the swap case `commute`), after the set lemmas for `Eff` and `Trace` (Q-S6-26 (a), Q-S6-28 (a)); examples/eval.lang | S5, S6 |
+| X6 | `Blockchain = Im [[ ]]` | secs 9, 13 | Semantic domain (List Tx / ~) | CORRECT: `List Tx / ~` = `Im eval`, built by image factorization with no decision procedure; a function out of `Blockchain` factors through `eval`. S6 DONE: `Blockchain` is the Sigma of `f : Eff` and the truncated fiber of `traceEval` over `f`, with `chainOf`, `chainEval` (the first projection) and `chainAppend` (Q-S6-4 (a)); examples/chain.lang | S6 |
+| X7 | `++`, `[t]` (monoid on `Trace` and `Blockchain`) | sec 8 | Operations | KEEP: one spelling for append, `c ++ [t]` (Q-R4 (a)). S6 DONE: `traceAppend`, `traceOne` and the parser sugar: `a <| t` is `traceCons`, `c ++ d` is the append of the type of `c`, `[t]` is `traceOne` and `[[t]]` is `traceEval` (Q-S6-5 (a), Q-S6-9 (a)); examples/sugar.lang, 10 parse refusals | S6 |
 | X8 | `Ledger = Trace / ~N`, `apply`, `query`, `[[ ]]N` | sec 9 | (none) | KEEP: node state; a right congruence is enough | S7 |
 | X9 | `<=` (prefix), `Compatible` | sec 10 | Consensus ("agreement = path equality") | CORRECT: agreement is `Compatible` (a common extension); decidable on `Trace` through the Foata normal form | S7 |
-| X10 | (`GenConsensus`, `CanonicalChain`, run colimit) | sec 10 | Consensus (CanonicalChain) | DROP, refused: no finite value; `Forks` and `~cons` have no definition. SPEC text only | S6 |
+| X10 | (`GenConsensus`, `CanonicalChain`, run colimit) | sec 10 | Consensus (CanonicalChain) | DROP, refused: no finite value; `Forks` and `~cons` have no definition. SPEC text only. S6 DONE: `REFUSE_NOT_IN_DESIGN` (the S1 code; canonical-chain.lang) | S6 |
 | X11 | `Bag A` (comm, trunc), `Value = Bag Asset`, `Balance`, `[[ ]]v` | sec 2 | Consensus (List Output / perm) | KEEP: the free commutative monoid | S2 |
 | X12 | `UTxO = FinMap OutRef Output` | secs 2, 12 | Consensus (List Output / perm) | CORRECT: outputs have unique refs, so a finite map, not a bag | S8 |
 | X13 | `Delta M`, `neg`, `Balanced`, mint and burn policy | sec 3 | (none) | KEEP: subtraction is total | S2 |
@@ -122,7 +127,7 @@ name: a program that uses it gets a refusal (section 7).
 | X18 | `FinMap Key Val`, `canon`, `root`, inclusion proof, `Digest` | sec 12 | (none) | KEEP: binding is assumption O1; policy normal forms later (Q-R7 (a)) | S8 |
 | X19 | `Valid r r'`, `compose` | sec 13 | (none) | KEEP: the T2 circuit emits `Valid`; `compose` uses L4 and O1 once | S8, S17 |
 | X20 | shards: `Trace (B1 + B2) ~ Trace B1 x Trace B2` | sec 11 | (none) | KEEP as a T3 report fact (cross-shard letter count), no type | S11 |
-| X21 | `D = (Body x Body) minus Ind`, the MEV surface | sec 14 | Summary | KEEP: T3 lists the `D` pairs | S6, S11 |
+| X21 | `D = (Body x Body) minus Ind`, the MEV surface | sec 14 | Summary | KEEP: T3 lists the `D` pairs. S6 DONE: front.c generates `D : Body -> Body -> Flag`, the negation of `ind` (Q-S6-7 (a)); T3 is S11 | S6, S11 |
 
 Design parameters that the rows use, each a base sort with decidable
 equality and no other operation unless a row gives one: `Asset`, `Owner`,
@@ -332,12 +337,12 @@ Notes:
 | L1 | `Bag` is commutative: an eliminator out of `Bag A` gives the `comm` clause. `agg (xs ++ ys) = agg xs (x) agg ys`. | kernel, per eliminator. S2 DONE at `Bag`: a fold or elim out of `Bag` with a wrong count of cases gives `REFUSE_BAG_NONCOMM` (Q-S2-4 (a)). S4 DONE at `Bag Sig`: the agg prelude gives `agg` and `aggOp`; a program with the slot `Sig` and no `sigComm`, or a wrong `sigComm`, gets `REFUSE_BAG_NONCOMM` (Q-S4-4 (a)); examples/agg.lang; `examples/bag.lang`. `agg` needs O2 (S4) |
 | L2 | `Pfin` union laws: unit, assoc, comm, idem. Mempool merge is order-free. S4: `Mempool = Pfin AuthTx` (auth prelude), so these laws hold at `Mempool` (examples/authtx.lang). | prelude (merge-lang S1b, quorum-lang FMSet port), S3 DONE at `Pfin`: `unionUnitL`, `unionUnitR`, `unionAssoc`, `unionComm` and `unionIdem` (domain/domain.lang); `examples/pfin.lang`. The `Mempool` instance comes with `AuthTx` (S4) |
 | L3 | Trace swap: if `Ind a b`, `[[a <| b <| t]] = [[b <| a <| t]]`. | checker, from the frame law (section 5). S5 DONE by shape (Q-S5-5 (a)): the read, decide, write phases of each `step` and the `Ind` matrix (`langc ind`) are the evidence; there is no kernel path term. |
-| L4 | `[[t ++ u]] = [[t]] ; [[u]]`, and `[[ ]]` is the unique monoid map that extends `step` (D1 sec 8). | prelude |
+| L4 | `[[t ++ u]] = [[t]] ; [[u]]`, and `[[ ]]` is the unique monoid map that extends `step` (D1 sec 8). | prelude. S6 DONE: `evalAppend` by a dependent `Trace` elim (Q-S6-27 (a)); examples/eval-append.lang |
 | L5 | No-malleability: equal bodies give equal `AuthTx`; txid reads `Body` only. | checker: a step or txid that reads a `Witness` is refused. S4 DONE for `txid` and the `Body` slot: `REFUSE_WITNESS_READ` (Q-S4-2 (a)), and the prelude lemma `authTxEq` (Q-S4-7 (a)); examples/authtx.lang. S5 DONE for `step`: a footprint family that mentions `Witness`, `Authorized` or `AuthTx` gives `REFUSE_WITNESS_READ` (step-reads-witness.lang, step-reads-witness-alias.lang). |
 | L6 | Nerode right congruence: `t ~N u` gives `t ++ k ~N u ++ k`. | prelude |
 | L7 | `Valid` compose: `Valid r r'` and `Valid r' r''` give `Valid r r''`. Uses L4 and O1 once. | prelude; T2 emits it |
 | L8 | `Delta`: `a - a = 0`; `Balanced` is closed under `+`. | prelude, S2 DONE: `deltaSelf` (`a - a = 0`), `balancedAdd` (Q-S2-6 (a)) and `balancedNeg` (section 4); `examples/value.lang` |
-| L9 | `eval` factors through `Blockchain` (X6). | by construction |
+| L9 | `eval` factors through `Blockchain` (X6). | by construction. S6 DONE: `chainEval` of `chainOf t` is `traceEval t` by refl (Q-S6-4 (a)); examples/chain.lang |
 
 Assumptions (named, never proved in the language):
 

@@ -1,0 +1,3 @@
+-- keyEqRefl gives keyEq a a = flagYes only for the same key two times: two different keys do not.
+keyspace Bal : Size -> Key
+def bad : Path Flag (keyEq (Bal sz0) (Bal (szS sz0))) flagYes := keyEqRefl (Bal sz0)

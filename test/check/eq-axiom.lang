@@ -1,0 +1,2 @@
+-- Rule R2 first (quotient-lang S6 u8, USER ruling Q-S6-38 (a)): an axiom of the type Eff -> Eff -> Flag gives REFUSE_AXIOM before the N7 test.
+axiom effEqAx : Eff -> Eff -> Flag

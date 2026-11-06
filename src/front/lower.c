@@ -653,6 +653,7 @@ static int lower_canon(Low *l, Buf *b, const Value *v, Operand *out) {
     return refuse(l, "len (the op count of a FreeMon trace at run time)");
   case OP_VALUE_COUNT:
     return refuse(l, "valueCount (the count of an asset in a Value at run time)");
+  case OP_NAT_SUCC:
   case OP_ELIM:
   case OP_KMAP:
   case OP_KMAP_OF:
@@ -1245,6 +1246,7 @@ static int lower_stuck(Low *l, Buf *b, const Value *v, Operand *out) {
     return refuse(l, "len (the op count of a FreeMon trace at run time)");
   case OP_VALUE_COUNT:
     return refuse(l, "valueCount (the count of an asset in a Value at run time)");
+  case OP_NAT_SUCC:
   case OP_ELIM:
   case OP_KMAP:
   case OP_KMAP_OF:

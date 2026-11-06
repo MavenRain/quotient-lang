@@ -1,0 +1,24 @@
+-- traceAppend and the L4 law (S6 u5c, Q-S6-27 (a)): traceAppend t u puts
+-- the letters of t in front of u. evalAppend t u is a path from the eval
+-- of traceAppend t u to effSeq (traceEval t) (traceEval u). rL4 uses the
+-- law to relate two runs on the state s0.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
+def pay0 : Body := bodyPay (mk sz0 (szS sz0))
+def cast0 : Body := bodyCast (mkcast sz0)
+def s0 : State := fun (k : Key) => sz0
+def tA : Trace := traceOne pay0
+def tB : Trace := traceOne cast0
+def tAB : Trace := traceAppend tA tB
+def aEps : Path Trace (traceAppend traceEps tB) tB := refl
+def aAB : Path Trace tAB (traceCons pay0 (traceCons cast0 traceEps)) := refl
+def lAB : Path Eff (traceEval tAB) (effSeq (traceEval tA) (traceEval tB)) := evalAppend tA tB
+def lABA : Path Eff (traceEval (traceAppend tAB tA)) (effSeq (traceEval tAB) (traceEval tA)) := evalAppend tAB tA
+def lOne : (a : Body) -> (u : Trace) -> Path Eff (traceEval (traceAppend (traceOne a) u)) (effSeq (traceEval (traceOne a)) (traceEval u)) :=
+  fun (a : Body) (u : Trace) => evalAppend (traceOne a) u
+def rAB : Val := effRun (traceEval tAB) s0 (Bal sz0)
+def rSeq : Val := effRun (effSeq (traceEval tA) (traceEval tB)) s0 (Bal sz0)
+def rL4 : Path Val rAB rSeq := fun (i : I) => effRun (lAB @ i) s0 (Bal sz0)

@@ -1,0 +1,31 @@
+-- keyEqSound changes a flagYes result of keyEq into a path between the two keys.
+-- The key spaces use Nat, Size, Flag, Option Nat, List Size and Prod Nat Flag fields.
+-- The field lemmas (natEqSound .. listEqSound) are used directly, then keyEqSound open and closed.
+-- keyEqRefl gives the flagYes result of keyEq for the same key two times (u4c1).
+-- The refl field lemmas (natEqRefl .. listEqRefl) and flagAndIntro are used directly, then keyEqRefl open and closed.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Mix : Nat -> Flag -> Option Nat -> Key
+keyspace Lst : List Size -> Prod Nat Flag -> Key
+def sameNat : Path Nat 3 3 := natEqSound 3 3 refl
+def sameSize : Path Size (szS sz0) (szS sz0) := sizeEqSound (szS sz0) (szS sz0) refl
+def sameFlag : Path Flag flagNo flagNo := flagEqSound flagNo flagNo refl
+def sameOpt : Path (Option Nat) (some 2) (some 2) := optionEqSound Nat natEq natEqSound (some 2) (some 2) refl
+def samePair : Path (Prod Nat Flag) (pair 1 flagYes) (pair 1 flagYes) := prodEqSound Nat Flag natEq flagEq natEqSound flagEqSound (pair 1 flagYes) (pair 1 flagYes) refl
+def sameList : Path (List Nat) (cons 1 (cons 2 nil)) (cons 1 (cons 2 nil)) := listEqSound Nat natEq natEqSound (cons 1 (cons 2 nil)) (cons 1 (cons 2 nil)) refl
+def roundList : (l : List Size) -> Path (List Size) (listRebuild Size (listUncons Size l)) l := listRound Size
+def soundOpen : (a : Key) -> (b : Key) -> Path Flag (keyEq a b) flagYes -> Path Key a b := keyEqSound
+def sameBal : Path Key (Bal sz0) (Bal sz0) := keyEqSound (Bal sz0) (Bal sz0) refl
+def sameMix : Path Key (Mix 3 flagYes (some 2)) (Mix 3 flagYes (some 2)) := keyEqSound (Mix 3 flagYes (some 2)) (Mix 3 flagYes (some 2)) refl
+def sameLst : Path Key (Lst (cons sz0 nil) (pair 1 flagNo)) (Lst (cons sz0 nil) (pair 1 flagNo)) := keyEqSound (Lst (cons sz0 nil) (pair 1 flagNo)) (Lst (cons sz0 nil) (pair 1 flagNo)) refl
+def reflNat : Path Flag (natEq 3 3) flagYes := natEqRefl 3
+def reflSize : Path Flag (sizeEq (szS sz0) (szS sz0)) flagYes := sizeEqRefl (szS sz0)
+def reflFlag : Path Flag (flagEq flagNo flagNo) flagYes := flagEqRefl flagNo
+def reflOpt : Path Flag (optionEq Nat natEq (some 2) (some 2)) flagYes := optionEqRefl Nat natEq natEqRefl (some 2)
+def reflPair : Path Flag (prodEq Nat Flag natEq flagEq (pair 1 flagYes) (pair 1 flagYes)) flagYes := prodEqRefl Nat Flag natEq flagEq natEqRefl flagEqRefl (pair 1 flagYes)
+def reflList : (xs : List Size) -> Path Flag (listEq Size sizeEq xs xs) flagYes := fun (xs : List Size) => listEqRefl Size sizeEq sizeEqRefl xs
+def reflBoth : Path Flag (flagIf flagYes flagYes flagNo) flagYes := flagAndIntro flagYes flagYes refl refl
+def reflOpen : (a : Key) -> Path Flag (keyEq a a) flagYes := keyEqRefl
+def reflBal : Path Flag (keyEq (Bal sz0) (Bal sz0)) flagYes := keyEqRefl (Bal sz0)
+def reflMix : Path Flag (keyEq (Mix 3 flagYes (some 2)) (Mix 3 flagYes (some 2))) flagYes := keyEqRefl (Mix 3 flagYes (some 2))
+def reflLst : Path Flag (keyEq (Lst (cons sz0 nil) (pair 1 flagNo)) (Lst (cons sz0 nil) (pair 1 flagNo))) flagYes := keyEqRefl (Lst (cons sz0 nil) (pair 1 flagNo))

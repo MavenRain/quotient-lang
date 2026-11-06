@@ -54,6 +54,8 @@ const char *tok_kind_name(TokKind kind) {
     case TOK_RBRACKET: return "']'";
     case TOK_COMMA: return "','";
     case TOK_DOT: return "'.'";
+    case TOK_CONS: return "'<|'";
+    case TOK_APPEND: return "'++'";
     case TOK_KW_DEF: return "'def'";
     case TOK_KW_REC: return "'rec'";
     case TOK_KW_FUN: return "'fun'";
@@ -198,6 +200,14 @@ static int lex_symbol(Lexer *lx) {
       break;
     case '=':
       kind = next == '>' ? TOK_FATARROW : TOK_EOF;
+      width = 2;
+      break;
+    case '<':
+      kind = next == '|' ? TOK_CONS : TOK_EOF;
+      width = 2;
+      break;
+    case '+':
+      kind = next == '+' ? TOK_APPEND : TOK_EOF;
       width = 2;
       break;
     default: break;

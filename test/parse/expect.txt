@@ -16,3 +16,13 @@ irrelevant-at.lang PARSE_EXPECT
 irrelevant-attr.lang LEX_CHAR
 footprint-no-binder.lang PARSE_EXPECT
 step-bad-item.lang PARSE_EXPECT
+sugar-cons-notail.lang PARSE_EXPECT
+sugar-bracket-open.lang PARSE_EXPECT
+sugar-bracket2-open.lang PARSE_EXPECT
+sugar-bracket-empty.lang PARSE_EXPECT
+sugar-lt-alone.lang LEX_CHAR
+sugar-append-notail.lang PARSE_EXPECT
+sugar-append-nohead.lang PARSE_EXPECT
+sugar-plus-alone.lang LEX_CHAR
+sugar-append-open.lang PARSE_EXPECT
+sugar-bracket-pi.lang PARSE_EXPECT
