@@ -242,3 +242,8 @@ eq-eff-sum.lang REFUSE_EQ_UNDECIDABLE
 eq-chain.lang REFUSE_EQ_UNDECIDABLE
 eq-axiom.lang REFUSE_AXIOM
 canonical-chain.lang REFUSE_NOT_IN_DESIGN
+nerode-end.lang PATH_END
+ledger-fold-noglue.lang TYPE_MISMATCH
+ledger-glue-type.lang TYPE_MISMATCH
+prefix-wrong-k.lang PATH_END
+body-eq-seal.lang PATH_END

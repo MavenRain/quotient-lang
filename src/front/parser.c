@@ -158,6 +158,7 @@ static int starts_atom(TokKind kind) {
     case TOK_DOT:
     case TOK_CONS:
     case TOK_APPEND:
+    case TOK_LE:
     case TOK_KW_DEF:
     case TOK_KW_REC:
     case TOK_KW_FUN:
@@ -390,19 +391,41 @@ static const Term *sugar_app(Parser *p, const Token *tok, const Term *fn, const 
 }
 
 static const Term *parse_cons(Parser *p);
+static const Term *parse_atom(Parser *p);
+
+/* An `N` directly after `]` (on the same line, with no space) is the
+   `[[l]]N` marker. In all other positions `N` stays a name. */
+static int at_ledger_n(Parser *p, const Token *close) {
+  const Token *tok = cur(p);
+  return tok->kind == TOK_IDENT && tok->len == 1 && tok->text[0] == 'N' && tok->line == close->line && tok->col == close->col + 1;
+}
 
 /* `[t]` is `traceOne t` and `[[t]]` is `traceEval t`. A `[` directly after
    `=>` stays a system (Q-S6-9 (a)): parse_lambda_tail takes it first.
    The inner term is at the level of `<|` (USER ruling Q-S6-37 (a)), so a
-   Pi type or a `fun` in `[t]` needs parentheses. */
+   Pi type or a `fun` in `[t]` needs parentheses. `[[l]]N s` is
+   `ledgerEval s l` (Q-S7-5 (a), Q-S7-9 (a)), where s is one atom. An `N`
+   directly after one `]` has no `[[ ]]` before it: a parse refusal. */
 static const Term *parse_bracket(Parser *p) {
   const Token *tok = cur(p);
   bump(p);
   int twice = eat(p, TOK_LBRACKET);
   const Term *inner = enter(p) ? parse_cons(p) : NULL;
   p->depth--;
-  if (inner == NULL || !expect(p, TOK_RBRACKET, "']'") || (twice && !expect(p, TOK_RBRACKET, "']'"))) return NULL;
-  return sugar_app(p, tok, sugar_name(p, tok, twice ? "traceEval" : "traceOne"), inner);
+  const Token *first = cur(p);
+  if (inner == NULL || !expect(p, TOK_RBRACKET, "']'")) return NULL;
+  const Token *close = twice ? cur(p) : first;
+  if (twice && !expect(p, TOK_RBRACKET, "']'")) return NULL;
+  int marked = at_ledger_n(p, close);
+  if (marked && !twice) {
+    (void)expect(p, TOK_RBRACKET, "'[[ ]]' before N");
+    return NULL;
+  }
+  if (!marked) return sugar_app(p, tok, sugar_name(p, tok, twice ? "traceEval" : "traceOne"), inner);
+  bump(p);
+  const Term *state = enter(p) ? parse_atom(p) : NULL;
+  p->depth--;
+  return state == NULL ? NULL : sugar_app(p, tok, sugar_app(p, tok, sugar_name(p, tok, "ledgerEval"), state), inner);
 }
 
 static const Term *parse_atom(Parser *p) {
@@ -431,6 +454,7 @@ static const Term *parse_atom(Parser *p) {
     case TOK_DOT:
     case TOK_CONS:
     case TOK_APPEND:
+    case TOK_LE:
     case TOK_KW_DEF:
     case TOK_KW_REC:
     case TOK_KW_FUN:
@@ -521,10 +545,23 @@ static const Term *parse_cons(Parser *p) {
   return rest == NULL ? NULL : sugar_app(p, tok, sugar_app(p, tok, sugar_name(p, tok, "traceCons"), head), rest);
 }
 
+/* `t <= u` is `prefix t u` (S7 u4 sugar, Q-S7-6 (a)). It is looser than
+   `<|` and tighter than `->`. It does not chain: after `t <= u` a second
+   `<=` is a parse refusal at that token. */
+static const Term *parse_le(Parser *p) {
+  const Term *head = parse_cons(p);
+  if (head == NULL || !at(p, TOK_LE)) return head;
+  const Token *tok = cur(p);
+  bump(p);
+  const Term *rest = enter(p) ? parse_cons(p) : NULL;
+  p->depth--;
+  return rest == NULL ? NULL : sugar_app(p, tok, sugar_app(p, tok, sugar_name(p, tok, "prefix"), head), rest);
+}
+
 static const Term *parse_term_body(Parser *p) {
   if (at(p, TOK_KW_FUN)) return parse_fun(p);
   if (at_binder_group(p)) return parse_binder_type(p);
-  const Term *head = parse_cons(p);
+  const Term *head = parse_le(p);
   if (head == NULL || !at(p, TOK_ARROW)) return head;
   const Token *arrow = cur(p);
   bump(p);
@@ -891,6 +928,7 @@ static int parse_decl(Parser *p, Decl *d) {
     case TOK_DOT:
     case TOK_CONS:
     case TOK_APPEND:
+    case TOK_LE:
     case TOK_KW_REC:
     case TOK_KW_FUN:
     case TOK_KW_TYPE:

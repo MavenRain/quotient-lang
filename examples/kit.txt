@@ -35,3 +35,9 @@ eval.lang
 eval-append.lang
 chain.lang
 sugar.lang
+nerode.lang
+ledger.lang
+prefix.lang
+body-eq.lang
+body-eq-hygiene.lang
+foata.lang

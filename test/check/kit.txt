@@ -109,3 +109,8 @@ eq-eff-alias.lang
 eq-eff-sum.lang
 eq-chain.lang
 eq-axiom.lang
+nerode-end.lang
+ledger-fold-noglue.lang
+ledger-glue-type.lang
+prefix-wrong-k.lang
+body-eq-seal.lang

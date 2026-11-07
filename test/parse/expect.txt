@@ -26,3 +26,5 @@ sugar-append-nohead.lang PARSE_EXPECT
 sugar-plus-alone.lang LEX_CHAR
 sugar-append-open.lang PARSE_EXPECT
 sugar-bracket-pi.lang PARSE_EXPECT
+sugar-bracket-n.lang PARSE_EXPECT
+sugar-le-chain.lang PARSE_EXPECT

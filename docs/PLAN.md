@@ -17,7 +17,11 @@ file gives the readings of that request, the route, the slices and the open
 items. The USER ruled Q-R1 to Q-R8 before S0 (section 14). So sections 2 to
 5 are RULED, not proposals.
 
-Status: S6 DONE (2026-11-06): `Trace` over `Body`, the generated `ind`,
+Status: S7 DONE (2026-11-07): `Ledger` (the Nerode set quotient at a
+start state), `apply`, `query`, `[[ ]]N`, `<=` (`prefix`), `Compatible`,
+the Foata decider (`bodyEq`, `foata`, `foataEq`, `traceLe`,
+`compatible`; its soundness proof is OPEN) and L6. S6 (2026-11-06) gave
+`Trace` over `Body`, the generated `ind`,
 `commute` and `D`, `[[ ]]` (`traceEval`), `Blockchain`, the sugar `<|`,
 `++`, `[t]` and `[[t]]`, REFUSE_EQ_UNDECIDABLE, L4 and L9. S5
 (2026-11-04) gave footprint families, key spaces, `step`, the `ind`
@@ -29,7 +33,7 @@ L5 (section 6). S3 (2026-11-03) gave `Pfin`, `in`, `union`, the slot
 `Key`, `Footprint = Pfin Key`, REFUSE_BAG_NONCOMM at `Pfin` and L2. S2
 (2026-11-02) gave `Amount`, `Bag`, `Value`, `Balance`, `[[ ]]v`,
 `Delta`, `neg`, `Balanced`, REFUSE_OVERFLOW and REFUSE_BAG_NONCOMM at
-`Bag`, with L1 and L8, on the S1 kernel (section 8.1). Next: S7
+`Bag`, with L1 and L8, on the S1 kernel (section 8.1). Next: S8
 (section 12).
 
 ## 1. Rulings
@@ -114,8 +118,8 @@ name: a program that uses it gets a refusal (section 7).
 | X5 | `eval` = `[[ ]] : Trace -> Eff`, `Eff`, `;`, `just` | secs 7, 8 | Semantic domain (eval); Operations (eval factors) | KEEP: `nothing` is the abort value. S6 DONE: `traceEval` is `traceFold` into `Eff` (unit `just`, op `effSeq`, the swap case `commute`), after the set lemmas for `Eff` and `Trace` (Q-S6-26 (a), Q-S6-28 (a)); examples/eval.lang | S5, S6 |
 | X6 | `Blockchain = Im [[ ]]` | secs 9, 13 | Semantic domain (List Tx / ~) | CORRECT: `List Tx / ~` = `Im eval`, built by image factorization with no decision procedure; a function out of `Blockchain` factors through `eval`. S6 DONE: `Blockchain` is the Sigma of `f : Eff` and the truncated fiber of `traceEval` over `f`, with `chainOf`, `chainEval` (the first projection) and `chainAppend` (Q-S6-4 (a)); examples/chain.lang | S6 |
 | X7 | `++`, `[t]` (monoid on `Trace` and `Blockchain`) | sec 8 | Operations | KEEP: one spelling for append, `c ++ [t]` (Q-R4 (a)). S6 DONE: `traceAppend`, `traceOne` and the parser sugar: `a <| t` is `traceCons`, `c ++ d` is the append of the type of `c`, `[t]` is `traceOne` and `[[t]]` is `traceEval` (Q-S6-5 (a), Q-S6-9 (a)); examples/sugar.lang, 10 parse refusals | S6 |
-| X8 | `Ledger = Trace / ~N`, `apply`, `query`, `[[ ]]N` | sec 9 | (none) | KEEP: node state; a right congruence is enough | S7 |
-| X9 | `<=` (prefix), `Compatible` | sec 10 | Consensus ("agreement = path equality") | CORRECT: agreement is `Compatible` (a common extension); decidable on `Trace` through the Foata normal form | S7 |
+| X8 | `Ledger = Trace / ~N`, `apply`, `query`, `[[ ]]N` | sec 9 | (none) | KEEP: node state; a right congruence is enough. S7 DONE: `~N` is evaluation at a start state: `nerode s0 t u` is a path in `Maybe State` from `traceEval t s0` to `traceEval u s0` (Q-S7-1 (a)). front.c generates `Ledger s0` as a set quotient HIT with `ledgerIn`, `ledgerGlue` on a `nerode` path, `ledgerSquash` and `ledgerFold` into a set (Q-S7-2 (a)). `apply s0 l b` adds `b` at the end of each trace (the glue case uses `nerodeRight`); `ledgerEval` runs a ledger at `s0`; `query` reads a value of a set `A` from the result state through `State -> A` and gives `Maybe A` (Q-S7-3 (a)); the sugar `[[l]]N s` is `ledgerEval s l` (Q-S7-5 (a), Q-S7-9 (a)); examples/ledger.lang, ledger-glue-type.lang, ledger-fold-noglue.lang, sugar-bracket-n.lang | S7 |
+| X9 | `<=` (prefix), `Compatible` | sec 10 | Consensus ("agreement = path equality") | CORRECT: agreement is `Compatible` (a common extension); decidable on `Trace` through the Foata normal form. S7 DONE: the kernel defs `prefix` and `Compatible` (Q-S7-4 (a)), the sugar `t <= u` for `prefix t u` (Q-S7-6 (a)), and `traceAppendEps`, `prefixRefl` and `compatibleOfPrefix` (Q-S7-10 (a)). front.c generates the decider on `List Body`: `bodyEq` and `bodyEqSound` on the key-eq prelude, only when each field of each footprint family is a key argument form (Q-S7-7 (a), Q-S7-11 (a), Q-S7-12 (a)); `foataPeel`, `foata` and `foataEq`, with each Foata step compared as a bag (Q-S7-13 (a)); `traceResidual`, `traceLe` and `compatible` (Q-S7-14 (a)). The decider runs in eval and Wasm; its soundness proof is OPEN for a later slice (Q-S7-4 (a)); examples/prefix.lang, examples/body-eq.lang, examples/foata.lang, prefix-wrong-k.lang, body-eq-seal.lang, sugar-le-chain.lang | S7 |
 | X10 | (`GenConsensus`, `CanonicalChain`, run colimit) | sec 10 | Consensus (CanonicalChain) | DROP, refused: no finite value; `Forks` and `~cons` have no definition. SPEC text only. S6 DONE: `REFUSE_NOT_IN_DESIGN` (the S1 code; canonical-chain.lang) | S6 |
 | X11 | `Bag A` (comm, trunc), `Value = Bag Asset`, `Balance`, `[[ ]]v` | sec 2 | Consensus (List Output / perm) | KEEP: the free commutative monoid | S2 |
 | X12 | `UTxO = FinMap OutRef Output` | secs 2, 12 | Consensus (List Output / perm) | CORRECT: outputs have unique refs, so a finite map, not a bag | S8 |
@@ -339,7 +343,7 @@ Notes:
 | L3 | Trace swap: if `Ind a b`, `[[a <| b <| t]] = [[b <| a <| t]]`. | checker, from the frame law (section 5). S5 DONE by shape (Q-S5-5 (a)): the read, decide, write phases of each `step` and the `Ind` matrix (`langc ind`) are the evidence; there is no kernel path term. |
 | L4 | `[[t ++ u]] = [[t]] ; [[u]]`, and `[[ ]]` is the unique monoid map that extends `step` (D1 sec 8). | prelude. S6 DONE: `evalAppend` by a dependent `Trace` elim (Q-S6-27 (a)); examples/eval-append.lang |
 | L5 | No-malleability: equal bodies give equal `AuthTx`; txid reads `Body` only. | checker: a step or txid that reads a `Witness` is refused. S4 DONE for `txid` and the `Body` slot: `REFUSE_WITNESS_READ` (Q-S4-2 (a)), and the prelude lemma `authTxEq` (Q-S4-7 (a)); examples/authtx.lang. S5 DONE for `step`: a footprint family that mentions `Witness`, `Authorized` or `AuthTx` gives `REFUSE_WITNESS_READ` (step-reads-witness.lang, step-reads-witness-alias.lang). |
-| L6 | Nerode right congruence: `t ~N u` gives `t ++ k ~N u ++ k`. | prelude |
+| L6 | Nerode right congruence: `t ~N u` gives `t ++ k ~N u ++ k`. | prelude. S7 DONE: `nerodeRight` from `evalAppend` and bind (Q-S7-1 (a)), with `nerodeCat`, `nerodeRefl`, `nerodeSym` and `nerodeTrans`; examples/nerode.lang, nerode-end.lang |
 | L7 | `Valid` compose: `Valid r r'` and `Valid r' r''` give `Valid r r''`. Uses L4 and O1 once. | prelude; T2 emits it |
 | L8 | `Delta`: `a - a = 0`; `Balanced` is closed under `+`. | prelude, S2 DONE: `deltaSelf` (`a - a = 0`), `balancedAdd` (Q-S2-6 (a)) and `balancedNeg` (section 4); `examples/value.lang` |
 | L9 | `eval` factors through `Blockchain` (X6). | by construction. S6 DONE: `chainEval` of `chainOf t` is `traceEval t` by refl (Q-S6-4 (a)); examples/chain.lang |

@@ -106,6 +106,7 @@ static size_t def_at(const DeclList *out, size_t first, const char *name) {
    refused slot stops before them. */
 static int splice_after(Arena *arena, size_t first, const char *const *after, size_t count, const char *source, const char *text, size_t len, DeclList *out, Diag *diag) {
   DeclList kernel = {NULL, 0, 0};
+  TokenList toks;
   Decl *items;
   size_t at = first;
   size_t i;
@@ -115,7 +116,9 @@ static int splice_after(Arena *arena, size_t first, const char *const *after, si
       return 1;
     at = k > at ? k : at;
   }
-  if (!load_one(arena, source, ORIGIN_DOMAIN, text, len, &kernel, diag))
+  /* Generated locals use dotted names that a program cannot bind. */
+  if (!lex_internal(arena, source, text, len, &toks, diag)
+      || !parse_source(arena, source, ORIGIN_DOMAIN, &toks, &kernel, diag))
     return 0;
   items = arena_alloc(arena, (out->count + kernel.count) * sizeof *items);
   if (items == NULL)
@@ -525,18 +528,18 @@ static void key_put_eq(KeyText *b, const Term *t) {
   key_put(b, ")");
 }
 
-/* The eq term of the field J: (EQ keyEqAJ SECONDJ). SECOND is " keyEqB"
-   for keyEq and " keyEqA" for keyEqRefl (u4c1). */
+/* The eq term of the field J: (EQ keyEqAJ SECONDJ). SECOND is " keyEq.B"
+   for keyEq and " keyEq.A" for keyEqRefl (u4c1). */
 static void key_put_field_eq_with(KeyText *b, const Term *type, size_t j, const char *second) {
   key_put(b, "(");
   key_put_eq(b, type);
-  key_put_index(b, " keyEqA", j);
+  key_put_index(b, " keyEq.A", j);
   key_put_index(b, second, j);
   key_put(b, ")");
 }
 
 static void key_put_field_eq(KeyText *b, const Term *type, size_t j) {
-  key_put_field_eq_with(b, type, j, " keyEqB");
+  key_put_field_eq_with(b, type, j, " keyEq.B");
 }
 
 /* The conjunction of the field eq terms from the Pi T (the field J) on:
@@ -558,7 +561,7 @@ static void key_put_conj_with(KeyText *b, const Term *t, size_t j, const char *s
 }
 
 static void key_put_conj(KeyText *b, const Term *t, size_t j) {
-  key_put_conj_with(b, t, j, " keyEqB");
+  key_put_conj_with(b, t, j, " keyEq.B");
 }
 
 /* "fun (NAME1 : T1) ... (NAMEm : Tm) => " for the arguments of the key
@@ -585,20 +588,20 @@ static int key_space(const Decl *d) {
    the field conjunction on the diagonal and flagNo off it. */
 static void key_put_case(KeyText *b, const DeclList *out, size_t first, size_t i) {
   size_t k;
-  key_put_fun(b, "keyEqA", out->items[i].type);
-  key_put(b, "elim (fun (keyEqU : Key) => Flag)");
+  key_put_fun(b, "keyEq.A", out->items[i].type);
+  key_put(b, "elim (fun (keyEq.U : Key) => Flag)");
   for (k = first; k < out->count; k++) {
     if (!key_space(&out->items[k]))
       continue;
     key_put(b, " (");
-    key_put_fun(b, "keyEqB", out->items[k].type);
+    key_put_fun(b, "keyEq.B", out->items[k].type);
     if (k == i)
       key_put_conj(b, out->items[i].type, 1u);
     else
       key_put(b, "flagNo");
     key_put(b, ")");
   }
-  key_put(b, " keyEqY");
+  key_put(b, " keyEq.Y");
 }
 
 /* u4b2 (Q-S6-17..19 (a)): the sound lemma for a key argument type, the
@@ -668,13 +671,13 @@ static void key_put_key(KeyText *b, const char *name, const char *prefix, const 
 }
 
 /* The proof of Path Flag C_k flagYes, with C_k the conjunction from the
-   field k: keyEqH for k = 1, else flagAndRight on the proof for k - 1.
+   field k: keyEq.H for k = 1, else flagAndRight on the proof for k - 1.
    HEAD is the type of the key space (the node of the field 1). */
 static void key_put_rest(KeyText *b, const Term *head, size_t k) {
   const Term *t = head;
   size_t i;
   if (k <= 1u) {
-    key_put(b, "keyEqH");
+    key_put(b, "keyEq.H");
     return;
   }
   for (i = 1u; i + 1u < k; i++)
@@ -689,7 +692,7 @@ static void key_put_rest(KeyText *b, const Term *head, size_t k) {
 }
 
 /* The path on the diagonal: refl for no field, else a path lambda with
-   the field paths (SOUND keyEqAj keyEqBj Hj) @ keyEqI. Hj is flagAndLeft
+   the field paths (SOUND keyEqAj keyEqBj Hj) @ keyEq.I. Hj is flagAndLeft
    on the proof for the field j, the last field takes that proof. */
 static void key_put_diag(KeyText *b, const char *name, const Term *type) {
   const Term *t;
@@ -698,14 +701,14 @@ static void key_put_diag(KeyText *b, const char *name, const Term *type) {
     key_put(b, "refl");
     return;
   }
-  key_put(b, "fun (keyEqI : I) => ");
+  key_put(b, "fun (keyEq.I : I) => ");
   key_put(b, name);
   for (t = type; t != NULL && t->kind == TERM_PI; t = t->right) {
     j++;
     key_put(b, " ((");
     key_put_sound(b, t->left);
-    key_put_index(b, " keyEqA", j);
-    key_put_index(b, " keyEqB", j);
+    key_put_index(b, " keyEq.A", j);
+    key_put_index(b, " keyEq.B", j);
     key_put(b, " ");
     if (t->right != NULL && t->right->kind == TERM_PI) {
       key_put(b, "(flagAndLeft ");
@@ -718,44 +721,44 @@ static void key_put_diag(KeyText *b, const char *name, const Term *type) {
     } else {
       key_put_rest(b, type, j);
     }
-    key_put(b, ") @ keyEqI)");
+    key_put(b, ") @ keyEq.I)");
   }
 }
 
 /* The keyEqSound case for the key space i (the mirror of key_put_case):
-   an elim on keyEqY, flagAbsurd off the diagonal, the field paths on it. */
+   an elim on keyEq.Y, flagAbsurd off the diagonal, the field paths on it. */
 static void key_put_sound_case(KeyText *b, const DeclList *out, size_t first, size_t i) {
   size_t k;
   const Decl *d = &out->items[i];
-  key_put_fun(b, "keyEqA", d->type);
-  key_put(b, "fun (keyEqY : Key) => elim (fun (keyEqU : Key) => Path Flag (keyEq ");
-  key_put_key(b, d->name, " keyEqA", d->type);
-  key_put(b, " keyEqU) flagYes -> Path Key ");
-  key_put_key(b, d->name, " keyEqA", d->type);
-  key_put(b, " keyEqU)");
+  key_put_fun(b, "keyEq.A", d->type);
+  key_put(b, "fun (keyEq.Y : Key) => elim (fun (keyEq.U : Key) => Path Flag (keyEq ");
+  key_put_key(b, d->name, " keyEq.A", d->type);
+  key_put(b, " keyEq.U) flagYes -> Path Key ");
+  key_put_key(b, d->name, " keyEq.A", d->type);
+  key_put(b, " keyEq.U)");
   for (k = first; k < out->count; k++) {
     const Decl *e = &out->items[k];
     if (!key_space(e))
       continue;
     key_put(b, " (");
-    key_put_fun(b, "keyEqB", e->type);
-    key_put(b, "fun (keyEqH : Path Flag (keyEq ");
-    key_put_key(b, d->name, " keyEqA", d->type);
+    key_put_fun(b, "keyEq.B", e->type);
+    key_put(b, "fun (keyEq.H : Path Flag (keyEq ");
+    key_put_key(b, d->name, " keyEq.A", d->type);
     key_put(b, " ");
-    key_put_key(b, e->name, " keyEqB", e->type);
+    key_put_key(b, e->name, " keyEq.B", e->type);
     key_put(b, ") flagYes) => ");
     if (k == i) {
       key_put_diag(b, d->name, d->type);
     } else {
       key_put(b, "flagAbsurd Key ");
-      key_put_key(b, d->name, " keyEqA", d->type);
+      key_put_key(b, d->name, " keyEq.A", d->type);
       key_put(b, " ");
-      key_put_key(b, e->name, " keyEqB", e->type);
-      key_put(b, " keyEqH");
+      key_put_key(b, e->name, " keyEq.B", e->type);
+      key_put(b, " keyEq.H");
     }
     key_put(b, ")");
   }
-  key_put(b, " keyEqY");
+  key_put(b, " keyEq.Y");
 }
 
 /* u4c1 (Q-S6-24 (a)): the refl lemma for a key argument type, the
@@ -806,7 +809,7 @@ static void key_put_refl(KeyText *b, const Term *t) {
   key_put(b, ")");
 }
 
-/* The refl proof of the field conjunction (key_put_conj with keyEqA for
+/* The refl proof of the field conjunction (key_put_conj with keyEq.A for
    both keys) from the Pi T (the field J) on: refl for no field,
    (REFL keyEqAJ) for one field, else flagAndIntro. */
 static void key_put_refl_conj(KeyText *b, const Term *t, size_t j) {
@@ -817,17 +820,17 @@ static void key_put_refl_conj(KeyText *b, const Term *t, size_t j) {
   if (t->right == NULL || t->right->kind != TERM_PI) {
     key_put(b, "(");
     key_put_refl(b, t->left);
-    key_put_index(b, " keyEqA", j);
+    key_put_index(b, " keyEq.A", j);
     key_put(b, ")");
     return;
   }
   key_put(b, "(flagAndIntro ");
-  key_put_field_eq_with(b, t->left, j, " keyEqA");
+  key_put_field_eq_with(b, t->left, j, " keyEq.A");
   key_put(b, " ");
-  key_put_conj_with(b, t->right, j + 1u, " keyEqA");
+  key_put_conj_with(b, t->right, j + 1u, " keyEq.A");
   key_put(b, " (");
   key_put_refl(b, t->left);
-  key_put_index(b, " keyEqA", j);
+  key_put_index(b, " keyEq.A", j);
   key_put(b, ") ");
   key_put_refl_conj(b, t->right, j + 1u);
   key_put(b, ")");
@@ -835,16 +838,15 @@ static void key_put_refl_conj(KeyText *b, const Term *t, size_t j) {
 
 /* The keyEqRefl case for the key space with the type TYPE. */
 static void key_put_refl_case(KeyText *b, const Term *type) {
-  key_put_fun(b, "keyEqA", type);
+  key_put_fun(b, "keyEq.A", type);
   key_put_refl_conj(b, type, 1u);
 }
 
-/* With a key space in the program, put the key-eq prelude directly after
-   the generated family Key, with the trusted origin ORIGIN_DOMAIN. With
-   an argument type outside the six forms there is no prelude: check.c
-   gives REFUSE_KEYSPACE at the key space. */
-static int key_eq_after_key(Arena *arena, size_t first, DeclList *out, Diag *diag) {
-  KeyText b;
+/* The key-eq test: the program has a key space, and each key space
+   argument is a key argument form. key_eq_after_key puts the key-eq
+   prelude only then, and body_eq_after_body (S7 u5a1, Q-S7-12 (a)) makes
+   bodyEq only then. */
+static int key_eq_wanted(size_t first, const DeclList *out) {
   size_t n = 0;
   int forms = 1;
   size_t i;
@@ -856,7 +858,17 @@ static int key_eq_after_key(Arena *arena, size_t first, DeclList *out, Diag *dia
     for (t = out->items[i].type; t != NULL && t->kind == TERM_PI; t = t->right)
       forms = forms && key_arg_form(t->left);
   }
-  if (n == 0u || !forms)
+  return n != 0u && forms;
+}
+
+/* With a key space in the program, put the key-eq prelude directly after
+   the generated family Key, with the trusted origin ORIGIN_DOMAIN. With
+   an argument type outside the six forms there is no prelude: check.c
+   gives REFUSE_KEYSPACE at the key space. */
+static int key_eq_after_key(Arena *arena, size_t first, DeclList *out, Diag *diag) {
+  KeyText b;
+  size_t i;
+  if (!key_eq_wanted(first, out))
     return 1;
   b.arena = arena;
   b.len = 0u;
@@ -867,7 +879,7 @@ static int key_eq_after_key(Arena *arena, size_t first, DeclList *out, Diag *dia
   b.buf[0] = '\0';
   b.ok = 1;
   key_put(&b, key_eq_source);
-  key_put(&b, "def keyEq : Key -> Key -> Flag := fun (keyEqX : Key) (keyEqY : Key) => elim (fun (keyEqT : Key) => Flag)");
+  key_put(&b, "def keyEq : Key -> Key -> Flag := fun (keyEq.X : Key) (keyEq.Y : Key) => elim (fun (keyEq.T : Key) => Flag)");
   for (i = first; i < out->count; i++) {
     if (!key_space(&out->items[i]))
       continue;
@@ -875,8 +887,8 @@ static int key_eq_after_key(Arena *arena, size_t first, DeclList *out, Diag *dia
     key_put_case(&b, out, first, i);
     key_put(&b, ")");
   }
-  key_put(&b, " keyEqX\n");
-  key_put(&b, "def keyEqSound : (keyEqX : Key) -> (keyEqY : Key) -> Path Flag (keyEq keyEqX keyEqY) flagYes -> Path Key keyEqX keyEqY := fun (keyEqX : Key) => elim (fun (keyEqT : Key) => (keyEqY : Key) -> Path Flag (keyEq keyEqT keyEqY) flagYes -> Path Key keyEqT keyEqY)");
+  key_put(&b, " keyEq.X\n");
+  key_put(&b, "def keyEqSound : (keyEq.X : Key) -> (keyEq.Y : Key) -> Path Flag (keyEq keyEq.X keyEq.Y) flagYes -> Path Key keyEq.X keyEq.Y := fun (keyEq.X : Key) => elim (fun (keyEq.T : Key) => (keyEq.Y : Key) -> Path Flag (keyEq keyEq.T keyEq.Y) flagYes -> Path Key keyEq.T keyEq.Y)");
   for (i = first; i < out->count; i++) {
     if (!key_space(&out->items[i]))
       continue;
@@ -884,8 +896,8 @@ static int key_eq_after_key(Arena *arena, size_t first, DeclList *out, Diag *dia
     key_put_sound_case(&b, out, first, i);
     key_put(&b, ")");
   }
-  key_put(&b, " keyEqX\n");
-  key_put(&b, "def keyEqRefl : (keyEqX : Key) -> Path Flag (keyEq keyEqX keyEqX) flagYes := fun (keyEqX : Key) => elim (fun (keyEqT : Key) => Path Flag (keyEq keyEqT keyEqT) flagYes)");
+  key_put(&b, " keyEq.X\n");
+  key_put(&b, "def keyEqRefl : (keyEq.X : Key) -> Path Flag (keyEq keyEq.X keyEq.X) flagYes := fun (keyEq.X : Key) => elim (fun (keyEq.T : Key) => Path Flag (keyEq keyEq.T keyEq.T) flagYes)");
   for (i = first; i < out->count; i++) {
     if (!key_space(&out->items[i]))
       continue;
@@ -893,7 +905,7 @@ static int key_eq_after_key(Arena *arena, size_t first, DeclList *out, Diag *dia
     key_put_refl_case(&b, out->items[i].type);
     key_put(&b, ")");
   }
-  key_put(&b, " keyEqX\n");
+  key_put(&b, " keyEq.X\n");
   return b.ok && splice_after(arena, first, KEY_AFTER, 1u, KEY_EQ_SOURCE_NAME, b.buf, b.len, out, diag);
 }
 
@@ -1231,6 +1243,259 @@ static const char *front_prefixed(Arena *arena, const char *prefix, const char *
   return s;
 }
 
+/* quotient-lang S7 u5a1 (USER rulings Q-S7-7 (a), Q-S7-11 (a) and
+   Q-S7-12 (a)): bodyEq, the equality flag of Body (field by field, the
+   mirror of keyEq), and bodyEqSound, its sound lemma (the mirror of
+   keyEqSound). The front end puts them after the family Body and after
+   the key-eq prelude, only when the key-eq prelude is in the program
+   (key_eq_wanted) and each field of each program footprint family is a
+   key argument form. Else it makes neither. */
+#define BODY_EQ_SOURCE_NAME "kernel/body-eq.lang"
+static const char *const BODY_AFTER[] = {"Body", "keyEqRefl"};
+
+/* The field types of the footprint family FAM as a Pi chain (NULL for no
+   field): the form of a key space type that the keyEq helpers take. */
+static Term *body_chain(Arena *arena, const Decl *fam, int *ok) {
+  Term *rest = NULL;
+  size_t j;
+  for (j = fam->ctors[0].field_count; j > 0u; j--) {
+    Term *t = arena_alloc(arena, sizeof *t);
+    if (t == NULL) {
+      *ok = 0;
+      return NULL;
+    }
+    memset(t, 0, sizeof *t);
+    t->kind = TERM_PI;
+    t->left = fam->ctors[0].fields[j - 1u].type;
+    t->right = rest;
+    rest = t;
+  }
+  return rest;
+}
+
+/* (bodyF VAR) for the footprint family F. */
+static void body_put_var(KeyText *b, const Decl *fam, const char *var) {
+  key_put(b, "(body");
+  key_put(b, fam->name);
+  key_put(b, " ");
+  key_put(b, var);
+  key_put(b, ")");
+}
+
+/* (bodyF (C P1 .. Pm)) for the footprint family F with the constructor C
+   and the field names PREFIX (" keyEq.A" or " keyEq.B"). */
+static void body_put_value(KeyText *b, const Decl *fam, const char *prefix, const Term *chain) {
+  key_put(b, "(body");
+  key_put(b, fam->name);
+  key_put(b, " ");
+  key_put_key(b, fam->ctors[0].name, prefix, chain);
+  key_put(b, ")");
+}
+
+/* The Body path on the diagonal: refl for no field, else the path lambda
+   of key_put_diag with bodyF on its body. */
+static void body_put_diag(KeyText *b, const Decl *fam, const Term *chain) {
+  static const char lam[] = "fun (keyEq.I : I) => ";
+  size_t n = sizeof lam - 1u;
+  KeyText d;
+  if (chain == NULL) {
+    key_put(b, "refl");
+    return;
+  }
+  d.arena = b->arena;
+  d.len = 0u;
+  d.cap = 4096u;
+  d.buf = arena_alloc(b->arena, d.cap);
+  if (d.buf == NULL) {
+    b->ok = 0;
+    return;
+  }
+  d.buf[0] = '\0';
+  d.ok = 1;
+  key_put_diag(&d, fam->ctors[0].name, chain);
+  if (!d.ok || d.len < n || d.len >= d.cap || memcmp(d.buf, lam, n) != 0) {
+    b->ok = 0;
+    return;
+  }
+  d.buf[d.len] = '\0';
+  key_put(b, lam);
+  key_put(b, "body");
+  key_put(b, fam->name);
+  key_put(b, " (");
+  key_put(b, d.buf + n);
+  key_put(b, ")");
+}
+
+/* The bodyEq case for the footprint family I: an elim on the second body;
+   on the diagonal an elim on each footprint value and the field
+   conjunction, off it flagNo. */
+static void body_put_case(KeyText *b, const DeclList *out, Term *const *chain, size_t first, size_t i) {
+  const Decl *f = &out->items[i];
+  size_t k;
+  key_put(b, "fun (bodyEq.P : ");
+  key_put(b, f->name);
+  key_put(b, ") => elim (fun (bodyEq.U : Body) => Flag)");
+  for (k = first; k < out->count; k++) {
+    const Decl *g = &out->items[k];
+    if (!footprint_family(g))
+      continue;
+    key_put(b, " (fun (bodyEq.Q : ");
+    key_put(b, g->name);
+    key_put(b, ") => ");
+    if (k == i) {
+      key_put(b, "elim (fun (bodyEq.V : ");
+      key_put(b, f->name);
+      key_put(b, ") => Flag) (");
+      key_put_fun(b, "keyEq.A", chain[i]);
+      key_put(b, "elim (fun (bodyEq.W : ");
+      key_put(b, f->name);
+      key_put(b, ") => Flag) (");
+      key_put_fun(b, "keyEq.B", chain[i]);
+      key_put_conj(b, chain[i], 1u);
+      key_put(b, ") bodyEq.Q) bodyEq.P");
+    } else {
+      key_put(b, "flagNo");
+    }
+    key_put(b, ")");
+  }
+  key_put(b, " bodyEq.Y");
+}
+
+/* The bodyEqSound diagonal for the footprint family F: an elim on bodyEq.P
+   with bodyEq.Q and the H arrow in the motive, then an elim on bodyEq.Q, and
+   the field paths under bodyF; applied to bodyEq.Q and keyEq.H. */
+static void body_put_sound_diag(KeyText *b, const Decl *f, const Term *chain) {
+  key_put(b, "(elim (fun (bodyEq.V : ");
+  key_put(b, f->name);
+  key_put(b, ") => (bodyEq.Q : ");
+  key_put(b, f->name);
+  key_put(b, ") -> Path Flag (bodyEq ");
+  body_put_var(b, f, "bodyEq.V");
+  key_put(b, " ");
+  body_put_var(b, f, "bodyEq.Q");
+  key_put(b, ") flagYes -> Path Body ");
+  body_put_var(b, f, "bodyEq.V");
+  key_put(b, " ");
+  body_put_var(b, f, "bodyEq.Q");
+  key_put(b, ") (");
+  key_put_fun(b, "keyEq.A", chain);
+  key_put(b, "fun (bodyEq.Q : ");
+  key_put(b, f->name);
+  key_put(b, ") => elim (fun (bodyEq.W : ");
+  key_put(b, f->name);
+  key_put(b, ") => Path Flag (bodyEq ");
+  body_put_value(b, f, " keyEq.A", chain);
+  key_put(b, " ");
+  body_put_var(b, f, "bodyEq.W");
+  key_put(b, ") flagYes -> Path Body ");
+  body_put_value(b, f, " keyEq.A", chain);
+  key_put(b, " ");
+  body_put_var(b, f, "bodyEq.W");
+  key_put(b, ") (");
+  key_put_fun(b, "keyEq.B", chain);
+  key_put(b, "fun (keyEq.H : Path Flag (bodyEq ");
+  body_put_value(b, f, " keyEq.A", chain);
+  key_put(b, " ");
+  body_put_value(b, f, " keyEq.B", chain);
+  key_put(b, ") flagYes) => ");
+  body_put_diag(b, f, chain);
+  key_put(b, ") bodyEq.Q) bodyEq.P) bodyEq.Q keyEq.H");
+}
+
+/* The bodyEqSound case for the footprint family I (the mirror of
+   key_put_sound_case): an elim on bodyEq.Y, flagAbsurd off the diagonal,
+   body_put_sound_diag on it. */
+static void body_put_sound_case(KeyText *b, const DeclList *out, Term *const *chain, size_t first, size_t i) {
+  const Decl *f = &out->items[i];
+  size_t k;
+  key_put(b, "fun (bodyEq.P : ");
+  key_put(b, f->name);
+  key_put(b, ") => fun (bodyEq.Y : Body) => elim (fun (bodyEq.U : Body) => Path Flag (bodyEq ");
+  body_put_var(b, f, "bodyEq.P");
+  key_put(b, " bodyEq.U) flagYes -> Path Body ");
+  body_put_var(b, f, "bodyEq.P");
+  key_put(b, " bodyEq.U)");
+  for (k = first; k < out->count; k++) {
+    const Decl *g = &out->items[k];
+    if (!footprint_family(g))
+      continue;
+    key_put(b, " (fun (bodyEq.Q : ");
+    key_put(b, g->name);
+    key_put(b, ") => fun (keyEq.H : Path Flag (bodyEq ");
+    body_put_var(b, f, "bodyEq.P");
+    key_put(b, " ");
+    body_put_var(b, g, "bodyEq.Q");
+    key_put(b, ") flagYes) => ");
+    if (k == i) {
+      body_put_sound_diag(b, f, chain[i]);
+    } else {
+      key_put(b, "flagAbsurd Body ");
+      body_put_var(b, f, "bodyEq.P");
+      key_put(b, " ");
+      body_put_var(b, g, "bodyEq.Q");
+      key_put(b, " keyEq.H");
+    }
+    key_put(b, ")");
+  }
+  key_put(b, " bodyEq.Y");
+}
+
+static int body_eq_after_body(Arena *arena, size_t first, DeclList *out, Diag *diag) {
+  KeyText b;
+  Term **chain;
+  size_t n = 0;
+  int forms = 1;
+  int ok = 1;
+  size_t i;
+  if (!key_eq_wanted(first, out))
+    return 1;
+  for (i = first; i < out->count; i++) {
+    const Decl *d = &out->items[i];
+    size_t j;
+    if (!footprint_family(d))
+      continue;
+    n++;
+    for (j = 0; j < d->ctors[0].field_count; j++)
+      forms = forms && key_arg_form(d->ctors[0].fields[j].type);
+  }
+  if (n == 0u || !forms)
+    return 1;
+  chain = arena_alloc(arena, out->count * sizeof *chain);
+  if (chain == NULL)
+    return 0;
+  for (i = 0; i < out->count; i++)
+    chain[i] = i >= first && footprint_family(&out->items[i]) ? body_chain(arena, &out->items[i], &ok) : NULL;
+  if (!ok)
+    return 0;
+  b.arena = arena;
+  b.len = 0u;
+  b.cap = 4096u;
+  b.buf = arena_alloc(arena, b.cap);
+  if (b.buf == NULL)
+    return 0;
+  b.buf[0] = '\0';
+  b.ok = 1;
+  key_put(&b, "def bodyEq : Body -> Body -> Flag := fun (bodyEq.X : Body) (bodyEq.Y : Body) => elim (fun (bodyEq.T : Body) => Flag)");
+  for (i = first; i < out->count; i++) {
+    if (!footprint_family(&out->items[i]))
+      continue;
+    key_put(&b, " (");
+    body_put_case(&b, out, chain, first, i);
+    key_put(&b, ")");
+  }
+  key_put(&b, " bodyEq.X\n");
+  key_put(&b, "def bodyEqSound : (bodyEq.X : Body) -> (bodyEq.Y : Body) -> Path Flag (bodyEq bodyEq.X bodyEq.Y) flagYes -> Path Body bodyEq.X bodyEq.Y := fun (bodyEq.X : Body) => elim (fun (bodyEq.T : Body) => (bodyEq.Y : Body) -> Path Flag (bodyEq bodyEq.T bodyEq.Y) flagYes -> Path Body bodyEq.T bodyEq.Y)");
+  for (i = first; i < out->count; i++) {
+    if (!footprint_family(&out->items[i]))
+      continue;
+    key_put(&b, " (");
+    body_put_sound_case(&b, out, chain, first, i);
+    key_put(&b, ")");
+  }
+  key_put(&b, " bodyEq.X\n");
+  return b.ok && splice_after(arena, first, BODY_AFTER, 2u, BODY_EQ_SOURCE_NAME, b.buf, b.len, out, diag);
+}
+
 /* The Body family (quotient-lang S5, USER rulings Q-S5-6 (a), Q-S5-22 (a),
    Q-S5-28 (a) and Q-S5-30 (a)). With a footprint family in the program,
    Body is a family with one constructor for each program footprint
@@ -1407,6 +1672,60 @@ static const char trace_source[] =
 
 static int trace_after_ind(Arena *arena, size_t first, DeclList *out, Diag *diag) {
   return splice_after(arena, first, TRACE_AFTER, 1u, TRACE_SOURCE_NAME, trace_source, sizeof trace_source - 1u, out, diag);
+}
+
+/* The Foata form (quotient-lang S7 u5a2, USER rulings Q-S7-4 (a), Q-S7-7
+   (a) and Q-S7-13 (a)). foataPeel splits a list of bodies into a step and
+   the rest. A body goes in the step when ind is flagYes for each earlier
+   body of the list and this body. foata peels steps until the list is
+   empty. The input list is the fuel: a step of a nonempty list holds its
+   first body. The front end puts the two defs directly after traceAppend.
+   With no ind (no Body), it adds nothing. foataNil and foataStepsNil are
+   nil at a known type: a bare nil in pair or as an argument does not
+   infer. */
+#define FOATA_SOURCE_NAME "kernel/foata.lang"
+
+static const char *const FOATA_AFTER[] = {"traceAppend"};
+
+static const char foata_source[] =
+  "def foataNil : List Body := nil\n"
+  "def foataStepsNil : List (List Body) := nil\n"
+  "def foataPeel : List Body -> Prod (List Body) (List Body) := fun (w : List Body) => fold (fun (h : Body) (r : List Body -> Prod (List Body) (List Body)) (seen : List Body) => (fun (p : Prod (List Body) (List Body)) => elim (fun (f : Flag) => Prod (List Body) (List Body)) (pair (cons h (first p)) (second p)) (pair (first p) (cons h (second p))) (fold (fun (s : Body) (acc : Flag) => flagIf (ind s h) acc flagNo) flagYes seen)) (r (cons h seen))) (fun (seen : List Body) => pair foataNil foataNil) w foataNil\n"
+  "def foata : List Body -> List (List Body) := fun (w : List Body) => fold (fun (h : Body) (r : List Body -> List (List Body)) (v : List Body) => (fun (p : Prod (List Body) (List Body)) => elim (fun (f : Flag) => List (List Body)) foataStepsNil (cons (first p) (r (second p))) (fold (fun (s : Body) (acc : Flag) => flagNo) flagYes v)) (foataPeel v)) (fun (v : List Body) => foataStepsNil) w w\n";
+
+static int foata_after_trace(Arena *arena, size_t first, DeclList *out, Diag *diag) {
+  return splice_after(arena, first, FOATA_AFTER, 1u, FOATA_SOURCE_NAME, foata_source, sizeof foata_source - 1u, out, diag);
+}
+
+/* The step test of the Foata form (quotient-lang S7 u5a2, USER ruling
+   Q-S7-13 (a)). foataRemove removes the first body of a list that is equal
+   to a body by bodyEq. foataStepEq is bag equality of two steps. foataEq
+   is flagYes when the two Foata forms have equal steps in the same order.
+   traceRemove removes the first body of a list that is equal to a body
+   and is ind of each earlier body of the list (S7 u5b, USER ruling
+   Q-S7-14 (a)). traceResidual walks the first list in order: a body is
+   common when it is ind of each earlier body of the first residual and
+   traceRemove removes it from the second list. traceLe is flagYes when
+   the first residual is empty. compatible is flagYes when each body of
+   the first residual is ind of each body of the second residual.
+   The front end puts the defs after the later of foata and bodyEqSound.
+   With no bodyEq, it adds nothing. foataNone is none at a known type. */
+#define FOATA_EQ_SOURCE_NAME "kernel/foata-eq.lang"
+
+static const char *const FOATA_EQ_AFTER[] = {"foata", "bodyEqSound"};
+
+static const char foata_eq_source[] =
+  "def foataNone : Option (List Body) := none\n"
+  "def foataRemove : Body -> List Body -> Prod (List Body) (Option (List Body)) := fun (a : Body) (l : List Body) => fold (fun (h : Body) (acc : Prod (List Body) (Option (List Body))) => pair (cons h (first acc)) (elim (fun (f : Flag) => Option (List Body)) (some (first acc)) (option foataNone (fun (m : List Body) => some (cons h m)) (second acc)) (bodyEq a h))) (pair foataNil foataNone) l\n"
+  "def foataStepEq : List Body -> List Body -> Flag := fun (x : List Body) (y : List Body) => option flagNo (fun (m : List Body) => fold (fun (s : Body) (acc : Flag) => flagNo) flagYes m) (fold (fun (h : Body) (r : List Body -> Option (List Body)) (ys : List Body) => option foataNone r (second (foataRemove h ys))) (fun (ys : List Body) => some ys) x y)\n"
+  "def foataEq : List Body -> List Body -> Flag := fun (x : List Body) (y : List Body) => listEq (List Body) foataStepEq (foata x) (foata y)\n"
+  "def traceRemove : Body -> List Body -> Prod Flag (List Body) := fun (a : Body) (l : List Body) => fold (fun (b : Body) (r : List Body -> Flag -> Prod Flag (List Body)) (seen : List Body) (done : Flag) => (fun (hit : Flag) => (fun (p : Prod Flag (List Body)) => elim (fun (f : Flag) => Prod Flag (List Body)) (pair flagYes (second p)) (pair (first p) (cons b (second p))) hit) (r (cons b seen) (flagIf hit flagYes done))) (flagIf done flagNo (flagIf (bodyEq a b) (fold (fun (s : Body) (acc : Flag) => flagIf (ind s b) acc flagNo) flagYes seen) flagNo))) (fun (seen : List Body) (done : Flag) => pair flagNo foataNil) l foataNil flagNo\n"
+  "def traceResidual : List Body -> List Body -> Prod (List Body) (List Body) := fun (x : List Body) (y : List Body) => fold (fun (h : Body) (r : List Body -> List Body -> Prod (List Body) (List Body)) (ys : List Body) (xs : List Body) => (fun (p : Prod Flag (List Body)) => (fun (common : Flag) => (fun (q : Prod (List Body) (List Body)) => elim (fun (f : Flag) => Prod (List Body) (List Body)) q (pair (cons h (first q)) (second q)) common) (r (elim (fun (f : Flag) => List Body) (second p) ys common) (elim (fun (f : Flag) => List Body) xs (cons h xs) common))) (flagIf (fold (fun (s : Body) (acc : Flag) => flagIf (ind s h) acc flagNo) flagYes xs) (first p) flagNo)) (traceRemove h ys)) (fun (ys : List Body) (xs : List Body) => pair foataNil ys) x y foataNil\n"
+  "def traceLe : List Body -> List Body -> Flag := fun (x : List Body) (y : List Body) => fold (fun (s : Body) (acc : Flag) => flagNo) flagYes (first (traceResidual x y))\n"
+  "def compatible : List Body -> List Body -> Flag := fun (x : List Body) (y : List Body) => (fun (p : Prod (List Body) (List Body)) => fold (fun (a : Body) (acc : Flag) => flagIf (fold (fun (b : Body) (accB : Flag) => flagIf (ind a b) accB flagNo) flagYes (second p)) acc flagNo) flagYes (first p)) (traceResidual x y)\n";
+
+static int foata_eq_after_foata(Arena *arena, size_t first, DeclList *out, Diag *diag) {
+  return splice_after(arena, first, FOATA_EQ_AFTER, 2u, FOATA_EQ_SOURCE_NAME, foata_eq_source, sizeof foata_eq_source - 1u, out, diag);
 }
 
 /* The def ind (quotient-lang S6, USER ruling Q-S6-11 (a)) is a
@@ -1690,6 +2009,85 @@ static int body_commute(Arena *arena, size_t first, DeclList *out, Diag *diag) {
     com_put(&t, "          (transp (fun (j : I) => Trunc1 (fiber Trace Eff traceEval (p @ (i /\\ j)))) (~i) x)\n");
     com_put(&t, "          (transp (fun (j : I) => Trunc1 (fiber Trace Eff traceEval (p @ (i \\/ ~j)))) i y)\n");
     com_put(&t, "          i)\n");
+    /* S7 u2 (Q-S7-1 (a)): nerode s0 t u is the path in Maybe State between
+       the results of t and u at the start state s0. nerodeCat composes two
+       such paths. nerodeRight is L6: evalAppend at s0, then bind along r. */
+    com_put(&t, "def nerode : State -> Trace -> Trace -> Type 0 := fun (s0 : State) (t : Trace) (u : Trace) => Path (Maybe State) (traceEval t s0) (traceEval u s0)\n");
+    com_put(&t, "def nerodeCat : (a : Maybe State) -> (b : Maybe State) -> (c : Maybe State) -> Path (Maybe State) a b -> Path (Maybe State) b c -> Path (Maybe State) a c :=\n");
+    com_put(&t, "  fun (a : Maybe State) (b : Maybe State) (c : Maybe State) (p : Path (Maybe State) a b) (q : Path (Maybe State) b c) =>\n");
+    com_put(&t, "    fun (i : I) => hcomp (Maybe State) (~i \\/ i) (fun (k : I) => [ ~i -> a, i -> q @ k ]) (p @ i)\n");
+    com_put(&t, "def nerodeRefl : (s0 : State) -> (t : Trace) -> nerode s0 t t := fun (s0 : State) (t : Trace) => refl\n");
+    com_put(&t, "def nerodeSym : (s0 : State) -> (t : Trace) -> (u : Trace) -> nerode s0 t u -> nerode s0 u t := fun (s0 : State) (t : Trace) (u : Trace) (r : nerode s0 t u) => fun (i : I) => r @ (~i)\n");
+    com_put(&t, "def nerodeTrans : (s0 : State) -> (t : Trace) -> (u : Trace) -> (v : Trace) -> nerode s0 t u -> nerode s0 u v -> nerode s0 t v :=\n");
+    com_put(&t, "  fun (s0 : State) (t : Trace) (u : Trace) (v : Trace) (p : nerode s0 t u) (q : nerode s0 u v) => nerodeCat (traceEval t s0) (traceEval u s0) (traceEval v s0) p q\n");
+    com_put(&t, "def nerodeRight : (s0 : State) -> (t : Trace) -> (u : Trace) -> (k : Trace) -> nerode s0 t u -> nerode s0 (traceAppend t k) (traceAppend u k) :=\n");
+    com_put(&t, "  fun (s0 : State) (t : Trace) (u : Trace) (k : Trace) (r : nerode s0 t u) =>\n");
+    com_put(&t, "    nerodeCat (traceEval (traceAppend t k) s0) (effSeq (traceEval t) (traceEval k) s0) (traceEval (traceAppend u k) s0)\n");
+    com_put(&t, "      (fun (i : I) => (evalAppend t k @ i) s0)\n");
+    com_put(&t, "      (nerodeCat (effSeq (traceEval t) (traceEval k) s0) (effSeq (traceEval u) (traceEval k) s0) (traceEval (traceAppend u k) s0)\n");
+    com_put(&t, "        (fun (i : I) => bind (r @ i) (fun (x : State) => traceEval k x))\n");
+    com_put(&t, "        (fun (i : I) => (evalAppend u k @ (~i)) s0))\n");
+    /* S7 u3a (Q-S7-2 (a)): Ledger s0 is the set quotient of Trace by
+       nerode s0. ledgerIn is a point, ledgerGlue is a path at a Nerode
+       pair and ledgerSquash makes Ledger s0 a set. ledgerFold maps
+       Ledger s0 into a set M from a map of traces that respects nerode s0. */
+    com_put(&t, "family Ledger (s0 : State) := ledgerIn (ledgerOf : Trace)\n");
+    com_put(&t, "  | ledgerGlue (ledgerA : Trace) (ledgerB : Trace) (ledgerR : nerode s0 ledgerA ledgerB) (ledgerI : I)\n");
+    com_put(&t, "    [ ~ledgerI -> ledgerIn s0 ledgerA, ledgerI -> ledgerIn s0 ledgerB ]\n");
+    com_put(&t, "  | ledgerSquash (ledgerFrom : Ledger s0) (ledgerTo : Ledger s0) (ledgerLeft : Path (Ledger s0) ledgerFrom ledgerTo) (ledgerRight : Path (Ledger s0) ledgerFrom ledgerTo) (ledgerSqI : I) (ledgerSqJ : I)\n");
+    com_put(&t, "    [ ~ledgerSqI -> ledgerLeft @ ledgerSqJ, ledgerSqI -> ledgerRight @ ledgerSqJ, ~ledgerSqJ -> ledgerFrom, ledgerSqJ -> ledgerTo ]\n");
+    com_put(&t, "def ledgerIsSet : (s0 : State) -> isSet (Ledger s0) :=\n");
+    com_put(&t, "  fun (s0 : State) (x : Ledger s0) (y : Ledger s0) (p : Path (Ledger s0) x y) (q : Path (Ledger s0) x y) => fun (i : I) => fun (j : I) => ledgerSquash s0 x y p q i j\n");
+    com_put(&t, "def ledgerFold : (s0 : State) -> (M : Type 0) -> isSet M -> (f : Trace -> M) -> ((t : Trace) -> (u : Trace) -> nerode s0 t u -> Path M (f t) (f u)) -> Ledger s0 -> M :=\n");
+    com_put(&t, "  fun (s0 : State) (M : Type 0) (sM : isSet M) (f : Trace -> M) (g : (t : Trace) -> (u : Trace) -> nerode s0 t u -> Path M (f t) (f u)) (l : Ledger s0) =>\n");
+    com_put(&t, "    fold (fun (t : Trace) => f t)\n");
+    com_put(&t, "      (fun (t : Trace) (u : Trace) (r : nerode s0 t u) => fun (i : I) => g t u r @ i)\n");
+    com_put(&t, "      (fun (x : M) (y : M) (p : Path M x y) (q : Path M x y) => fun (i : I) => fun (j : I) => (sM x y p q @ i) @ j) l\n");
+    /* S7 u3b (Q-S7-5 (a), Q-S7-9 (a)): apply adds the body b at the end of
+       each trace. A Nerode pair stays a Nerode pair (nerodeRight), thus the
+       glue case is a ledgerGlue path. ledgerEval runs a Ledger value at s0
+       and query reads one value of the result state. The point case of
+       ledgerEval is refl, but that lemma is not in the prelude: at an open
+       trace its check can reach the arena limit (examples/step-hygiene.lang). */
+    com_put(&t, "def apply : (s0 : State) -> Ledger s0 -> Body -> Ledger s0 :=\n");
+    com_put(&t, "  fun (s0 : State) (l : Ledger s0) (b : Body) => ledgerFold s0 (Ledger s0) (ledgerIsSet s0)\n");
+    com_put(&t, "    (fun (t : Trace) => ledgerIn s0 (traceAppend t (traceOne b)))\n");
+    com_put(&t, "    (fun (t : Trace) (u : Trace) (r : nerode s0 t u) => fun (i : I) => ledgerGlue s0 (traceAppend t (traceOne b)) (traceAppend u (traceOne b)) (nerodeRight s0 t u (traceOne b) r) i) l\n");
+    com_put(&t, "def ledgerEval : (s0 : State) -> Ledger s0 -> Maybe State :=\n");
+    com_put(&t, "  fun (s0 : State) (l : Ledger s0) => ledgerFold s0 (Maybe State) (maybeIsSet State (piIsSet Key Val valIsSet))\n");
+    com_put(&t, "    (fun (t : Trace) => traceEval t s0)\n");
+    com_put(&t, "    (fun (t : Trace) (u : Trace) (r : nerode s0 t u) => fun (i : I) => r @ i) l\n");
+    com_put(&t, "def query : (s0 : State) -> (A : Type 0) -> isSet A -> (State -> A) -> Ledger s0 -> Maybe A :=\n");
+    com_put(&t, "  fun (s0 : State) (A : Type 0) (sA : isSet A) (obs : State -> A) (l : Ledger s0) => bind (ledgerEval s0 l) (fun (x : State) => some (obs x))\n");
+    /* S7 u4 (Q-S7-4 (a), Q-S7-6 (a), Q-S7-10 (a)): traceAppendEps is the
+       right unit law of traceAppend, an elim in the evalAppendGen form (the
+       motive is a path of Trace, thus a prop by traceIsSet). prefix t u is
+       the truncated type of a k with traceAppend t k = u (the sugar
+       `t <= u`). Compatible t u has a common upper bound w of t and u. */
+    com_put(&t, "def appendEpsCons : (a : Body) -> (r : Trace) -> Path Trace (traceAppend r traceEps) r -> Path Trace (traceAppend (traceCons a r) traceEps) (traceCons a r) :=\n");
+    com_put(&t, "  fun (a : Body) (r : Trace) (ih : Path Trace (traceAppend r traceEps) r) => fun (i : I) => traceCons a (ih @ i)\n");
+    com_put(&t, "def traceAppendEps : (t : Trace) -> Path Trace (traceAppend t traceEps) t :=\n");
+    com_put(&t, "  fun (t : Trace) => elim (fun (z : Trace) => Path Trace (traceAppend z traceEps) z)\n");
+    com_put(&t, "    refl\n");
+    com_put(&t, "    (fun (a : Body) (r : Trace) (ih : Path Trace (traceAppend r traceEps) r) => appendEpsCons a r ih)\n");
+    com_put(&t, "    (fun (a : Body) (b : Body) (r : Trace) (ih : Path Trace (traceAppend r traceEps) r) (h : Path Flag (ind a b) flagYes) =>\n");
+    com_put(&t, "      fun (i : I) => tracePropLine Trace (fun (z : Trace) => Path Trace (traceAppend z traceEps) z) (fun (z : Trace) => traceIsSet (traceAppend z traceEps) z)\n");
+    com_put(&t, "        (traceCons a (traceCons b r)) (traceCons b (traceCons a r)) (fun (j : I) => traceSwap a b r h j)\n");
+    com_put(&t, "        (appendEpsCons a (traceCons b r) (appendEpsCons b r ih)) (appendEpsCons b (traceCons a r) (appendEpsCons a r ih)) @ i)\n");
+    com_put(&t, "    (fun (x : Trace) (ihx : Path Trace (traceAppend x traceEps) x) (y : Trace) (ihy : Path Trace (traceAppend y traceEps) y) (p : Path Trace x y) (ihp : PathP (fun (j : I) => Path Trace (traceAppend (p @ j) traceEps) (p @ j)) ihx ihy)\n");
+    com_put(&t, "      (q : Path Trace x y) (ihq : PathP (fun (j : I) => Path Trace (traceAppend (q @ j) traceEps) (q @ j)) ihx ihy) =>\n");
+    com_put(&t, "      fun (i : I) => fun (j : I) => (tracePropSquare Trace (fun (z : Trace) => Path Trace (traceAppend z traceEps) z) (fun (z : Trace) => traceIsSet (traceAppend z traceEps) z)\n");
+    com_put(&t, "        x y p q (fun (c : I) => fun (d : I) => traceSquash x y p q c d) ihx ihy ihp ihq @ i) @ j) t\n");
+    com_put(&t, "def prefix : Trace -> Trace -> Type 0 :=\n");
+    com_put(&t, "  fun (t : Trace) (u : Trace) => Trunc1 (Sigma (k : Trace) (Path Trace (traceAppend t k) u))\n");
+    com_put(&t, "def Compatible : Trace -> Trace -> Type 0 :=\n");
+    com_put(&t, "  fun (t : Trace) (u : Trace) => Trunc1 (Sigma (w : Trace) (Prod (prefix t w) (prefix u w)))\n");
+    com_put(&t, "def prefixRefl : (t : Trace) -> prefix t t :=\n");
+    com_put(&t, "  fun (t : Trace) => trunc1 (Sigma (k : Trace) (Path Trace (traceAppend t k) t)) (pack traceEps (traceAppendEps t))\n");
+    com_put(&t, "def prefixAppend : (t : Trace) -> (k : Trace) -> prefix t (traceAppend t k) :=\n");
+    com_put(&t, "  fun (t : Trace) (k : Trace) => trunc1 (Sigma (m : Trace) (Path Trace (traceAppend t m) (traceAppend t k))) (pack k refl)\n");
+    com_put(&t, "def compatibleOfPrefix : (t : Trace) -> (u : Trace) -> prefix t u -> Compatible t u :=\n");
+    com_put(&t, "  fun (t : Trace) (u : Trace) (p : prefix t u) => trunc1 (Sigma (w : Trace) (Prod (prefix t w) (prefix u w))) (pack u (pair p (prefixRefl u)))\n");
     last = set > last ? set : last;
     last = app != out->count && app > last ? app : last;
   }
@@ -1883,9 +2281,12 @@ int front_load(Arena *arena, const char *source, const char *text, size_t len, D
       && set_after_step(arena, first, out, diag)
       && step_defs(arena, first, out)
       && body_family(arena, first, out)
+      && body_eq_after_body(arena, first, out, diag)
       && body_step(arena, first, out)
       && ind_placeholder(arena, first, out)
       && trace_after_ind(arena, first, out, diag)
+      && foata_after_trace(arena, first, out, diag)
+      && foata_eq_after_foata(arena, first, out, diag)
       && body_commute(arena, first, out, diag)
       && auth_after_witness(arena, first, out, diag)
       && agg_after_sig(arena, first, out, diag)
@@ -1910,9 +2311,12 @@ int front_load_domain(Arena *arena, const char *source, const char *domain, cons
       && set_after_step(arena, first, out, diag)
       && step_defs(arena, first, out)
       && body_family(arena, first, out)
+      && body_eq_after_body(arena, first, out, diag)
       && body_step(arena, first, out)
       && ind_placeholder(arena, first, out)
       && trace_after_ind(arena, first, out, diag)
+      && foata_after_trace(arena, first, out, diag)
+      && foata_eq_after_foata(arena, first, out, diag)
       && body_commute(arena, first, out, diag)
       && auth_after_witness(arena, first, out, diag)
       && agg_after_sig(arena, first, out, diag)

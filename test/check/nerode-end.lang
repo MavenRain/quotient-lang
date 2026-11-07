@@ -1,0 +1,14 @@
+-- nerode (S7 u2, Q-S7-1 (a)): a nerode proof is a path between the
+-- results of the two traces at s0. This path stays at none, but traceEps
+-- gives some s0 at s0, thus the ends do not agree: PATH_END.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
+def pay0 : Body := bodyPay (mk sz0 (szS sz0))
+def cast0 : Body := bodyCast (mkcast sz0)
+def s0 : State := fun (k : Key) => sz0
+def tA : Trace := traceOne pay0
+def tB : Trace := traceOne cast0
+def bad : nerode s0 traceEps tA := fun (i : I) => none

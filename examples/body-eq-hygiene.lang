@@ -1,0 +1,16 @@
+-- Generated equality locals cannot capture program constructors or families.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+family Pay := keyEqA1 (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family bodyEqP := keyEqH (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
+def pay0 : Body := bodyPay (keyEqA1 sz0 (szS sz0))
+def pay1 : Body := bodyPay (keyEqA1 sz0 (szS sz0))
+def pay2 : Body := bodyPay (keyEqA1 (szS sz0) sz0)
+def cast0 : Body := bodybodyEqP (keyEqH sz0)
+def eqPay : Path Flag (bodyEq pay0 pay1) flagYes := refl
+def eqCast : Path Flag (bodyEq cast0 cast0) flagYes := refl
+def neField : Path Flag (bodyEq pay0 pay2) flagNo := refl
+def neFamily : Path Flag (bodyEq pay0 cast0) flagNo := refl
+def pathPay : Path Body pay0 pay1 := bodyEqSound pay0 pay1 eqPay
+def pathCast : Path Body cast0 cast0 := bodyEqSound cast0 cast0 eqCast

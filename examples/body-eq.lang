@@ -1,0 +1,20 @@
+-- bodyEq and bodyEqSound (S7 u5a1, Q-S7-7 (a), Q-S7-11 (a), Q-S7-12 (a)):
+-- the front end puts bodyEq (the equality flag of Body, field by field)
+-- and bodyEqSound (flagYes from bodyEq gives a path of Body) after the
+-- family Body. Each field of Pay and Cast is a Size, and each key space
+-- argument is a Size, thus the front end makes both.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
+def pay0 : Body := bodyPay (mk sz0 (szS sz0))
+def pay1 : Body := bodyPay (mk sz0 (szS sz0))
+def pay2 : Body := bodyPay (mk (szS sz0) sz0)
+def cast0 : Body := bodyCast (mkcast sz0)
+def eqPay : Path Flag (bodyEq pay0 pay1) flagYes := refl
+def eqCast : Path Flag (bodyEq cast0 cast0) flagYes := refl
+def neField : Path Flag (bodyEq pay0 pay2) flagNo := refl
+def neFamily : Path Flag (bodyEq pay0 cast0) flagNo := refl
+def pathPay : Path Body pay0 pay1 := bodyEqSound pay0 pay1 eqPay
+def pathCast : Path Body cast0 cast0 := bodyEqSound cast0 cast0 eqCast

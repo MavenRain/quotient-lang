@@ -1,0 +1,9 @@
+-- A fold of Ledger s0 with no ledgerGlue case: the checker refuses it
+-- (TYPE_MISMATCH).
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+def s0 : State := fun (k : Key) => sz0
+def bad : Ledger s0 -> Val :=
+  fun (l : Ledger s0) => fold (fun (t : Trace) => sz0)
+    (fun (x : Val) (y : Val) (p : Path Val x y) (q : Path Val x y) => fun (i : I) => fun (j : I) => (sizeIsSet x y p q @ i) @ j) l

@@ -1,0 +1,23 @@
+-- Nerode relation and L6 (S7 u2, Q-S7-1 (a)): the prelude text has
+-- nerode, nerodeCat, nerodeRefl, nerodeSym, nerodeTrans and nerodeRight.
+-- nerode s0 t u is the path in Maybe State between the results of t and
+-- u at the start state s0. nerodeRight is L6: the relation is a right
+-- congruence for traceAppend. These families have no step text, thus
+-- each step is just, and traceEps and tA give the same result at s0.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
+def pay0 : Body := bodyPay (mk sz0 (szS sz0))
+def cast0 : Body := bodyCast (mkcast sz0)
+def s0 : State := fun (k : Key) => sz0
+def tA : Trace := traceOne pay0
+def tB : Trace := traceOne cast0
+def nEA : nerode s0 traceEps tA := refl
+def nAE : nerode s0 tA traceEps := nerodeSym s0 traceEps tA nEA
+def nEE : nerode s0 traceEps traceEps := nerodeTrans s0 traceEps tA traceEps nEA nAE
+def nAA : nerode s0 tA tA := nerodeRefl s0 tA
+def nR : nerode s0 (traceAppend traceEps tB) (traceAppend tA tB) := nerodeRight s0 traceEps tA tB nEA
+def rL : Val := effRun (traceEval (traceAppend traceEps tB)) s0 (Bal sz0)
+def rR : Val := effRun (traceEval (traceAppend tA tB)) s0 (Bal sz0)

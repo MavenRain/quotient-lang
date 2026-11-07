@@ -26,6 +26,7 @@ typedef enum {
   TOK_DOT,      /* . in user mode only (S5, Q-S5-2 (a)) */
   TOK_CONS,     /* <| (S6 u7 sugar, Q-S6-5 (a)) */
   TOK_APPEND,   /* ++ (S6 u7 sugar, Q-S6-36 (a)) */
+  TOK_LE,       /* <= (S7 u4 sugar, Q-S7-6 (a)) */
   TOK_KW_DEF,
   TOK_KW_REC,
   TOK_KW_FUN,

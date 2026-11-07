@@ -1,0 +1,3 @@
+-- The sugar `<=` does not chain (S7 u4, Q-S7-6 (a)): after `t <= u` the
+-- parser expects ')' (PARSE_EXPECT).
+def x : Type 0 := (traceEps <= traceEps <= traceEps)

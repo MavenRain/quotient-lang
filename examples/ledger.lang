@@ -1,0 +1,37 @@
+-- Ledger (S7 u3a, Q-S7-2 (a)): the prelude text has Ledger, ledgerIsSet
+-- and ledgerFold. Ledger s0 is the set quotient of Trace by nerode s0.
+-- The family Pay has step text, thus tA changes Bal (szS sz0) and
+-- traceEps does not: lE and lA are two different Ledger values.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+step Pay p := [get x := Bal(p.from), let y := szS x, set Bal(p.to) := y]
+def pay0 : Body := bodyPay (mk sz0 (szS sz0))
+def s0 : State := fun (k : Key) => sz0
+def tA : Trace := traceOne pay0
+def lE : Ledger s0 := ledgerIn s0 traceEps
+def lA : Ledger s0 := ledgerIn s0 tA
+-- tA and tA then traceEps are Nerode-equal at s0, thus ledgerGlue gives
+-- a path between their points.
+def nA : nerode s0 tA (traceAppend tA traceEps) := refl
+def gA : Path (Ledger s0) lA (ledgerIn s0 (traceAppend tA traceEps)) := fun (i : I) => ledgerGlue s0 tA (traceAppend tA traceEps) nA i
+def lSet : isSet (Ledger s0) := ledgerIsSet s0
+-- at0 reads Bal (szS sz0) from a result. bal is the fold of Ledger s0
+-- into the set Val: a Nerode path goes to a path of Val values.
+def at0 : Maybe State -> Val := fun (m : Maybe State) => effRun (fun (s : State) => m) s0 (Bal (szS sz0))
+def bal : Ledger s0 -> Val := ledgerFold s0 Val sizeIsSet (fun (t : Trace) => at0 (traceEval t s0)) (fun (t : Trace) (u : Trace) (r : nerode s0 t u) => fun (i : I) => at0 (r @ i))
+def vE : Val := bal lE
+def vA : Val := bal lA
+-- S7 u3b (Q-S7-5 (a), Q-S7-9 (a)): apply adds pay0 at the end of each
+-- trace of lE. ledgerEval runs the result at s0, and [[lP]]N s0 is the
+-- same term (nP). query reads Bal (szS sz0) from the result state.
+def lP : Ledger s0 := apply s0 lE pay0
+def mP : Maybe State := ledgerEval s0 lP
+def nP : Path (Maybe State) mP ([[lP]]N s0) := refl
+def vP : Val := at0 ([[lP]]N s0)
+def qP : Maybe Val := query s0 Val sizeIsSet (fun (s : State) => s (Bal (szS sz0))) lP
+-- eIn is the point case of ledgerEval by refl. The prelude does not
+-- have it: at an open trace its check can reach the arena limit when a
+-- program has many step families (examples/step-hygiene.lang).
+def eIn : (t : Trace) -> Path (Maybe State) (ledgerEval s0 (ledgerIn s0 t)) (traceEval t s0) := fun (t : Trace) => refl
+def eA : Path (Maybe State) (ledgerEval s0 lA) (traceEval tA s0) := eIn tA

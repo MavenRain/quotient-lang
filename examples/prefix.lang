@@ -1,0 +1,20 @@
+-- Prefix and Compatible (S7 u4, Q-S7-4 (a), Q-S7-6 (a), Q-S7-10 (a)).
+-- t <= u is prefix t u: the truncated type of a trace k with traceAppend
+-- t k = u. Compatible t u has a common upper bound w of t and u.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+step Pay p := [get x := Bal(p.from), let y := szS x, set Bal(p.to) := y]
+def pay0 : Body := bodyPay (mk sz0 (szS sz0))
+def pay1 : Body := bodyPay (mk (szS sz0) sz0)
+def tA : Trace := traceOne pay0
+def tB : Trace := traceAppend tA (traceOne pay1)
+-- The sugar: tA <= tB is the same type as prefix tA tB.
+def pAB : tA <= tB := prefixAppend tA (traceOne pay1)
+def pAB2 : prefix tA tB := pAB
+def pEps : traceEps <= tA := trunc1 (Sigma (k : Trace) (Path Trace (traceAppend traceEps k) tA)) (pack tA refl)
+-- prefixRefl uses traceAppendEps, the right unit law of traceAppend.
+def pAA : tA <= tA := prefixRefl tA
+def uB : Path Trace (traceAppend tB traceEps) tB := traceAppendEps tB
+def rAll : (t : Trace) -> t <= t := fun (t : Trace) => prefixRefl t
+def cAB : Compatible tA tB := compatibleOfPrefix tA tB pAB

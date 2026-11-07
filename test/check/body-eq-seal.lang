@@ -1,0 +1,9 @@
+-- A bodyEq seal with a wrong field (S7 u5a1, Q-S7-7 (a)): the field to of
+-- pay0 and pay2 is not the same Size, thus bodyEq pay0 pay2 is flagNo, and
+-- refl is not a path of Flag from bodyEq pay0 pay2 to flagYes (PATH_END).
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+def pay0 : Body := bodyPay (mk sz0 (szS sz0))
+def pay2 : Body := bodyPay (mk sz0 sz0)
+def bad : Path Flag (bodyEq pay0 pay2) flagYes := refl

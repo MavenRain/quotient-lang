@@ -1,0 +1,9 @@
+-- A prefix proof with the wrong k (S7 u4, Q-S7-4 (a)): traceAppend tA tA
+-- is not tA, thus refl is not a path of Trace from traceAppend tA tA to tA
+-- (PATH_END).
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+def pay0 : Body := bodyPay (mk sz0 (szS sz0))
+def tA : Trace := traceOne pay0
+def bad : tA <= tA := trunc1 (Sigma (k : Trace) (Path Trace (traceAppend tA k) tA)) (pack tA refl)
