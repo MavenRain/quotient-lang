@@ -1,0 +1,2 @@
+-- Store is a defined name of the design signature (slice S8): a program def is refused.
+def Store : Type 0 := Unit

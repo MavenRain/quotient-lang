@@ -1,0 +1,43 @@
+-- The kernel type Valid (S8 u8a2, PLAN E4). Valid r r2 is a truncated
+-- claim: a trace changes a store with the Merkle root r into a store with
+-- the Merkle root r2. compose joins two claims into one claim. compose
+-- uses the axiom rootInj. The kernel adds Valid and compose when the
+-- program has the S6 slots and the S8 Merkle slots (lines 9 to 20).
+-- The families have no step, thus each trace keeps the state. s0 has an
+-- old write at the key Bal sz0. s1 has the same entries without the old write
+-- (fmOver). s2 has the entries of s1 in a different order (fmComm).
+def Val : Type 0 := Nat
+def valZero : Val := 0
+keyspace Bal : Size -> Key
+keyspace Vote : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
+def Digest : Type 0 := Nat
+def digestAdd : Nat -> Nat -> Nat := fun (x : Nat) (y : Nat) => option x (fun (s : Nat) => s) (natAdd x y)
+def storeLeaf : Key -> Val -> Digest := fun (k : Key) (v : Val) => digestAdd v 1
+def nodeDigest : Digest -> Digest -> Digest := fun (a : Digest) (b : Digest) => digestAdd (digestAdd a (digestAdd a a)) (digestAdd b 1)
+def emptyDigest : Digest := 0
+def tEff : isSet Eff := effIsSet
+def pay0 : Body := bodyPay (mk sz0 (szS sz0))
+def cast0 : Body := bodyCast (mkcast sz0)
+def s0 : Store := fmPut (Bal sz0) 5 (fmPut (Bal sz0) 3 (fmPut (Bal (szS sz0)) 7 fmEmpty))
+def s1 : Store := fmPut (Bal sz0) 5 (fmPut (Bal (szS sz0)) 7 fmEmpty)
+def s2 : Store := fmPut (Bal (szS sz0)) 7 (fmPut (Bal sz0) 5 fmEmpty)
+def t1 : Trace := traceOne pay0
+def t2 : Trace := traceOne cast0
+-- The step of pay0 keeps the state, and fmOver is a path from s0 to s1.
+def q1 : Path (Maybe State) (traceEval t1 (storeState s0)) (some (storeState s1)) :=
+  fun (i : I) => some (storeState (fmOver (Bal sz0) 5 3 (fmPut (Bal (szS sz0)) 7 fmEmpty) i))
+-- The step of cast0 keeps the state, and fmComm is a path from s1 to s2.
+def q2 : Path (Maybe State) (traceEval t2 (storeState s1)) (some (storeState s2)) :=
+  fun (i : I) => some (storeState (fmComm (Bal sz0) (Bal (szS sz0)) 5 7 fmEmpty refl i))
+-- A claim is trunc1 of a witness: the two stores, the trace and three paths.
+def v1 : Valid (storeRoot s0) (storeRoot s1) :=
+  trunc1 (Sigma (x : Store) (Sigma (y : Store) (Sigma (u : Trace) (Prod (Path Digest (storeRoot x) (storeRoot s0)) (Prod (Path Digest (storeRoot y) (storeRoot s1)) (Path (Maybe State) (traceEval u (storeState x)) (some (storeState y))))))))
+    (pack s0 (pack s1 (pack t1 (pair refl (pair refl q1)))))
+def v2 : Valid (storeRoot s1) (storeRoot s2) :=
+  trunc1 (Sigma (x : Store) (Sigma (y : Store) (Sigma (u : Trace) (Prod (Path Digest (storeRoot x) (storeRoot s1)) (Prod (Path Digest (storeRoot y) (storeRoot s2)) (Path (Maybe State) (traceEval u (storeState x)) (some (storeState y))))))))
+    (pack s1 (pack s2 (pack t2 (pair refl (pair refl q2)))))
+-- compose joins the claims v1 and v2 into one claim from s0 to s2.
+def v12 : Valid (storeRoot s0) (storeRoot s2) :=
+  compose (storeRoot s0) (storeRoot s1) (storeRoot s2) v1 v2

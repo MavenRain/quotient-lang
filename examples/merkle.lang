@@ -1,0 +1,22 @@
+-- The Merkle root, proof and verifier (quotient-lang S8 u5, USER rulings
+-- Q-S8-3 (b) and Q-S8-7 (a)). The program gives Digest and the SIG_PROGRAM
+-- names storeLeaf, nodeDigest and emptyDigest. Here a digest is a Nat (the
+-- slot Digest must be first-order data): storeLeaf k v is v + 1 and
+-- nodeDigest a b is 3a + b + 1. nodeDigest is not commutative, thus a side
+-- swap in inclVerify changes the root.
+def Val : Type 0 := Nat
+keyspace Bal : Nat -> Key
+def Digest : Type 0 := Nat
+-- digestAdd x y is x + y, or x when the sum overflows. It has no elim and
+-- no natSucc, thus the Wasm host lowers it (USER ruling Q-S8-u5d-1 (a)).
+def digestAdd : Nat -> Nat -> Nat := fun (x : Nat) (y : Nat) => option x (fun (s : Nat) => s) (natAdd x y)
+def storeLeaf : Key -> Val -> Digest := fun (k : Key) (v : Val) => digestAdd v 1
+def nodeDigest : Digest -> Digest -> Digest := fun (a : Digest) (b : Digest) => digestAdd (digestAdd a (digestAdd a a)) (digestAdd b 1)
+def emptyDigest : Digest := 0
+def demoStore : Store := fmPut (Bal 2) 7 (fmPut (Bal 1) 5 fmEmpty)
+-- The right spine over canon: nodeDigest 6 (nodeDigest 8 0) = 44.
+def demoRoot : Path Digest (storeRoot demoStore) 44 := refl
+def demoIncl1 : Path Digest (inclVerify (Bal 1) 5 (inclProof (Bal 1) (canon demoStore))) (storeRoot demoStore) := refl
+def demoIncl2 : Path Digest (inclVerify (Bal 2) 7 (inclProof (Bal 2) (canon demoStore))) (storeRoot demoStore) := refl
+-- 1 when the proof for Bal 2 with the value v gives the root.
+def demoCheck : Nat -> Flag := fun (v : Nat) => natEq (inclVerify (Bal 2) v (inclProof (Bal 2) (canon demoStore))) (storeRoot demoStore)

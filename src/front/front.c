@@ -240,10 +240,10 @@ static const char val_nat_source[] =
 static const char *const SET_AFTER[] = {"effRun"};
 static const char *const VAL_SET_AFTER[] = {"natIsSet"};
 
-/* The form of the def Val in OUT from FIRST on: 1 for Size, 2 for Nat, 0
-   for another form or no def Val. */
-static int val_form(const DeclList *out, size_t first) {
-  size_t k = def_at(out, first, "Val");
+/* The form of the def NAME in OUT from FIRST on: 1 for Size, 2 for Nat, 0
+   for another form or no def NAME. */
+static int def_form(const DeclList *out, size_t first, const char *name) {
+  size_t k = def_at(out, first, name);
   const Term *t;
   if (k == out->count)
     return 0;
@@ -253,6 +253,11 @@ static int val_form(const DeclList *out, size_t first) {
   if (strcmp(t->name, "Size") == 0)
     return 1;
   return strcmp(t->name, "Nat") == 0 ? 2 : 0;
+}
+
+/* The form of the def Val (def_form). */
+static int val_form(const DeclList *out, size_t first) {
+  return def_form(out, first, "Val");
 }
 
 static int set_after_step(Arena *arena, size_t first, DeclList *out, Diag *diag) {
@@ -604,6 +609,139 @@ static void key_put_case(KeyText *b, const DeclList *out, size_t first, size_t i
   key_put(b, " keyEq.Y");
 }
 
+/* u4 (Q-S8-5 (a)): the key order. The fixed order defs give an order for
+   each key argument form; each parametric order takes the eq and the
+   order of its argument types (Nat has the core natLe). The order is
+   lexicographic: the first field that is not equal decides. */
+static const char key_le_source[] =
+  "def sizeLe : Size -> Size -> Flag := fun (a : Size) => elim (fun (s : Size) => Size -> Flag) (fun (b : Size) => flagYes) (fun (k : Size) (r : Size -> Flag) (b : Size) => elim (fun (t : Size) => Flag) flagNo (fun (j : Size) (ih : Flag) => r j) b) a\n"
+  "def flagLe : Flag -> Flag -> Flag := fun (a : Flag) (b : Flag) => flagIf a b flagYes\n"
+  "def optionLe : (A : Type 0) -> (A -> A -> Flag) -> Option A -> Option A -> Flag := fun (A : Type 0) (leA : A -> A -> Flag) (x : Option A) (y : Option A) => option flagYes (fun (a : A) => option flagNo (fun (b : A) => leA a b) y) x\n"
+  "def prodLe : (A : Type 0) -> (B : Type 0) -> (A -> A -> Flag) -> (A -> A -> Flag) -> (B -> B -> Flag) -> Prod A B -> Prod A B -> Flag := fun (A : Type 0) (B : Type 0) (eqA : A -> A -> Flag) (leA : A -> A -> Flag) (leB : B -> B -> Flag) (x : Prod A B) (y : Prod A B) => flagIf (eqA (first x) (first y)) (leB (second x) (second y)) (leA (first x) (first y))\n"
+  "def listLe : (A : Type 0) -> (A -> A -> Flag) -> (A -> A -> Flag) -> List A -> List A -> Flag := fun (A : Type 0) (eqA : A -> A -> Flag) (leA : A -> A -> Flag) (xs : List A) (ys : List A) => fold (fun (h : A) (r : List A -> Flag) (zs : List A) => option flagNo (fun (p : Prod A (List A)) => flagIf (eqA h (first p)) (r (second p)) (leA h (first p))) (listUncons A zs)) (fun (zs : List A) => flagYes) xs ys\n";
+
+/* u4e: the flip lemmas of the key orders. For the eq E and the order L
+   of a key argument type: when E a b is flagNo, L b a is the inverse of
+   L a b (flagIf (L a b) flagNo flagYes). lexFlip is the flip of one
+   lexicographic step (flagIf on the eq of the first part, the order of
+   the next parts on equal, the order of the first part if not);
+   prodLeFlip, listLeFlip and the keyLe diagonal use it. */
+static const char key_flip_source[] =
+  "def flagLeFlip : (a : Flag) -> (b : Flag) -> Path Flag (flagEq a b) flagNo -> Path Flag (flagLe b a) (flagIf (flagLe a b) flagNo flagYes) := fun (a : Flag) => elim (fun (x : Flag) => (b : Flag) -> Path Flag (flagEq x b) flagNo -> Path Flag (flagLe b x) (flagIf (flagLe x b) flagNo flagYes)) (fun (b : Flag) => elim (fun (y : Flag) => Path Flag (flagEq flagYes y) flagNo -> Path Flag (flagLe y flagYes) (flagIf (flagLe flagYes y) flagNo flagYes)) (fun (h : Path Flag (flagEq flagYes flagYes) flagNo) => h) (fun (h : Path Flag (flagEq flagYes flagNo) flagNo) => refl) b) (fun (b : Flag) => elim (fun (y : Flag) => Path Flag (flagEq flagNo y) flagNo -> Path Flag (flagLe y flagNo) (flagIf (flagLe flagNo y) flagNo flagYes)) (fun (h : Path Flag (flagEq flagNo flagYes) flagNo) => refl) (fun (h : Path Flag (flagEq flagNo flagNo) flagNo) => h) b) a\n"
+  "def sizeLeFlip : (a : Size) -> (b : Size) -> Path Flag (sizeEq a b) flagNo -> Path Flag (sizeLe b a) (flagIf (sizeLe a b) flagNo flagYes) := fun (a : Size) => elim (fun (s : Size) => (b : Size) -> Path Flag (sizeEq s b) flagNo -> Path Flag (sizeLe b s) (flagIf (sizeLe s b) flagNo flagYes)) (fun (b : Size) => elim (fun (t : Size) => Path Flag (sizeEq sz0 t) flagNo -> Path Flag (sizeLe t sz0) (flagIf (sizeLe sz0 t) flagNo flagYes)) (fun (h : Path Flag (sizeEq sz0 sz0) flagNo) => h) (fun (j : Size) (jh : Path Flag (sizeEq sz0 j) flagNo -> Path Flag (sizeLe j sz0) (flagIf (sizeLe sz0 j) flagNo flagYes)) (h : Path Flag (sizeEq sz0 (szS j)) flagNo) => refl) b) (fun (k : Size) (ih : (b : Size) -> Path Flag (sizeEq k b) flagNo -> Path Flag (sizeLe b k) (flagIf (sizeLe k b) flagNo flagYes)) (b : Size) => elim (fun (t : Size) => Path Flag (sizeEq (szS k) t) flagNo -> Path Flag (sizeLe t (szS k)) (flagIf (sizeLe (szS k) t) flagNo flagYes)) (fun (h : Path Flag (sizeEq (szS k) sz0) flagNo) => refl) (fun (j : Size) (jh : Path Flag (sizeEq (szS k) j) flagNo -> Path Flag (sizeLe j (szS k)) (flagIf (sizeLe (szS k) j) flagNo flagYes)) (h : Path Flag (sizeEq (szS k) (szS j)) flagNo) => ih j h) b) a\n"
+  "def natLeFlip : (a : Nat) -> (b : Nat) -> Path Flag (natEq a b) flagNo -> Path Flag (natLe b a) (flagIf (natLe a b) flagNo flagYes) := fun (a : Nat) => elim (fun (s : Nat) => (b : Nat) -> Path Flag (natEq s b) flagNo -> Path Flag (natLe b s) (flagIf (natLe s b) flagNo flagYes)) (fun (b : Nat) => elim (fun (t : Nat) => Path Flag (natEq 0 t) flagNo -> Path Flag (natLe t 0) (flagIf (natLe 0 t) flagNo flagYes)) (fun (h : Path Flag (natEq 0 0) flagNo) => h) (fun (j : Nat) (jh : Path Flag (natEq 0 j) flagNo -> Path Flag (natLe j 0) (flagIf (natLe 0 j) flagNo flagYes)) (h : Path Flag (natEq 0 (natSucc j)) flagNo) => refl) b) (fun (k : Nat) (ih : (b : Nat) -> Path Flag (natEq k b) flagNo -> Path Flag (natLe b k) (flagIf (natLe k b) flagNo flagYes)) (b : Nat) => elim (fun (t : Nat) => Path Flag (natEq (natSucc k) t) flagNo -> Path Flag (natLe t (natSucc k)) (flagIf (natLe (natSucc k) t) flagNo flagYes)) (fun (h : Path Flag (natEq (natSucc k) 0) flagNo) => refl) (fun (j : Nat) (jh : Path Flag (natEq (natSucc k) j) flagNo -> Path Flag (natLe j (natSucc k)) (flagIf (natLe (natSucc k) j) flagNo flagYes)) (h : Path Flag (natEq (natSucc k) (natSucc j)) flagNo) => ih j h) b) a\n"
+  "def natLeTrans : (a : Nat) -> (b : Nat) -> (c : Nat) -> Path Flag (natLe a b) flagYes -> Path Flag (natLe b c) flagYes -> Path Flag (natLe a c) flagYes := fun (a : Nat) => elim (fun (s : Nat) => (b : Nat) -> (c : Nat) -> Path Flag (natLe s b) flagYes -> Path Flag (natLe b c) flagYes -> Path Flag (natLe s c) flagYes) (fun (b : Nat) (c : Nat) (p : Path Flag (natLe 0 b) flagYes) (q : Path Flag (natLe b c) flagYes) => refl) (fun (k : Nat) (ih : (b : Nat) -> (c : Nat) -> Path Flag (natLe k b) flagYes -> Path Flag (natLe b c) flagYes -> Path Flag (natLe k c) flagYes) (b : Nat) => elim (fun (t : Nat) => (c : Nat) -> Path Flag (natLe (natSucc k) t) flagYes -> Path Flag (natLe t c) flagYes -> Path Flag (natLe (natSucc k) c) flagYes) (fun (c : Nat) (p : Path Flag (natLe (natSucc k) 0) flagYes) (q : Path Flag (natLe 0 c) flagYes) => flagAbsurd Flag (natLe (natSucc k) c) flagYes p) (fun (j : Nat) (jh : (c : Nat) -> Path Flag (natLe (natSucc k) j) flagYes -> Path Flag (natLe j c) flagYes -> Path Flag (natLe (natSucc k) c) flagYes) (c : Nat) => elim (fun (u : Nat) => Path Flag (natLe (natSucc k) (natSucc j)) flagYes -> Path Flag (natLe (natSucc j) u) flagYes -> Path Flag (natLe (natSucc k) u) flagYes) (fun (p : Path Flag (natLe (natSucc k) (natSucc j)) flagYes) (q : Path Flag (natLe (natSucc j) 0) flagYes) => flagAbsurd Flag (natLe (natSucc k) 0) flagYes q) (fun (l : Nat) (lh : Path Flag (natLe (natSucc k) (natSucc j)) flagYes -> Path Flag (natLe (natSucc j) l) flagYes -> Path Flag (natLe (natSucc k) l) flagYes) (p : Path Flag (natLe (natSucc k) (natSucc j)) flagYes) (q : Path Flag (natLe (natSucc j) (natSucc l)) flagYes) => ih j l p q) c) b) a\n"
+  "def sizeLeTrans : (a : Size) -> (b : Size) -> (c : Size) -> Path Flag (sizeLe a b) flagYes -> Path Flag (sizeLe b c) flagYes -> Path Flag (sizeLe a c) flagYes := fun (a : Size) => elim (fun (s : Size) => (b : Size) -> (c : Size) -> Path Flag (sizeLe s b) flagYes -> Path Flag (sizeLe b c) flagYes -> Path Flag (sizeLe s c) flagYes) (fun (b : Size) (c : Size) (p : Path Flag (sizeLe sz0 b) flagYes) (q : Path Flag (sizeLe b c) flagYes) => refl) (fun (k : Size) (ih : (b : Size) -> (c : Size) -> Path Flag (sizeLe k b) flagYes -> Path Flag (sizeLe b c) flagYes -> Path Flag (sizeLe k c) flagYes) (b : Size) => elim (fun (t : Size) => (c : Size) -> Path Flag (sizeLe (szS k) t) flagYes -> Path Flag (sizeLe t c) flagYes -> Path Flag (sizeLe (szS k) c) flagYes) (fun (c : Size) (p : Path Flag (sizeLe (szS k) sz0) flagYes) (q : Path Flag (sizeLe sz0 c) flagYes) => flagAbsurd Flag (sizeLe (szS k) c) flagYes p) (fun (j : Size) (jh : (c : Size) -> Path Flag (sizeLe (szS k) j) flagYes -> Path Flag (sizeLe j c) flagYes -> Path Flag (sizeLe (szS k) c) flagYes) (c : Size) => elim (fun (u : Size) => Path Flag (sizeLe (szS k) (szS j)) flagYes -> Path Flag (sizeLe (szS j) u) flagYes -> Path Flag (sizeLe (szS k) u) flagYes) (fun (p : Path Flag (sizeLe (szS k) (szS j)) flagYes) (q : Path Flag (sizeLe (szS j) sz0) flagYes) => flagAbsurd Flag (sizeLe (szS k) sz0) flagYes q) (fun (l : Size) (lh : Path Flag (sizeLe (szS k) (szS j)) flagYes -> Path Flag (sizeLe (szS j) l) flagYes -> Path Flag (sizeLe (szS k) l) flagYes) (p : Path Flag (sizeLe (szS k) (szS j)) flagYes) (q : Path Flag (sizeLe (szS j) (szS l)) flagYes) => ih j l p q) c) b) a\n"
+  "def flagLeTrans : (a : Flag) -> (b : Flag) -> (c : Flag) -> Path Flag (flagLe a b) flagYes -> Path Flag (flagLe b c) flagYes -> Path Flag (flagLe a c) flagYes := fun (a : Flag) => elim (fun (x : Flag) => (b : Flag) -> (c : Flag) -> Path Flag (flagLe x b) flagYes -> Path Flag (flagLe b c) flagYes -> Path Flag (flagLe x c) flagYes) (fun (b : Flag) => elim (fun (y : Flag) => (c : Flag) -> Path Flag (flagLe flagYes y) flagYes -> Path Flag (flagLe y c) flagYes -> Path Flag (flagLe flagYes c) flagYes) (fun (c : Flag) (p : Path Flag (flagLe flagYes flagYes) flagYes) (q : Path Flag (flagLe flagYes c) flagYes) => q) (fun (c : Flag) (p : Path Flag (flagLe flagYes flagNo) flagYes) (q : Path Flag (flagLe flagNo c) flagYes) => flagAbsurd Flag (flagLe flagYes c) flagYes p) b) (fun (b : Flag) (c : Flag) (p : Path Flag (flagLe flagNo b) flagYes) (q : Path Flag (flagLe b c) flagYes) => refl) a\n"
+  "def lexFlip : (A : Type 0) -> (eqA : A -> A -> Flag) -> (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> (rA : (a : A) -> Path Flag (eqA a a) flagYes) -> (leA : A -> A -> Flag) -> (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) -> (a1 : A) -> (a2 : A) -> (er : Flag) -> (lf : Flag) -> (lb : Flag) -> (Path Flag er flagNo -> Path Flag lb (flagIf lf flagNo flagYes)) -> Path Flag (flagIf (eqA a1 a2) er flagNo) flagNo -> Path Flag (flagIf (eqA a2 a1) lb (leA a2 a1)) (flagIf (flagIf (eqA a1 a2) lf (leA a1 a2)) flagNo flagYes) := fun (A : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (rA : (a : A) -> Path Flag (eqA a a) flagYes) (leA : A -> A -> Flag) (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) (a1 : A) (a2 : A) (er : Flag) (lf : Flag) (lb : Flag) (fr : Path Flag er flagNo -> Path Flag lb (flagIf lf flagNo flagYes)) (h : Path Flag (flagIf (eqA a1 a2) er flagNo) flagNo) => (elim (fun (z1 : Flag) => (z2 : Flag) -> Path Flag (eqA a1 a2) z1 -> Path Flag (eqA a2 a1) z2 -> Path Flag (flagIf z1 er flagNo) flagNo -> Path Flag (flagIf z2 lb (leA a2 a1)) (flagIf (flagIf z1 lf (leA a1 a2)) flagNo flagYes)) (fun (z2 : Flag) => elim (fun (w : Flag) => Path Flag (eqA a1 a2) flagYes -> Path Flag (eqA a2 a1) w -> Path Flag (flagIf flagYes er flagNo) flagNo -> Path Flag (flagIf w lb (leA a2 a1)) (flagIf (flagIf flagYes lf (leA a1 a2)) flagNo flagYes)) (fun (q1 : Path Flag (eqA a1 a2) flagYes) (q2 : Path Flag (eqA a2 a1) flagYes) (hh : Path Flag (flagIf flagYes er flagNo) flagNo) => fr hh) (fun (q1 : Path Flag (eqA a1 a2) flagYes) (q2 : Path Flag (eqA a2 a1) flagNo) (hh : Path Flag (flagIf flagYes er flagNo) flagNo) => flagAbsurd Flag (leA a2 a1) (flagIf lf flagNo flagYes) (transp (fun (j : I) => Path Flag (q2 @ j) flagYes) i0 (transp (fun (j : I) => Path Flag (eqA ((sA a1 a2 q1) @ j) a1) flagYes) i0 (rA a1)))) z2) (fun (z2 : Flag) => elim (fun (w : Flag) => Path Flag (eqA a1 a2) flagNo -> Path Flag (eqA a2 a1) w -> Path Flag (flagIf flagNo er flagNo) flagNo -> Path Flag (flagIf w lb (leA a2 a1)) (flagIf (flagIf flagNo lf (leA a1 a2)) flagNo flagYes)) (fun (q1 : Path Flag (eqA a1 a2) flagNo) (q2 : Path Flag (eqA a2 a1) flagYes) (hh : Path Flag (flagIf flagNo er flagNo) flagNo) => flagAbsurd Flag lb (flagIf (leA a1 a2) flagNo flagYes) (transp (fun (j : I) => Path Flag (q1 @ j) flagYes) i0 (transp (fun (j : I) => Path Flag (eqA ((sA a2 a1 q2) @ j) a2) flagYes) i0 (rA a2)))) (fun (q1 : Path Flag (eqA a1 a2) flagNo) (q2 : Path Flag (eqA a2 a1) flagNo) (hh : Path Flag (flagIf flagNo er flagNo) flagNo) => fA a1 a2 q1) z2) (eqA a1 a2)) (eqA a2 a1) refl refl h\n"
+  "def optionLeFlip : (A : Type 0) -> (eqA : A -> A -> Flag) -> (leA : A -> A -> Flag) -> (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) -> (x : Option A) -> (y : Option A) -> Path Flag (optionEq A eqA x y) flagNo -> Path Flag (optionLe A leA y x) (flagIf (optionLe A leA x y) flagNo flagYes) := fun (A : Type 0) (eqA : A -> A -> Flag) (leA : A -> A -> Flag) (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) (x : Option A) => elim (fun (s : Option A) => (y : Option A) -> Path Flag (optionEq A eqA s y) flagNo -> Path Flag (optionLe A leA y s) (flagIf (optionLe A leA s y) flagNo flagYes)) (fun (y : Option A) => elim (fun (t : Option A) => Path Flag (optionEq A eqA none t) flagNo -> Path Flag (optionLe A leA t none) (flagIf (optionLe A leA none t) flagNo flagYes)) (fun (h : Path Flag (optionEq A eqA none none) flagNo) => h) (fun (b : A) (h : Path Flag (optionEq A eqA none (some b)) flagNo) => refl) y) (fun (a : A) (y : Option A) => elim (fun (t : Option A) => Path Flag (optionEq A eqA (some a) t) flagNo -> Path Flag (optionLe A leA t (some a)) (flagIf (optionLe A leA (some a) t) flagNo flagYes)) (fun (h : Path Flag (optionEq A eqA (some a) none) flagNo) => refl) (fun (b : A) (h : Path Flag (optionEq A eqA (some a) (some b)) flagNo) => fA a b h) y) x\n"
+  "def prodLeFlip : (A : Type 0) -> (B : Type 0) -> (eqA : A -> A -> Flag) -> (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> (rA : (a : A) -> Path Flag (eqA a a) flagYes) -> (leA : A -> A -> Flag) -> (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) -> (eqB : B -> B -> Flag) -> (leB : B -> B -> Flag) -> (fB : (a : B) -> (b : B) -> Path Flag (eqB a b) flagNo -> Path Flag (leB b a) (flagIf (leB a b) flagNo flagYes)) -> (x : Prod A B) -> (y : Prod A B) -> Path Flag (prodEq A B eqA eqB x y) flagNo -> Path Flag (prodLe A B eqA leA leB y x) (flagIf (prodLe A B eqA leA leB x y) flagNo flagYes) := fun (A : Type 0) (B : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (rA : (a : A) -> Path Flag (eqA a a) flagYes) (leA : A -> A -> Flag) (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) (eqB : B -> B -> Flag) (leB : B -> B -> Flag) (fB : (a : B) -> (b : B) -> Path Flag (eqB a b) flagNo -> Path Flag (leB b a) (flagIf (leB a b) flagNo flagYes)) (x : Prod A B) => elim (fun (s : Prod A B) => (y : Prod A B) -> Path Flag (prodEq A B eqA eqB s y) flagNo -> Path Flag (prodLe A B eqA leA leB y s) (flagIf (prodLe A B eqA leA leB s y) flagNo flagYes)) (fun (a1 : A) (b1 : B) (y : Prod A B) => elim (fun (t : Prod A B) => Path Flag (prodEq A B eqA eqB (pair a1 b1) t) flagNo -> Path Flag (prodLe A B eqA leA leB t (pair a1 b1)) (flagIf (prodLe A B eqA leA leB (pair a1 b1) t) flagNo flagYes)) (fun (a2 : A) (b2 : B) (h : Path Flag (prodEq A B eqA eqB (pair a1 b1) (pair a2 b2)) flagNo) => lexFlip A eqA sA rA leA fA a1 a2 (eqB b1 b2) (leB b1 b2) (leB b2 b1) (fB b1 b2) h) y) x\n"
+  "def listLeFlip : (A : Type 0) -> (eqA : A -> A -> Flag) -> (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> (rA : (a : A) -> Path Flag (eqA a a) flagYes) -> (leA : A -> A -> Flag) -> (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) -> (xs : List A) -> (ys : List A) -> Path Flag (listEq A eqA xs ys) flagNo -> Path Flag (listLe A eqA leA ys xs) (flagIf (listLe A eqA leA xs ys) flagNo flagYes) := fun (A : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (rA : (a : A) -> Path Flag (eqA a a) flagYes) (leA : A -> A -> Flag) (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) (xs : List A) => elim (fun (s : List A) => (ys : List A) -> Path Flag (listEq A eqA s ys) flagNo -> Path Flag (listLe A eqA leA ys s) (flagIf (listLe A eqA leA s ys) flagNo flagYes)) (fun (ys : List A) => elim (fun (t : List A) => Path Flag (listEq A eqA nil t) flagNo -> Path Flag (listLe A eqA leA t nil) (flagIf (listLe A eqA leA nil t) flagNo flagYes)) (fun (h : Path Flag (listEq A eqA nil nil) flagNo) => h) (fun (b : A) (m : List A) (jh : Path Flag (listEq A eqA nil m) flagNo -> Path Flag (listLe A eqA leA m nil) (flagIf (listLe A eqA leA nil m) flagNo flagYes)) (h : Path Flag (listEq A eqA nil (cons b m)) flagNo) => refl) ys) (fun (a : A) (xs1 : List A) (ih : (ys : List A) -> Path Flag (listEq A eqA xs1 ys) flagNo -> Path Flag (listLe A eqA leA ys xs1) (flagIf (listLe A eqA leA xs1 ys) flagNo flagYes)) (ys : List A) => elim (fun (t : List A) => Path Flag (listEq A eqA (cons a xs1) t) flagNo -> Path Flag (listLe A eqA leA t (cons a xs1)) (flagIf (listLe A eqA leA (cons a xs1) t) flagNo flagYes)) (fun (h : Path Flag (listEq A eqA (cons a xs1) nil) flagNo) => refl) (fun (b : A) (ys1 : List A) (jh : Path Flag (listEq A eqA (cons a xs1) ys1) flagNo -> Path Flag (listLe A eqA leA ys1 (cons a xs1)) (flagIf (listLe A eqA leA (cons a xs1) ys1) flagNo flagYes)) (h : Path Flag (listEq A eqA (cons a xs1) (cons b ys1)) flagNo) => lexFlip A eqA sA rA leA fA a b (listEq A eqA xs1 (listRebuild A (listUncons A ys1))) (listLe A eqA leA xs1 (listRebuild A (listUncons A ys1))) (listLe A eqA leA ys1 (listRebuild A (listUncons A xs1))) (fun (hh : Path Flag (listEq A eqA xs1 (listRebuild A (listUncons A ys1))) flagNo) => transp (fun (j : I) => Path Flag (listLe A eqA leA ((listRound A ys1) @ j) ((transp (fun (k : I) => Path (List A) ((listRound A xs1) @ k) (listRebuild A (listUncons A xs1))) i0 refl) @ j)) (flagIf (listLe A eqA leA xs1 (listRebuild A (listUncons A ys1))) flagNo flagYes)) i0 (ih (listRebuild A (listUncons A ys1)) hh)) h) ys) xs\n"
+  "def lexTrans : (A : Type 0) -> (eqA : A -> A -> Flag) -> (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> (rA : (a : A) -> Path Flag (eqA a a) flagYes) -> (leA : A -> A -> Flag) -> (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) -> (tA : (a : A) -> (b : A) -> (c : A) -> Path Flag (leA a b) flagYes -> Path Flag (leA b c) flagYes -> Path Flag (leA a c) flagYes) -> (a1 : A) -> (a2 : A) -> (a3 : A) -> (r12 : Flag) -> (r23 : Flag) -> (r13 : Flag) -> (h : Path Flag r12 flagYes -> Path Flag r23 flagYes -> Path Flag r13 flagYes) -> (p : Path Flag (flagIf (eqA a1 a2) r12 (leA a1 a2)) flagYes) -> (q : Path Flag (flagIf (eqA a2 a3) r23 (leA a2 a3)) flagYes) -> Path Flag (flagIf (eqA a1 a3) r13 (leA a1 a3)) flagYes := fun (A : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (rA : (a : A) -> Path Flag (eqA a a) flagYes) (leA : A -> A -> Flag) (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) (tA : (a : A) -> (b : A) -> (c : A) -> Path Flag (leA a b) flagYes -> Path Flag (leA b c) flagYes -> Path Flag (leA a c) flagYes) (a1 : A) (a2 : A) (a3 : A) (r12 : Flag) (r23 : Flag) (r13 : Flag) (h : Path Flag r12 flagYes -> Path Flag r23 flagYes -> Path Flag r13 flagYes) (p : Path Flag (flagIf (eqA a1 a2) r12 (leA a1 a2)) flagYes) (q : Path Flag (flagIf (eqA a2 a3) r23 (leA a2 a3)) flagYes) => (elim (fun (z1 : Flag) => (z2 : Flag) -> (z3 : Flag) -> Path Flag (eqA a1 a2) z1 -> Path Flag (eqA a2 a3) z2 -> Path Flag (eqA a1 a3) z3 -> Path Flag (flagIf z1 r12 (leA a1 a2)) flagYes -> Path Flag (flagIf z2 r23 (leA a2 a3)) flagYes -> Path Flag (flagIf z3 r13 (leA a1 a3)) flagYes) (fun (z2 : Flag) => elim (fun (w2 : Flag) => (z3 : Flag) -> Path Flag (eqA a1 a2) flagYes -> Path Flag (eqA a2 a3) w2 -> Path Flag (eqA a1 a3) z3 -> Path Flag (flagIf flagYes r12 (leA a1 a2)) flagYes -> Path Flag (flagIf w2 r23 (leA a2 a3)) flagYes -> Path Flag (flagIf z3 r13 (leA a1 a3)) flagYes) (fun (z3 : Flag) => elim (fun (w3 : Flag) => Path Flag (eqA a1 a2) flagYes -> Path Flag (eqA a2 a3) flagYes -> Path Flag (eqA a1 a3) w3 -> Path Flag (flagIf flagYes r12 (leA a1 a2)) flagYes -> Path Flag (flagIf flagYes r23 (leA a2 a3)) flagYes -> Path Flag (flagIf w3 r13 (leA a1 a3)) flagYes) (fun (q1 : Path Flag (eqA a1 a2) flagYes) (q2 : Path Flag (eqA a2 a3) flagYes) (q3 : Path Flag (eqA a1 a3) flagYes) (pp : Path Flag (flagIf flagYes r12 (leA a1 a2)) flagYes) (qq : Path Flag (flagIf flagYes r23 (leA a2 a3)) flagYes) => h pp qq) (fun (q1 : Path Flag (eqA a1 a2) flagYes) (q2 : Path Flag (eqA a2 a3) flagYes) (q3 : Path Flag (eqA a1 a3) flagNo) (pp : Path Flag (flagIf flagYes r12 (leA a1 a2)) flagYes) (qq : Path Flag (flagIf flagYes r23 (leA a2 a3)) flagYes) => flagAbsurd Flag (flagIf flagNo r13 (leA a1 a3)) flagYes (transp (fun (j : I) => Path Flag (q3 @ j) flagYes) i0 (transp (fun (j : I) => Path Flag (eqA ((sA a1 a2 q1) @ (~j)) a3) flagYes) i0 (q2)))) z3) (fun (z3 : Flag) => elim (fun (w3 : Flag) => Path Flag (eqA a1 a2) flagYes -> Path Flag (eqA a2 a3) flagNo -> Path Flag (eqA a1 a3) w3 -> Path Flag (flagIf flagYes r12 (leA a1 a2)) flagYes -> Path Flag (flagIf flagNo r23 (leA a2 a3)) flagYes -> Path Flag (flagIf w3 r13 (leA a1 a3)) flagYes) (fun (q1 : Path Flag (eqA a1 a2) flagYes) (q2 : Path Flag (eqA a2 a3) flagNo) (q3 : Path Flag (eqA a1 a3) flagYes) (pp : Path Flag (flagIf flagYes r12 (leA a1 a2)) flagYes) (qq : Path Flag (flagIf flagNo r23 (leA a2 a3)) flagYes) => flagAbsurd Flag (flagIf flagYes r13 (leA a1 a3)) flagYes (transp (fun (j : I) => Path Flag (q2 @ j) flagYes) i0 (transp (fun (j : I) => Path Flag (eqA ((sA a1 a2 q1) @ j) a3) flagYes) i0 (q3)))) (fun (q1 : Path Flag (eqA a1 a2) flagYes) (q2 : Path Flag (eqA a2 a3) flagNo) (q3 : Path Flag (eqA a1 a3) flagNo) (pp : Path Flag (flagIf flagYes r12 (leA a1 a2)) flagYes) (qq : Path Flag (flagIf flagNo r23 (leA a2 a3)) flagYes) => transp (fun (j : I) => Path Flag (leA ((sA a1 a2 q1) @ (~j)) a3) flagYes) i0 (qq)) z3) z2) (fun (z2 : Flag) => elim (fun (w2 : Flag) => (z3 : Flag) -> Path Flag (eqA a1 a2) flagNo -> Path Flag (eqA a2 a3) w2 -> Path Flag (eqA a1 a3) z3 -> Path Flag (flagIf flagNo r12 (leA a1 a2)) flagYes -> Path Flag (flagIf w2 r23 (leA a2 a3)) flagYes -> Path Flag (flagIf z3 r13 (leA a1 a3)) flagYes) (fun (z3 : Flag) => elim (fun (w3 : Flag) => Path Flag (eqA a1 a2) flagNo -> Path Flag (eqA a2 a3) flagYes -> Path Flag (eqA a1 a3) w3 -> Path Flag (flagIf flagNo r12 (leA a1 a2)) flagYes -> Path Flag (flagIf flagYes r23 (leA a2 a3)) flagYes -> Path Flag (flagIf w3 r13 (leA a1 a3)) flagYes) (fun (q1 : Path Flag (eqA a1 a2) flagNo) (q2 : Path Flag (eqA a2 a3) flagYes) (q3 : Path Flag (eqA a1 a3) flagYes) (pp : Path Flag (flagIf flagNo r12 (leA a1 a2)) flagYes) (qq : Path Flag (flagIf flagYes r23 (leA a2 a3)) flagYes) => flagAbsurd Flag (flagIf flagYes r13 (leA a1 a3)) flagYes (transp (fun (j : I) => Path Flag (q1 @ j) flagYes) i0 (transp (fun (j : I) => Path Flag (eqA a1 ((sA a2 a3 q2) @ (~j))) flagYes) i0 (q3)))) (fun (q1 : Path Flag (eqA a1 a2) flagNo) (q2 : Path Flag (eqA a2 a3) flagYes) (q3 : Path Flag (eqA a1 a3) flagNo) (pp : Path Flag (flagIf flagNo r12 (leA a1 a2)) flagYes) (qq : Path Flag (flagIf flagYes r23 (leA a2 a3)) flagYes) => transp (fun (j : I) => Path Flag (leA a1 ((sA a2 a3 q2) @ j)) flagYes) i0 (pp)) z3) (fun (z3 : Flag) => elim (fun (w3 : Flag) => Path Flag (eqA a1 a2) flagNo -> Path Flag (eqA a2 a3) flagNo -> Path Flag (eqA a1 a3) w3 -> Path Flag (flagIf flagNo r12 (leA a1 a2)) flagYes -> Path Flag (flagIf flagNo r23 (leA a2 a3)) flagYes -> Path Flag (flagIf w3 r13 (leA a1 a3)) flagYes) (fun (q1 : Path Flag (eqA a1 a2) flagNo) (q2 : Path Flag (eqA a2 a3) flagNo) (q3 : Path Flag (eqA a1 a3) flagYes) (pp : Path Flag (flagIf flagNo r12 (leA a1 a2)) flagYes) (qq : Path Flag (flagIf flagNo r23 (leA a2 a3)) flagYes) => flagAbsurd Flag (flagIf flagYes r13 (leA a1 a3)) flagYes (transp (fun (j : I) => Path Flag (flagIf (pp @ j) flagNo flagYes) flagYes) i0 (transp (fun (j : I) => Path Flag ((fA a1 a2 q1) @ j) flagYes) i0 (transp (fun (j : I) => Path Flag (leA a2 ((sA a1 a3 q3) @ (~j))) flagYes) i0 (qq))))) (fun (q1 : Path Flag (eqA a1 a2) flagNo) (q2 : Path Flag (eqA a2 a3) flagNo) (q3 : Path Flag (eqA a1 a3) flagNo) (pp : Path Flag (flagIf flagNo r12 (leA a1 a2)) flagYes) (qq : Path Flag (flagIf flagNo r23 (leA a2 a3)) flagYes) => tA a1 a2 a3 pp qq) z3) z2) (eqA a1 a2)) (eqA a2 a3) (eqA a1 a3) refl refl refl p q\n"
+  "def optionLeTrans : (A : Type 0) -> (eqA : A -> A -> Flag) -> (leA : A -> A -> Flag) -> (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) -> (tA : (a : A) -> (b : A) -> (c : A) -> Path Flag (leA a b) flagYes -> Path Flag (leA b c) flagYes -> Path Flag (leA a c) flagYes) -> (x : Option A) -> (y : Option A) -> (z : Option A) -> (p : Path Flag (optionLe A leA x y) flagYes) -> (q : Path Flag (optionLe A leA y z) flagYes) -> Path Flag (optionLe A leA x z) flagYes := fun (A : Type 0) (eqA : A -> A -> Flag) (leA : A -> A -> Flag) (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) (tA : (a : A) -> (b : A) -> (c : A) -> Path Flag (leA a b) flagYes -> Path Flag (leA b c) flagYes -> Path Flag (leA a c) flagYes) (x : Option A) => elim (fun (o : Option A) => (y : Option A) -> (z : Option A) -> Path Flag (optionLe A leA o y) flagYes -> Path Flag (optionLe A leA y z) flagYes -> Path Flag (optionLe A leA o z) flagYes) (fun (y : Option A) (z : Option A) (p : Path Flag (optionLe A leA none y) flagYes) (q : Path Flag (optionLe A leA y z) flagYes) => refl) (fun (a : A) (y : Option A) => elim (fun (u : Option A) => (z : Option A) -> Path Flag (optionLe A leA (some a) u) flagYes -> Path Flag (optionLe A leA u z) flagYes -> Path Flag (optionLe A leA (some a) z) flagYes) (fun (z : Option A) (p : Path Flag (optionLe A leA (some a) none) flagYes) (q : Path Flag (optionLe A leA none z) flagYes) => flagAbsurd Flag (optionLe A leA (some a) z) flagYes p) (fun (b : A) (z : Option A) => elim (fun (v : Option A) => Path Flag (optionLe A leA (some a) (some b)) flagYes -> Path Flag (optionLe A leA (some b) v) flagYes -> Path Flag (optionLe A leA (some a) v) flagYes) (fun (p : Path Flag (optionLe A leA (some a) (some b)) flagYes) (q : Path Flag (optionLe A leA (some b) none) flagYes) => flagAbsurd Flag (optionLe A leA (some a) none) flagYes q) (fun (c : A) (p : Path Flag (optionLe A leA (some a) (some b)) flagYes) (q : Path Flag (optionLe A leA (some b) (some c)) flagYes) => tA a b c p q) z) y) x\n"
+  "def prodLeTrans : (A : Type 0) -> (B : Type 0) -> (eqA : A -> A -> Flag) -> (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> (rA : (a : A) -> Path Flag (eqA a a) flagYes) -> (leA : A -> A -> Flag) -> (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) -> (tA : (a : A) -> (b : A) -> (c : A) -> Path Flag (leA a b) flagYes -> Path Flag (leA b c) flagYes -> Path Flag (leA a c) flagYes) -> (eqB : B -> B -> Flag) -> (leB : B -> B -> Flag) -> (fB : (a : B) -> (b : B) -> Path Flag (eqB a b) flagNo -> Path Flag (leB b a) (flagIf (leB a b) flagNo flagYes)) -> (tB : (a : B) -> (b : B) -> (c : B) -> Path Flag (leB a b) flagYes -> Path Flag (leB b c) flagYes -> Path Flag (leB a c) flagYes) -> (x : Prod A B) -> (y : Prod A B) -> (z : Prod A B) -> (p : Path Flag (prodLe A B eqA leA leB x y) flagYes) -> (q : Path Flag (prodLe A B eqA leA leB y z) flagYes) -> Path Flag (prodLe A B eqA leA leB x z) flagYes := fun (A : Type 0) (B : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (rA : (a : A) -> Path Flag (eqA a a) flagYes) (leA : A -> A -> Flag) (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) (tA : (a : A) -> (b : A) -> (c : A) -> Path Flag (leA a b) flagYes -> Path Flag (leA b c) flagYes -> Path Flag (leA a c) flagYes) (eqB : B -> B -> Flag) (leB : B -> B -> Flag) (fB : (a : B) -> (b : B) -> Path Flag (eqB a b) flagNo -> Path Flag (leB b a) (flagIf (leB a b) flagNo flagYes)) (tB : (a : B) -> (b : B) -> (c : B) -> Path Flag (leB a b) flagYes -> Path Flag (leB b c) flagYes -> Path Flag (leB a c) flagYes) (x : Prod A B) (y : Prod A B) (z : Prod A B) (p : Path Flag (prodLe A B eqA leA leB x y) flagYes) (q : Path Flag (prodLe A B eqA leA leB y z) flagYes) => lexTrans A eqA sA rA leA fA tA (first x) (first y) (first z) (leB (second x) (second y)) (leB (second y) (second z)) (leB (second x) (second z)) (tB (second x) (second y) (second z)) p q\n"
+  "def listLeTrans : (A : Type 0) -> (eqA : A -> A -> Flag) -> (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> (rA : (a : A) -> Path Flag (eqA a a) flagYes) -> (leA : A -> A -> Flag) -> (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) -> (tA : (a : A) -> (b : A) -> (c : A) -> Path Flag (leA a b) flagYes -> Path Flag (leA b c) flagYes -> Path Flag (leA a c) flagYes) -> (xs : List A) -> (ys : List A) -> (zs : List A) -> (p : Path Flag (listLe A eqA leA xs ys) flagYes) -> (q : Path Flag (listLe A eqA leA ys zs) flagYes) -> Path Flag (listLe A eqA leA xs zs) flagYes := fun (A : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (rA : (a : A) -> Path Flag (eqA a a) flagYes) (leA : A -> A -> Flag) (fA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagNo -> Path Flag (leA b a) (flagIf (leA a b) flagNo flagYes)) (tA : (a : A) -> (b : A) -> (c : A) -> Path Flag (leA a b) flagYes -> Path Flag (leA b c) flagYes -> Path Flag (leA a c) flagYes) (xs : List A) => elim (fun (s : List A) => (ys : List A) -> (zs : List A) -> Path Flag (listLe A eqA leA s ys) flagYes -> Path Flag (listLe A eqA leA ys zs) flagYes -> Path Flag (listLe A eqA leA s zs) flagYes) (fun (ys : List A) (zs : List A) (p : Path Flag (listLe A eqA leA nil ys) flagYes) (q : Path Flag (listLe A eqA leA ys zs) flagYes) => refl) (fun (h : A) (t : List A) (ih : (ys : List A) -> (zs : List A) -> Path Flag (listLe A eqA leA t ys) flagYes -> Path Flag (listLe A eqA leA ys zs) flagYes -> Path Flag (listLe A eqA leA t zs) flagYes) (ys : List A) => elim (fun (u : List A) => (zs : List A) -> Path Flag (listLe A eqA leA (cons h t) u) flagYes -> Path Flag (listLe A eqA leA u zs) flagYes -> Path Flag (listLe A eqA leA (cons h t) zs) flagYes) (fun (zs : List A) (p : Path Flag (listLe A eqA leA (cons h t) nil) flagYes) (q : Path Flag (listLe A eqA leA nil zs) flagYes) => flagAbsurd Flag (listLe A eqA leA (cons h t) zs) flagYes p) (fun (y : A) (ys2 : List A) (ih2 : (zs : List A) -> Path Flag (listLe A eqA leA (cons h t) ys2) flagYes -> Path Flag (listLe A eqA leA ys2 zs) flagYes -> Path Flag (listLe A eqA leA (cons h t) zs) flagYes) (zs : List A) => elim (fun (v : List A) => Path Flag (listLe A eqA leA (cons h t) (cons y ys2)) flagYes -> Path Flag (listLe A eqA leA (cons y ys2) v) flagYes -> Path Flag (listLe A eqA leA (cons h t) v) flagYes) (fun (p : Path Flag (listLe A eqA leA (cons h t) (cons y ys2)) flagYes) (q : Path Flag (listLe A eqA leA (cons y ys2) nil) flagYes) => flagAbsurd Flag (listLe A eqA leA (cons h t) nil) flagYes q) (fun (z : A) (zs2 : List A) (ih3 : Path Flag (listLe A eqA leA (cons h t) (cons y ys2)) flagYes -> Path Flag (listLe A eqA leA (cons y ys2) zs2) flagYes -> Path Flag (listLe A eqA leA (cons h t) zs2) flagYes) (p : Path Flag (listLe A eqA leA (cons h t) (cons y ys2)) flagYes) (q : Path Flag (listLe A eqA leA (cons y ys2) (cons z zs2)) flagYes) => lexTrans A eqA sA rA leA fA tA h y z (listLe A eqA leA t (option nil (fun (pr : Prod A (List A)) => cons (first pr) (second pr)) (listUncons A ys2))) (listLe A eqA leA ys2 (option nil (fun (pr : Prod A (List A)) => cons (first pr) (second pr)) (listUncons A zs2))) (listLe A eqA leA t (option nil (fun (pr : Prod A (List A)) => cons (first pr) (second pr)) (listUncons A zs2))) (fun (u : Path Flag (listLe A eqA leA t (option nil (fun (pr : Prod A (List A)) => cons (first pr) (second pr)) (listUncons A ys2))) flagYes) => ih ys2 (option nil (fun (pr : Prod A (List A)) => cons (first pr) (second pr)) (listUncons A zs2)) (transp (fun (j : I) => Path Flag (listLe A eqA leA t ((listRound A ys2) @ j)) flagYes) i0 u)) p q) zs) ys) xs\n";
+
+/* The order def of the type name NAME (Nat, Size, Flag). */
+static const char *key_le_name(const char *name) {
+  if (strcmp(name, "Nat") == 0)
+    return "natLe";
+  if (strcmp(name, "Size") == 0)
+    return "sizeLe";
+  return "flagLe";
+}
+
+/* The order term of the key argument form T (the mirror of key_put_eq):
+   Nat natLe, Size sizeLe, Flag flagLe, `Option T` (optionLe T leT),
+   `List T` (listLe T eqT leT) and `Prod A B` (prodLe A B eqA leA leB). */
+static void key_put_le(KeyText *b, const Term *t) {
+  if (t->kind == TERM_VAR) {
+    key_put(b, key_le_name(t->name));
+    return;
+  }
+  if (t->left->kind == TERM_VAR && strcmp(t->left->name, "List") == 0) {
+    key_put(b, "(listLe ");
+    key_put_type(b, t->right);
+    key_put(b, " ");
+    key_put_eq(b, t->right);
+    key_put(b, " ");
+    key_put_le(b, t->right);
+    key_put(b, ")");
+    return;
+  }
+  if (t->left->kind == TERM_VAR) {
+    key_put(b, "(optionLe ");
+    key_put_type(b, t->right);
+    key_put(b, " ");
+    key_put_le(b, t->right);
+    key_put(b, ")");
+    return;
+  }
+  key_put(b, "(prodLe ");
+  key_put_type(b, t->left->right);
+  key_put(b, " ");
+  key_put_type(b, t->right);
+  key_put(b, " ");
+  key_put_eq(b, t->left->right);
+  key_put(b, " ");
+  key_put_le(b, t->left->right);
+  key_put(b, " ");
+  key_put_le(b, t->right);
+  key_put(b, ")");
+}
+
+/* The order term of the field J: (LE keyEqAJ keyEqBJ). */
+static void key_put_field_le(KeyText *b, const Term *type, size_t j) {
+  key_put(b, "(");
+  key_put_le(b, type);
+  key_put_index(b, " keyEq.A", j);
+  key_put_index(b, " keyEq.B", j);
+  key_put(b, ")");
+}
+
+/* The lexicographic order of the fields from the Pi T (the field J) on:
+   flagYes for no field, the field order for one field, else flagIf on
+   the field eq: the order of the next fields when the field J is equal,
+   the order of the field J if not. */
+static void key_put_lex(KeyText *b, const Term *t, size_t j) {
+  if (t == NULL || t->kind != TERM_PI) {
+    key_put(b, "flagYes");
+    return;
+  }
+  if (t->right == NULL || t->right->kind != TERM_PI) {
+    key_put_field_le(b, t->left, j);
+    return;
+  }
+  key_put(b, "(flagIf ");
+  key_put_field_eq(b, t->left, j);
+  key_put(b, " ");
+  key_put_lex(b, t->right, j + 1u);
+  key_put(b, " ");
+  key_put_field_le(b, t->left, j);
+  key_put(b, ")");
+}
+
+/* The case of keyLe for the key space I: an elim on the second key, with
+   the lexicographic field order on the diagonal, flagYes for a later key
+   space and flagNo for an earlier key space. */
+static void key_put_le_case(KeyText *b, const DeclList *out, size_t first, size_t i) {
+  size_t k;
+  key_put_fun(b, "keyEq.A", out->items[i].type);
+  key_put(b, "elim (fun (keyEq.U : Key) => Flag)");
+  for (k = first; k < out->count; k++) {
+    if (!key_space(&out->items[k]))
+      continue;
+    key_put(b, " (");
+    key_put_fun(b, "keyEq.B", out->items[k].type);
+    if (k == i)
+      key_put_lex(b, out->items[i].type, 1u);
+    else
+      key_put(b, k > i ? "flagYes" : "flagNo");
+    key_put(b, ")");
+  }
+  key_put(b, " keyEq.Y");
+}
+
 /* u4b2 (Q-S6-17..19 (a)): the sound lemma for a key argument type, the
    mirror of key_put_eq: natEqSound, sizeEqSound, flagEqSound,
    (optionEqSound T eqT sT), (listEqSound T eqT sT) and
@@ -836,6 +974,420 @@ static void key_put_refl_conj(KeyText *b, const Term *t, size_t j) {
   key_put(b, ")");
 }
 
+/* u4e2 (Q-S8-5 (a)): keyLeFlip, the flip of keyLe for two keys that are
+   not equal: (keyLe l k) is the negation of (keyLe k l). The cases are
+   the mirror of key_put_le_case: refl off the diagonal; on the diagonal
+   the field flip for one field and lexFlip for more fields. */
+static const char *key_flip_name(const char *name) {
+  if (strcmp(name, "Nat") == 0)
+    return "natLeFlip";
+  if (strcmp(name, "Size") == 0)
+    return "sizeLeFlip";
+  return "flagLeFlip";
+}
+
+/* The flip lemma of the order of a key argument type, the mirror of
+   key_put_le: natLeFlip, sizeLeFlip, flagLeFlip,
+   (optionLeFlip T eqT leT fT), (listLeFlip T eqT sT rT leT fT) and
+   (prodLeFlip A B eqA sA rA leA fA eqB leB fB). */
+static void key_put_flip(KeyText *b, const Term *t) {
+  if (t->kind == TERM_VAR) {
+    key_put(b, key_flip_name(t->name));
+    return;
+  }
+  if (t->left->kind == TERM_VAR && strcmp(t->left->name, "List") == 0) {
+    key_put(b, "(listLeFlip ");
+    key_put_type(b, t->right);
+    key_put(b, " ");
+    key_put_eq(b, t->right);
+    key_put(b, " ");
+    key_put_sound(b, t->right);
+    key_put(b, " ");
+    key_put_refl(b, t->right);
+    key_put(b, " ");
+    key_put_le(b, t->right);
+    key_put(b, " ");
+    key_put_flip(b, t->right);
+    key_put(b, ")");
+    return;
+  }
+  if (t->left->kind == TERM_VAR) {
+    key_put(b, "(optionLeFlip ");
+    key_put_type(b, t->right);
+    key_put(b, " ");
+    key_put_eq(b, t->right);
+    key_put(b, " ");
+    key_put_le(b, t->right);
+    key_put(b, " ");
+    key_put_flip(b, t->right);
+    key_put(b, ")");
+    return;
+  }
+  key_put(b, "(prodLeFlip ");
+  key_put_type(b, t->left->right);
+  key_put(b, " ");
+  key_put_type(b, t->right);
+  key_put(b, " ");
+  key_put_eq(b, t->left->right);
+  key_put(b, " ");
+  key_put_sound(b, t->left->right);
+  key_put(b, " ");
+  key_put_refl(b, t->left->right);
+  key_put(b, " ");
+  key_put_le(b, t->left->right);
+  key_put(b, " ");
+  key_put_flip(b, t->left->right);
+  key_put(b, " ");
+  key_put_eq(b, t->right);
+  key_put(b, " ");
+  key_put_le(b, t->right);
+  key_put(b, " ");
+  key_put_flip(b, t->right);
+  key_put(b, ")");
+}
+
+/* The field term (PUT TYPE XJ YJ) with the names X and Y. */
+static void key_put_field_by(KeyText *b, void (*put)(KeyText *, const Term *), const Term *type, size_t j, const char *x, const char *y) {
+  key_put(b, "(");
+  put(b, type);
+  key_put_index(b, x, j);
+  key_put_index(b, y, j);
+  key_put(b, ")");
+}
+
+/* key_put_lex with the names X and Y in place of keyEq.A and keyEq.B. */
+static void key_put_lex_names(KeyText *b, const Term *t, size_t j, const char *x, const char *y) {
+  if (t == NULL || t->kind != TERM_PI) {
+    key_put(b, "flagYes");
+    return;
+  }
+  if (t->right == NULL || t->right->kind != TERM_PI) {
+    key_put_field_by(b, key_put_le, t->left, j, x, y);
+    return;
+  }
+  key_put(b, "(flagIf ");
+  key_put_field_by(b, key_put_eq, t->left, j, x, y);
+  key_put(b, " ");
+  key_put_lex_names(b, t->right, j + 1u, x, y);
+  key_put(b, " ");
+  key_put_field_by(b, key_put_le, t->left, j, x, y);
+  key_put(b, ")");
+}
+
+/* The proof that the fields from J on are not equal: keyEq.H for the
+   field 1, keyEq.HJ for a field J after the field 1. */
+static void key_put_flip_h(KeyText *b, size_t j) {
+  if (j <= 1u)
+    key_put(b, " keyEq.H");
+  else
+    key_put_index(b, " keyEq.H", j);
+}
+
+/* The flip on the diagonal from the field J on (T is the node of the
+   field J): keyEq.H for no field, the field flip for the last field,
+   else lexFlip with the step for the next fields. */
+static void key_put_flip_step(KeyText *b, const Term *t, size_t j) {
+  if (t == NULL || t->kind != TERM_PI) {
+    key_put(b, "keyEq.H");
+    return;
+  }
+  if (t->right == NULL || t->right->kind != TERM_PI) {
+    key_put(b, "(");
+    key_put_flip(b, t->left);
+    key_put_index(b, " keyEq.A", j);
+    key_put_index(b, " keyEq.B", j);
+    key_put_flip_h(b, j);
+    key_put(b, ")");
+    return;
+  }
+  key_put(b, "(lexFlip ");
+  key_put_type(b, t->left);
+  key_put(b, " ");
+  key_put_eq(b, t->left);
+  key_put(b, " ");
+  key_put_sound(b, t->left);
+  key_put(b, " ");
+  key_put_refl(b, t->left);
+  key_put(b, " ");
+  key_put_le(b, t->left);
+  key_put(b, " ");
+  key_put_flip(b, t->left);
+  key_put_index(b, " keyEq.A", j);
+  key_put_index(b, " keyEq.B", j);
+  key_put(b, " ");
+  key_put_conj(b, t->right, j + 1u);
+  key_put(b, " ");
+  key_put_lex_names(b, t->right, j + 1u, " keyEq.A", " keyEq.B");
+  key_put(b, " ");
+  key_put_lex_names(b, t->right, j + 1u, " keyEq.B", " keyEq.A");
+  key_put_index(b, " (fun (keyEq.H", j + 1u);
+  key_put(b, " : Path Flag ");
+  key_put_conj(b, t->right, j + 1u);
+  key_put(b, " flagNo) => ");
+  key_put_flip_step(b, t->right, j + 1u);
+  key_put(b, ")");
+  key_put_flip_h(b, j);
+  key_put(b, ")");
+}
+
+/* The keyLeFlip case for the key space I (the mirror of
+   key_put_sound_case): an elim on keyEq.Y, refl off the diagonal (both
+   orders are constant there), the field flips on it. */
+static void key_put_flip_case(KeyText *b, const DeclList *out, size_t first, size_t i) {
+  size_t k;
+  const Decl *d = &out->items[i];
+  key_put_fun(b, "keyEq.A", d->type);
+  key_put(b, "fun (keyEq.Y : Key) => elim (fun (keyEq.U : Key) => Path Flag (keyEq ");
+  key_put_key(b, d->name, " keyEq.A", d->type);
+  key_put(b, " keyEq.U) flagNo -> Path Flag (keyLe keyEq.U ");
+  key_put_key(b, d->name, " keyEq.A", d->type);
+  key_put(b, ") (flagIf (keyLe ");
+  key_put_key(b, d->name, " keyEq.A", d->type);
+  key_put(b, " keyEq.U) flagNo flagYes))");
+  for (k = first; k < out->count; k++) {
+    const Decl *e = &out->items[k];
+    if (!key_space(e))
+      continue;
+    key_put(b, " (");
+    key_put_fun(b, "keyEq.B", e->type);
+    key_put(b, "fun (keyEq.H : Path Flag (keyEq ");
+    key_put_key(b, d->name, " keyEq.A", d->type);
+    key_put(b, " ");
+    key_put_key(b, e->name, " keyEq.B", e->type);
+    key_put(b, ") flagNo) => ");
+    if (k == i)
+      key_put_flip_step(b, d->type, 1u);
+    else
+      key_put(b, "refl");
+    key_put(b, ")");
+  }
+  key_put(b, " keyEq.Y");
+}
+
+/* The trans lemma name of the order of a key argument type. */
+static const char *key_trans_name(const char *name) {
+  if (strcmp(name, "Nat") == 0)
+    return "natLeTrans";
+  if (strcmp(name, "Size") == 0)
+    return "sizeLeTrans";
+  return "flagLeTrans";
+}
+
+/* The trans lemma of the order of a key argument type, the mirror of
+   key_put_flip: natLeTrans, sizeLeTrans, flagLeTrans,
+   (optionLeTrans T eqT leT fT tT), (listLeTrans T eqT sT rT leT fT tT)
+   and (prodLeTrans A B eqA sA rA leA fA tA eqB leB fB tB). */
+static void key_put_trans(KeyText *b, const Term *t) {
+  if (t->kind == TERM_VAR) {
+    key_put(b, key_trans_name(t->name));
+    return;
+  }
+  if (t->left->kind == TERM_VAR && strcmp(t->left->name, "List") == 0) {
+    key_put(b, "(listLeTrans ");
+    key_put_type(b, t->right);
+    key_put(b, " ");
+    key_put_eq(b, t->right);
+    key_put(b, " ");
+    key_put_sound(b, t->right);
+    key_put(b, " ");
+    key_put_refl(b, t->right);
+    key_put(b, " ");
+    key_put_le(b, t->right);
+    key_put(b, " ");
+    key_put_flip(b, t->right);
+    key_put(b, " ");
+    key_put_trans(b, t->right);
+    key_put(b, ")");
+    return;
+  }
+  if (t->left->kind == TERM_VAR) {
+    key_put(b, "(optionLeTrans ");
+    key_put_type(b, t->right);
+    key_put(b, " ");
+    key_put_eq(b, t->right);
+    key_put(b, " ");
+    key_put_le(b, t->right);
+    key_put(b, " ");
+    key_put_flip(b, t->right);
+    key_put(b, " ");
+    key_put_trans(b, t->right);
+    key_put(b, ")");
+    return;
+  }
+  key_put(b, "(prodLeTrans ");
+  key_put_type(b, t->left->right);
+  key_put(b, " ");
+  key_put_type(b, t->right);
+  key_put(b, " ");
+  key_put_eq(b, t->left->right);
+  key_put(b, " ");
+  key_put_sound(b, t->left->right);
+  key_put(b, " ");
+  key_put_refl(b, t->left->right);
+  key_put(b, " ");
+  key_put_le(b, t->left->right);
+  key_put(b, " ");
+  key_put_flip(b, t->left->right);
+  key_put(b, " ");
+  key_put_trans(b, t->left->right);
+  key_put(b, " ");
+  key_put_eq(b, t->right);
+  key_put(b, " ");
+  key_put_le(b, t->right);
+  key_put(b, " ");
+  key_put_flip(b, t->right);
+  key_put(b, " ");
+  key_put_trans(b, t->right);
+  key_put(b, ")");
+}
+
+/* A keyLeTrans hypothesis name: PREFIX for the field 1, PREFIX J for a
+   field J after the field 1. */
+static void key_put_trans_h(KeyText *b, const char *prefix, size_t j) {
+  if (j <= 1u)
+    key_put(b, prefix);
+  else
+    key_put_index(b, prefix, j);
+}
+
+/* The trans on the diagonal from the field J on (T is the node of the
+   field J; the mirror of key_put_flip_step): keyEq.P for no field, the
+   field trans for the last field, else lexTrans with the step for the
+   next fields. */
+static void key_put_trans_step(KeyText *b, const Term *t, size_t j) {
+  if (t == NULL || t->kind != TERM_PI) {
+    key_put(b, "keyEq.P");
+    return;
+  }
+  if (t->right == NULL || t->right->kind != TERM_PI) {
+    key_put(b, "(");
+    key_put_trans(b, t->left);
+    key_put_index(b, " keyEq.A", j);
+    key_put_index(b, " keyEq.B", j);
+    key_put_index(b, " keyEq.C", j);
+    key_put_trans_h(b, " keyEq.P", j);
+    key_put_trans_h(b, " keyEq.Q", j);
+    key_put(b, ")");
+    return;
+  }
+  key_put(b, "(lexTrans ");
+  key_put_type(b, t->left);
+  key_put(b, " ");
+  key_put_eq(b, t->left);
+  key_put(b, " ");
+  key_put_sound(b, t->left);
+  key_put(b, " ");
+  key_put_refl(b, t->left);
+  key_put(b, " ");
+  key_put_le(b, t->left);
+  key_put(b, " ");
+  key_put_flip(b, t->left);
+  key_put(b, " ");
+  key_put_trans(b, t->left);
+  key_put_index(b, " keyEq.A", j);
+  key_put_index(b, " keyEq.B", j);
+  key_put_index(b, " keyEq.C", j);
+  key_put(b, " ");
+  key_put_lex_names(b, t->right, j + 1u, " keyEq.A", " keyEq.B");
+  key_put(b, " ");
+  key_put_lex_names(b, t->right, j + 1u, " keyEq.B", " keyEq.C");
+  key_put(b, " ");
+  key_put_lex_names(b, t->right, j + 1u, " keyEq.A", " keyEq.C");
+  key_put_index(b, " (fun (keyEq.P", j + 1u);
+  key_put(b, " : Path Flag ");
+  key_put_lex_names(b, t->right, j + 1u, " keyEq.A", " keyEq.B");
+  key_put_index(b, " flagYes) (keyEq.Q", j + 1u);
+  key_put(b, " : Path Flag ");
+  key_put_lex_names(b, t->right, j + 1u, " keyEq.B", " keyEq.C");
+  key_put(b, " flagYes) => ");
+  key_put_trans_step(b, t->right, j + 1u);
+  key_put(b, ")");
+  key_put_trans_h(b, " keyEq.P", j);
+  key_put_trans_h(b, " keyEq.Q", j);
+  key_put(b, ")");
+}
+
+/* A keyLeTrans cell for the key spaces I, J and K (the positions in the
+   declaration order): refl for K after I (keyLe is flagYes there), the
+   field trans for I = J = K, else an absurd case on keyEq.P (J before
+   I) or on keyEq.Q (K before J). */
+static void key_put_trans_cell(KeyText *b, const Decl *d, const Decl *f, size_t i, size_t j, size_t k) {
+  if (k > i) {
+    key_put(b, "refl");
+    return;
+  }
+  if (j == i && k == i) {
+    key_put_trans_step(b, d->type, 1u);
+    return;
+  }
+  key_put(b, "(flagAbsurd Flag (keyLe ");
+  key_put_key(b, d->name, " keyEq.A", d->type);
+  key_put(b, " ");
+  key_put_key(b, f->name, " keyEq.C", f->type);
+  key_put(b, ") flagYes ");
+  key_put(b, j < i ? "keyEq.P" : "keyEq.Q");
+  key_put(b, ")");
+}
+
+/* The keyLeTrans step for the key spaces I and J: an elim on keyEq.Z
+   with a cell for each key space K. */
+static void key_put_trans_mid(KeyText *b, const DeclList *out, size_t first, size_t i, size_t j) {
+  size_t k;
+  const Decl *d = &out->items[i];
+  const Decl *e = &out->items[j];
+  key_put(b, "fun (keyEq.Z : Key) => elim (fun (keyEq.W : Key) => Path Flag (keyLe ");
+  key_put_key(b, d->name, " keyEq.A", d->type);
+  key_put(b, " ");
+  key_put_key(b, e->name, " keyEq.B", e->type);
+  key_put(b, ") flagYes -> Path Flag (keyLe ");
+  key_put_key(b, e->name, " keyEq.B", e->type);
+  key_put(b, " keyEq.W) flagYes -> Path Flag (keyLe ");
+  key_put_key(b, d->name, " keyEq.A", d->type);
+  key_put(b, " keyEq.W) flagYes)");
+  for (k = first; k < out->count; k++) {
+    const Decl *f = &out->items[k];
+    if (!key_space(f))
+      continue;
+    key_put(b, " (");
+    key_put_fun(b, "keyEq.C", f->type);
+    key_put(b, "fun (keyEq.P : Path Flag (keyLe ");
+    key_put_key(b, d->name, " keyEq.A", d->type);
+    key_put(b, " ");
+    key_put_key(b, e->name, " keyEq.B", e->type);
+    key_put(b, ") flagYes) (keyEq.Q : Path Flag (keyLe ");
+    key_put_key(b, e->name, " keyEq.B", e->type);
+    key_put(b, " ");
+    key_put_key(b, f->name, " keyEq.C", f->type);
+    key_put(b, ") flagYes) => ");
+    key_put_trans_cell(b, d, f, i, j, k);
+    key_put(b, ")");
+  }
+  key_put(b, " keyEq.Z");
+}
+
+/* The keyLeTrans case for the key space I (the mirror of
+   key_put_flip_case): an elim on keyEq.Y, then on keyEq.Z. */
+static void key_put_trans_case(KeyText *b, const DeclList *out, size_t first, size_t i) {
+  size_t j;
+  const Decl *d = &out->items[i];
+  key_put_fun(b, "keyEq.A", d->type);
+  key_put(b, "fun (keyEq.Y : Key) => elim (fun (keyEq.V : Key) => (keyEq.Z : Key) -> Path Flag (keyLe ");
+  key_put_key(b, d->name, " keyEq.A", d->type);
+  key_put(b, " keyEq.V) flagYes -> Path Flag (keyLe keyEq.V keyEq.Z) flagYes -> Path Flag (keyLe ");
+  key_put_key(b, d->name, " keyEq.A", d->type);
+  key_put(b, " keyEq.Z) flagYes)");
+  for (j = first; j < out->count; j++) {
+    const Decl *e = &out->items[j];
+    if (!key_space(e))
+      continue;
+    key_put(b, " (");
+    key_put_fun(b, "keyEq.B", e->type);
+    key_put_trans_mid(b, out, first, i, j);
+    key_put(b, ")");
+  }
+  key_put(b, " keyEq.Y");
+}
+
 /* The keyEqRefl case for the key space with the type TYPE. */
 static void key_put_refl_case(KeyText *b, const Term *type) {
   key_put_fun(b, "keyEq.A", type);
@@ -879,6 +1431,8 @@ static int key_eq_after_key(Arena *arena, size_t first, DeclList *out, Diag *dia
   b.buf[0] = '\0';
   b.ok = 1;
   key_put(&b, key_eq_source);
+  key_put(&b, key_le_source);
+  key_put(&b, key_flip_source);
   key_put(&b, "def keyEq : Key -> Key -> Flag := fun (keyEq.X : Key) (keyEq.Y : Key) => elim (fun (keyEq.T : Key) => Flag)");
   for (i = first; i < out->count; i++) {
     if (!key_space(&out->items[i]))
@@ -888,12 +1442,39 @@ static int key_eq_after_key(Arena *arena, size_t first, DeclList *out, Diag *dia
     key_put(&b, ")");
   }
   key_put(&b, " keyEq.X\n");
+  key_put(&b, "def keyLe : Key -> Key -> Flag := fun (keyEq.X : Key) (keyEq.Y : Key) => elim (fun (keyEq.T : Key) => Flag)");
+  for (i = first; i < out->count; i++) {
+    if (!key_space(&out->items[i]))
+      continue;
+    key_put(&b, " (");
+    key_put_le_case(&b, out, first, i);
+    key_put(&b, ")");
+  }
+  key_put(&b, " keyEq.X\n");
   key_put(&b, "def keyEqSound : (keyEq.X : Key) -> (keyEq.Y : Key) -> Path Flag (keyEq keyEq.X keyEq.Y) flagYes -> Path Key keyEq.X keyEq.Y := fun (keyEq.X : Key) => elim (fun (keyEq.T : Key) => (keyEq.Y : Key) -> Path Flag (keyEq keyEq.T keyEq.Y) flagYes -> Path Key keyEq.T keyEq.Y)");
   for (i = first; i < out->count; i++) {
     if (!key_space(&out->items[i]))
       continue;
     key_put(&b, " (");
     key_put_sound_case(&b, out, first, i);
+    key_put(&b, ")");
+  }
+  key_put(&b, " keyEq.X\n");
+  key_put(&b, "def keyLeFlip : (keyEq.X : Key) -> (keyEq.Y : Key) -> Path Flag (keyEq keyEq.X keyEq.Y) flagNo -> Path Flag (keyLe keyEq.Y keyEq.X) (flagIf (keyLe keyEq.X keyEq.Y) flagNo flagYes) := fun (keyEq.X : Key) => elim (fun (keyEq.T : Key) => (keyEq.Y : Key) -> Path Flag (keyEq keyEq.T keyEq.Y) flagNo -> Path Flag (keyLe keyEq.Y keyEq.T) (flagIf (keyLe keyEq.T keyEq.Y) flagNo flagYes))");
+  for (i = first; i < out->count; i++) {
+    if (!key_space(&out->items[i]))
+      continue;
+    key_put(&b, " (");
+    key_put_flip_case(&b, out, first, i);
+    key_put(&b, ")");
+  }
+  key_put(&b, " keyEq.X\n");
+  key_put(&b, "def keyLeTrans : (keyEq.X : Key) -> (keyEq.Y : Key) -> (keyEq.Z : Key) -> Path Flag (keyLe keyEq.X keyEq.Y) flagYes -> Path Flag (keyLe keyEq.Y keyEq.Z) flagYes -> Path Flag (keyLe keyEq.X keyEq.Z) flagYes := fun (keyEq.X : Key) => elim (fun (keyEq.U : Key) => (keyEq.Y : Key) -> (keyEq.Z : Key) -> Path Flag (keyLe keyEq.U keyEq.Y) flagYes -> Path Flag (keyLe keyEq.Y keyEq.Z) flagYes -> Path Flag (keyLe keyEq.U keyEq.Z) flagYes)");
+  for (i = first; i < out->count; i++) {
+    if (!key_space(&out->items[i]))
+      continue;
+    key_put(&b, " (");
+    key_put_trans_case(&b, out, first, i);
     key_put(&b, ")");
   }
   key_put(&b, " keyEq.X\n");
@@ -1642,6 +2223,803 @@ static int body_step(Arena *arena, size_t first, DeclList *out) {
   return 1;
 }
 
+/* The Store FinMap (quotient-lang S8 u3, USER ruling Q-S8-1 (a)): a
+   fixed family Store at the instance FinMap Key Val. A program cannot
+   declare a family (rule R1), thus the front end adds it. fmOver puts a
+   value over an old value at the same key. fmComm swaps two puts at keys
+   where keyEq k l is flagNo: the cell takes this path as a field (the
+   traceSwap form). storeSquash makes Store a set. The fields have new
+   names (rule R4); the domain family FreeMon uses fmSquash and the fm
+   field names. The front end puts it directly after the last of
+   keyEqRefl (the last def of the key-eq prelude) and Val. With no Key or no Val, it adds nothing. lookup is a storeFold
+   into Maybe Val, thus it needs the isSet proof of Val (Val is Size or
+   Nat): the front end puts it after the last of storeIsSet and that
+   proof. In lookupComm, two hits at keys where keyEq k l is flagNo give
+   a path from flagNo to flagYes (keyEqSound, keyEqRefl). */
+#define STORE_SOURCE_NAME "kernel/store.lang"
+
+static const char *const STORE_AFTER[] = {"keyEqRefl", "Val"};
+static const char *const LOOKUP_AFTER[] = {"storeIsSet", "valIsSet"};
+
+/* storeState (USER ruling Q-S8-2 (a)): the value at a key, or valZero for
+   a missing key. The kernel adds it after lookup and valZero, only when
+   the program defines valZero (a SIG_PROGRAM name of the type Val). It
+   folds the store at Val with stateSel, a flagIf: the Wasm host lowers
+   flagIf but no elim (S8 u4b2). */
+static const char *const STATE_AFTER[] = {"lookup", "valZero"};
+
+static const char store_source[] =
+  "family Store := fmEmpty\n"
+  "  | fmPut (putK : Key) (putV : Val) (putM : Store)\n"
+  "  | fmOver (overK : Key) (overV : Val) (overW : Val) (overM : Store) (overI : I)\n"
+  "    [ ~overI -> fmPut overK overV (fmPut overK overW overM), overI -> fmPut overK overV overM ]\n"
+  "  | fmComm (commK : Key) (commL : Key) (commV : Val) (commW : Val) (commM : Store) (commNe : Path Flag (keyEq commK commL) flagNo) (commI : I)\n"
+  "    [ ~commI -> fmPut commK commV (fmPut commL commW commM), commI -> fmPut commL commW (fmPut commK commV commM) ]\n"
+  "  | storeSquash (storeFrom : Store) (storeTo : Store) (storeLeft : Path Store storeFrom storeTo) (storeRight : Path Store storeFrom storeTo) (storeI : I) (storeJ : I)\n"
+  "    [ ~storeI -> storeLeft @ storeJ, storeI -> storeRight @ storeJ, ~storeJ -> storeFrom, storeJ -> storeTo ]\n"
+  "def storeFold : (M : Type 0) -> isSet M -> (e : M) -> (put : Key -> Val -> M -> M) -> ((k : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path M (put k v (put k w m)) (put k v m)) -> ((k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path Flag (keyEq k l) flagNo -> Path M (put k v (put l w m)) (put l w (put k v m))) -> Store -> M :=\n"
+  "  fun (M : Type 0) (s : isSet M) (e : M) (put : Key -> Val -> M -> M) (ov : (k : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path M (put k v (put k w m)) (put k v m)) (cm : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path Flag (keyEq k l) flagNo -> Path M (put k v (put l w m)) (put l w (put k v m))) (t : Store) =>\n"
+  "    fold e (fun (k : Key) (v : Val) (m : M) => put k v m)\n"
+  "      (fun (k : Key) (v : Val) (w : Val) (m : M) => fun (overI : I) => ov k v w m @ overI)\n"
+  "      (fun (k : Key) (l : Key) (v : Val) (w : Val) (m : M) (p : Path Flag (keyEq k l) flagNo) => fun (commI : I) => cm k l v w m p @ commI)\n"
+  "      (fun (x : M) (y : M) (p : Path M x y) (q : Path M x y) => fun (storeI : I) => fun (storeJ : I) => (s x y p q @ storeI) @ storeJ) t\n"
+  "def storeIsSet : isSet Store := fun (x : Store) (y : Store) (p : Path Store x y) (q : Path Store x y) => fun (i : I) => fun (j : I) => storeSquash x y p q i j\n";
+
+static const char lookup_source[] =
+  "def lookupSel : Flag -> Val -> Maybe Val -> Maybe Val := fun (f : Flag) (v : Val) (r : Maybe Val) => elim (fun (z : Flag) => Maybe Val) (some v) r f\n"
+  "def lookupOver : (q : Key) -> (k : Key) -> (v : Val) -> (w : Val) -> (r : Maybe Val) -> Path (Maybe Val) (lookupSel (keyEq q k) v (lookupSel (keyEq q k) w r)) (lookupSel (keyEq q k) v r) :=\n"
+  "  fun (q : Key) (k : Key) (v : Val) (w : Val) (r : Maybe Val) => elim (fun (f : Flag) => Path (Maybe Val) (lookupSel f v (lookupSel f w r)) (lookupSel f v r)) refl refl (keyEq q k)\n"
+  "def lookupComm : (q : Key) -> (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (r : Maybe Val) -> Path Flag (keyEq k l) flagNo -> Path (Maybe Val) (lookupSel (keyEq q k) v (lookupSel (keyEq q l) w r)) (lookupSel (keyEq q l) w (lookupSel (keyEq q k) v r)) :=\n"
+  "  fun (q : Key) (k : Key) (l : Key) (v : Val) (w : Val) (r : Maybe Val) (ne : Path Flag (keyEq k l) flagNo) =>\n"
+  "    (elim (fun (f : Flag) => Path Flag (keyEq q k) f -> (g : Flag) -> Path Flag (keyEq q l) g -> Path (Maybe Val) (lookupSel f v (lookupSel g w r)) (lookupSel g w (lookupSel f v r)))\n"
+  "      (fun (pf : Path Flag (keyEq q k) flagYes) (g : Flag) => elim (fun (h : Flag) => Path Flag (keyEq q l) h -> Path (Maybe Val) (lookupSel flagYes v (lookupSel h w r)) (lookupSel h w (lookupSel flagYes v r)))\n"
+  "        (fun (pg : Path Flag (keyEq q l) flagYes) => fun (i : I) => elim (fun (z : Flag) => Maybe Val) (some w) (some v) (trans Flag flagNo (keyEq k l) flagYes (fun (j : I) => ne @ (~j)) (trans Flag (keyEq k l) (keyEq q q) flagYes (fun (j : I) => keyEq (keyEqSound q k pf @ (~j)) (keyEqSound q l pg @ (~j))) (keyEqRefl q)) @ i))\n"
+  "        (fun (pg : Path Flag (keyEq q l) flagNo) => refl) g)\n"
+  "      (fun (pf : Path Flag (keyEq q k) flagNo) (g : Flag) => elim (fun (h : Flag) => Path Flag (keyEq q l) h -> Path (Maybe Val) (lookupSel flagNo v (lookupSel h w r)) (lookupSel h w (lookupSel flagNo v r)))\n"
+  "        (fun (pg : Path Flag (keyEq q l) flagYes) => refl)\n"
+  "        (fun (pg : Path Flag (keyEq q l) flagNo) => refl) g)\n"
+  "      (keyEq q k)) (fun (i : I) => keyEq q k) (keyEq q l) (fun (i : I) => keyEq q l)\n"
+  "def lookup : Store -> Key -> Maybe Val :=\n"
+  "  fun (t : Store) (q : Key) => storeFold (Maybe Val) (maybeIsSet Val valIsSet) none\n"
+  "    (fun (k : Key) (v : Val) (r : Maybe Val) => lookupSel (keyEq q k) v r)\n"
+  "    (fun (k : Key) (v : Val) (w : Val) (r : Maybe Val) => lookupOver q k v w r)\n"
+  "    (fun (k : Key) (l : Key) (v : Val) (w : Val) (r : Maybe Val) (ne : Path Flag (keyEq k l) flagNo) => lookupComm q k l v w r ne) t\n";
+
+static const char state_source[] =
+  "def stateSel : Flag -> Val -> Val -> Val := fun (f : Flag) (v : Val) (r : Val) => flagIf f v r\n"
+  "def stateOver : (q : Key) -> (k : Key) -> (v : Val) -> (w : Val) -> (r : Val) -> Path Val (stateSel (keyEq q k) v (stateSel (keyEq q k) w r)) (stateSel (keyEq q k) v r) :=\n"
+  "  fun (q : Key) (k : Key) (v : Val) (w : Val) (r : Val) => elim (fun (f : Flag) => Path Val (stateSel f v (stateSel f w r)) (stateSel f v r)) refl refl (keyEq q k)\n"
+  "def stateComm : (q : Key) -> (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (r : Val) -> Path Flag (keyEq k l) flagNo -> Path Val (stateSel (keyEq q k) v (stateSel (keyEq q l) w r)) (stateSel (keyEq q l) w (stateSel (keyEq q k) v r)) :=\n"
+  "  fun (q : Key) (k : Key) (l : Key) (v : Val) (w : Val) (r : Val) (ne : Path Flag (keyEq k l) flagNo) =>\n"
+  "    (elim (fun (f : Flag) => Path Flag (keyEq q k) f -> (g : Flag) -> Path Flag (keyEq q l) g -> Path Val (stateSel f v (stateSel g w r)) (stateSel g w (stateSel f v r)))\n"
+  "      (fun (pf : Path Flag (keyEq q k) flagYes) (g : Flag) => elim (fun (h : Flag) => Path Flag (keyEq q l) h -> Path Val (stateSel flagYes v (stateSel h w r)) (stateSel h w (stateSel flagYes v r)))\n"
+  "        (fun (pg : Path Flag (keyEq q l) flagYes) => fun (i : I) => elim (fun (z : Flag) => Val) w v (trans Flag flagNo (keyEq k l) flagYes (fun (j : I) => ne @ (~j)) (trans Flag (keyEq k l) (keyEq q q) flagYes (fun (j : I) => keyEq (keyEqSound q k pf @ (~j)) (keyEqSound q l pg @ (~j))) (keyEqRefl q)) @ i))\n"
+  "        (fun (pg : Path Flag (keyEq q l) flagNo) => refl) g)\n"
+  "      (fun (pf : Path Flag (keyEq q k) flagNo) (g : Flag) => elim (fun (h : Flag) => Path Flag (keyEq q l) h -> Path Val (stateSel flagNo v (stateSel h w r)) (stateSel h w (stateSel flagNo v r)))\n"
+  "        (fun (pg : Path Flag (keyEq q l) flagYes) => refl)\n"
+  "        (fun (pg : Path Flag (keyEq q l) flagNo) => refl) g)\n"
+  "      (keyEq q k)) (fun (i : I) => keyEq q k) (keyEq q l) (fun (i : I) => keyEq q l)\n"
+  "def storeState : Store -> Key -> Val :=\n"
+  "  fun (t : Store) (q : Key) => storeFold Val valIsSet valZero\n"
+  "    (fun (k : Key) (v : Val) (r : Val) => stateSel (keyEq q k) v r)\n"
+  "    (fun (k : Key) (v : Val) (w : Val) (r : Val) => stateOver q k v w r)\n"
+  "    (fun (k : Key) (l : Key) (v : Val) (w : Val) (r : Val) (ne : Path Flag (keyEq k l) flagNo) => stateComm q k l v w r ne) t\n";
+
+/* The canon set witness (quotient-lang S8 u4c). eqIsSet makes isSet A
+   from a decidable eq on A and its sound and refl lemmas (the Hedberg
+   form of stableIsSet). eqNormAt sends a path to the sound path when the
+   eq is flagYes and keeps the path when the eq is flagNo. In the flagNo
+   case the path gives a path from flagNo to flagYes, thus the constancy
+   is setAbsurd. keyIsSet is eqIsSet at keyEq. canonIsSet is eqIsSet at
+   List (Prod Key Val) with listEq over prodEq of keyEq and the eq of Val
+   (natEq or sizeEq by the form of Val). The front end puts the block
+   after the last of keyEqRefl and valIsSet; keyEqRefl stays the last def
+   of the key-eq block. With no valIsSet, it adds nothing. */
+static const char *const CANON_SET_AFTER[] = {"keyEqRefl", "valIsSet"};
+
+#define CANON_SET_HEAD \
+  "def eqNormAt : (A : Type 0) -> (eqA : A -> A -> Flag) -> ((a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> (a : A) -> (x : A) -> Path A a x -> (f : Flag) -> Path Flag (eqA a x) f -> Path A a x :=\n" \
+  "  fun (A : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (a : A) (x : A) (p : Path A a x) (f : Flag) =>\n" \
+  "    elim (fun (g : Flag) => Path Flag (eqA a x) g -> Path A a x) (fun (e : Path Flag (eqA a x) flagYes) => sA a x e) (fun (e : Path Flag (eqA a x) flagNo) => p) f\n" \
+  "def eqNorm : (A : Type 0) -> (eqA : A -> A -> Flag) -> ((a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> (a : A) -> (x : A) -> Path A a x -> Path A a x :=\n" \
+  "  fun (A : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (a : A) (x : A) (p : Path A a x) => eqNormAt A eqA sA a x p (eqA a x) (fun (i : I) => eqA a x)\n" \
+  "def eqNormConst : (A : Type 0) -> (eqA : A -> A -> Flag) -> (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> ((a : A) -> Path Flag (eqA a a) flagYes) -> (a : A) -> (x : A) -> (p : Path A a x) -> (q : Path A a x) -> Path (Path A a x) (eqNorm A eqA sA a x p) (eqNorm A eqA sA a x q) :=\n" \
+  "  fun (A : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (rA : (a : A) -> Path Flag (eqA a a) flagYes) (a : A) (x : A) (p : Path A a x) (q : Path A a x) =>\n" \
+  "    (elim (fun (g : Flag) => (e : Path Flag (eqA a x) g) -> Path (Path A a x) (eqNormAt A eqA sA a x p g e) (eqNormAt A eqA sA a x q g e))\n" \
+  "      (fun (e : Path Flag (eqA a x) flagYes) => fun (j : I) => sA a x e)\n" \
+  "      (fun (e : Path Flag (eqA a x) flagNo) => setAbsurd (Path A a x) p q (trans Flag flagNo (eqA a x) flagYes (fun (j : I) => e @ (~j)) (trans Flag (eqA a x) (eqA a a) flagYes (fun (j : I) => eqA a (p @ (~j))) (rA a))))\n" \
+  "      (eqA a x)) (fun (i : I) => eqA a x)\n" \
+  "def eqIsSet : (A : Type 0) -> (eqA : A -> A -> Flag) -> ((a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> ((a : A) -> Path Flag (eqA a a) flagYes) -> isSet A :=\n" \
+  "  fun (A : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (rA : (a : A) -> Path Flag (eqA a a) flagYes) => stableIsSet A (eqNorm A eqA sA) (eqNormConst A eqA sA rA)\n" \
+  "def keyIsSet : isSet Key := eqIsSet Key keyEq keyEqSound keyEqRefl\n"
+
+#define CANON_SET_TAIL \
+  "def canonIsSet : isSet (List (Prod Key Val)) := eqIsSet (List (Prod Key Val)) (listEq (Prod Key Val) canonEntryEq) (listEqSound (Prod Key Val) canonEntryEq canonEntrySound) (listEqRefl (Prod Key Val) canonEntryEq canonEntryRefl)\n" \
+  "def canonStepAt : Flag -> Flag -> Key -> Val -> Prod Key Val -> List (Prod Key Val) -> List (Prod Key Val) -> List (Prod Key Val) :=\n" \
+  "  fun (e : Flag) (le : Flag) (k : Key) (v : Val) (h : Prod Key Val) (t : List (Prod Key Val)) (r : List (Prod Key Val)) => flagIf e (cons (pair k v) t) (flagIf le (cons (pair k v) (cons h t)) (cons h r))\n" \
+  "def canonStep : Key -> Val -> Prod Key Val -> List (Prod Key Val) -> List (Prod Key Val) -> List (Prod Key Val) :=\n" \
+  "  fun (k : Key) (v : Val) (h : Prod Key Val) (t : List (Prod Key Val)) (r : List (Prod Key Val)) => canonStepAt (keyEq k (first h)) (keyLe k (first h)) k v h t r\n" \
+  "def canonPara : Key -> Val -> List (Prod Key Val) -> Prod (List (Prod Key Val)) (List (Prod Key Val)) :=\n" \
+  "  fun (k : Key) (v : Val) (m : List (Prod Key Val)) => fold (fun (h : Prod Key Val) (acc : Prod (List (Prod Key Val)) (List (Prod Key Val))) => pair (cons h (first acc)) (canonStep k v h (first acc) (second acc))) (pair nil (cons (pair k v) nil)) m\n" \
+  "def canonInsert : Key -> Val -> List (Prod Key Val) -> List (Prod Key Val) :=\n" \
+  "  fun (k : Key) (v : Val) (m : List (Prod Key Val)) => second (canonPara k v m)\n" \
+  "def insFirst : (k : Key) -> (v : Val) -> (m : List (Prod Key Val)) -> Path (List (Prod Key Val)) (first (canonPara k v m)) m :=\n" \
+  "  fun (k : Key) (v : Val) (m : List (Prod Key Val)) => elim (fun (z : List (Prod Key Val)) => Path (List (Prod Key Val)) (first (canonPara k v z)) z) refl (fun (h : Prod Key Val) (t : List (Prod Key Val)) (ih : Path (List (Prod Key Val)) (first (canonPara k v t)) t) => fun (i : I) => cons h (ih @ i)) m\n" \
+  "def insCons : (k : Key) -> (v : Val) -> (h : Prod Key Val) -> (t : List (Prod Key Val)) -> Path (List (Prod Key Val)) (canonInsert k v (cons h t)) (canonStep k v h t (canonInsert k v t)) :=\n" \
+  "  fun (k : Key) (v : Val) (h : Prod Key Val) (t : List (Prod Key Val)) => fun (i : I) => canonStep k v h (insFirst k v t @ i) (canonInsert k v t)\n" \
+  "def insHit : (k : Key) -> (v : Val) -> (w : Val) -> (t : List (Prod Key Val)) -> Path (List (Prod Key Val)) (canonInsert k v (cons (pair k w) t)) (cons (pair k v) t) :=\n" \
+  "  fun (k : Key) (v : Val) (w : Val) (t : List (Prod Key Val)) => trans (List (Prod Key Val)) (canonInsert k v (cons (pair k w) t)) (canonStep k v (pair k w) t (canonInsert k v t)) (cons (pair k v) t) (insCons k v (pair k w) t) (fun (i : I) => canonStepAt (keyEqRefl k @ i) (keyLe k k) k v (pair k w) t (canonInsert k v t))\n" \
+  "def insOverAt : (k : Key) -> (v : Val) -> (w : Val) -> (h : Prod Key Val) -> (t : List (Prod Key Val)) -> Path (List (Prod Key Val)) (canonInsert k v (canonInsert k w t)) (canonInsert k v t) -> (e : Flag) -> Path Flag (keyEq k (first h)) e -> (le : Flag) -> Path Flag (keyLe k (first h)) le -> Path (List (Prod Key Val)) (canonInsert k v (canonStepAt e le k w h t (canonInsert k w t))) (canonStepAt e le k v h t (canonInsert k v t)) :=\n" \
+  "  fun (k : Key) (v : Val) (w : Val) (h : Prod Key Val) (t : List (Prod Key Val)) (ih : Path (List (Prod Key Val)) (canonInsert k v (canonInsert k w t)) (canonInsert k v t)) (e : Flag) =>\n" \
+  "    elim (fun (f : Flag) => Path Flag (keyEq k (first h)) f -> (le : Flag) -> Path Flag (keyLe k (first h)) le -> Path (List (Prod Key Val)) (canonInsert k v (canonStepAt f le k w h t (canonInsert k w t))) (canonStepAt f le k v h t (canonInsert k v t)))\n" \
+  "      (fun (pe : Path Flag (keyEq k (first h)) flagYes) (le : Flag) (pl : Path Flag (keyLe k (first h)) le) => insHit k v w t)\n" \
+  "      (fun (pe : Path Flag (keyEq k (first h)) flagNo) (le : Flag) =>\n" \
+  "        elim (fun (g : Flag) => Path Flag (keyLe k (first h)) g -> Path (List (Prod Key Val)) (canonInsert k v (canonStepAt flagNo g k w h t (canonInsert k w t))) (canonStepAt flagNo g k v h t (canonInsert k v t)))\n" \
+  "          (fun (pl : Path Flag (keyLe k (first h)) flagYes) => insHit k v w (cons h t))\n" \
+  "          (fun (pl : Path Flag (keyLe k (first h)) flagNo) => trans (List (Prod Key Val)) (canonInsert k v (cons h (canonInsert k w t))) (canonStep k v h (canonInsert k w t) (canonInsert k v (canonInsert k w t))) (cons h (canonInsert k v t)) (insCons k v h (canonInsert k w t)) (trans (List (Prod Key Val)) (canonStep k v h (canonInsert k w t) (canonInsert k v (canonInsert k w t))) (cons h (canonInsert k v (canonInsert k w t))) (cons h (canonInsert k v t)) (fun (i : I) => canonStepAt (pe @ i) (pl @ i) k v h (canonInsert k w t) (canonInsert k v (canonInsert k w t))) (fun (i : I) => cons h (ih @ i))))\n" \
+  "          le)\n" \
+  "      e\n" \
+  "def insOver : (k : Key) -> (v : Val) -> (w : Val) -> (m : List (Prod Key Val)) -> Path (List (Prod Key Val)) (canonInsert k v (canonInsert k w m)) (canonInsert k v m) :=\n" \
+  "  fun (k : Key) (v : Val) (w : Val) (m : List (Prod Key Val)) => elim (fun (z : List (Prod Key Val)) => Path (List (Prod Key Val)) (canonInsert k v (canonInsert k w z)) (canonInsert k v z))\n" \
+  "    (fun (i : I) => canonStepAt (keyEqRefl k @ i) (keyLe k k) k v (pair k w) nil (cons (pair k v) nil))\n" \
+  "    (fun (h : Prod Key Val) (t : List (Prod Key Val)) (ih : Path (List (Prod Key Val)) (canonInsert k v (canonInsert k w t)) (canonInsert k v t)) =>\n" \
+  "      trans (List (Prod Key Val)) (canonInsert k v (canonInsert k w (cons h t))) (canonInsert k v (canonStep k w h t (canonInsert k w t))) (canonInsert k v (cons h t))\n" \
+  "        (fun (i : I) => canonInsert k v (insCons k w h t @ i))\n" \
+  "        (trans (List (Prod Key Val)) (canonInsert k v (canonStep k w h t (canonInsert k w t))) (canonStep k v h t (canonInsert k v t)) (canonInsert k v (cons h t))\n" \
+  "          (insOverAt k v w h t ih (keyEq k (first h)) (fun (i : I) => keyEq k (first h)) (keyLe k (first h)) (fun (i : I) => keyLe k (first h)))\n" \
+  "          (fun (i : I) => insCons k v h t @ (~i))))\n" \
+  "    m\n" \
+  "def keyEqSymNo : (k : Key) -> (l : Key) -> Path Flag (keyEq k l) flagNo -> Path Flag (keyEq l k) flagNo :=\n" \
+  "  fun (k : Key) (l : Key) (ne : Path Flag (keyEq k l) flagNo) => elim (fun (f : Flag) => Path Flag (keyEq l k) f -> Path Flag f flagNo) (fun (p : Path Flag (keyEq l k) flagYes) => flagAbsurd Flag flagYes flagNo (trans Flag flagNo (keyEq k l) flagYes (fun (i : I) => ne @ (~i)) (trans Flag (keyEq k l) (keyEq k k) flagYes (fun (i : I) => keyEq k (keyEqSound l k p @ i)) (keyEqRefl k)))) (fun (p : Path Flag (keyEq l k) flagNo) => refl) (keyEq l k) (fun (i : I) => keyEq l k)\n" \
+  "def keyLeAnti : (k : Key) -> (l : Key) -> Path Flag (keyEq k l) flagNo -> Path Flag (keyLe k l) flagYes -> Path Flag (keyLe l k) flagNo :=\n" \
+  "  fun (k : Key) (l : Key) (ne : Path Flag (keyEq k l) flagNo) (p : Path Flag (keyLe k l) flagYes) => trans Flag (keyLe l k) (flagIf (keyLe k l) flagNo flagYes) flagNo (keyLeFlip k l ne) (fun (i : I) => flagIf (p @ i) flagNo flagYes)\n" \
+  "def keyLeTot : (k : Key) -> (l : Key) -> Path Flag (keyEq k l) flagNo -> Path Flag (keyLe k l) flagNo -> Path Flag (keyLe l k) flagYes :=\n" \
+  "  fun (k : Key) (l : Key) (ne : Path Flag (keyEq k l) flagNo) (p : Path Flag (keyLe k l) flagNo) => trans Flag (keyLe l k) (flagIf (keyLe k l) flagNo flagYes) flagYes (keyLeFlip k l ne) (fun (i : I) => flagIf (p @ i) flagNo flagYes)\n" \
+  "def insCommNil : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> Path Flag (keyEq k l) flagNo -> Path (List (Prod Key Val)) (canonInsert k v (canonInsert l w nil)) (canonInsert l w (canonInsert k v nil)) :=\n" \
+  "  fun (k : Key) (l : Key) (v : Val) (w : Val) (ne : Path Flag (keyEq k l) flagNo) =>\n" \
+  "    trans (List (Prod Key Val)) (canonStepAt (keyEq k l) (keyLe k l) k v (pair l w) nil (cons (pair k v) nil)) (canonStepAt flagNo (keyLe k l) k v (pair l w) nil (cons (pair k v) nil)) (canonStepAt (keyEq l k) (keyLe l k) l w (pair k v) nil (cons (pair l w) nil))\n" \
+  "      (fun (i : I) => canonStepAt (ne @ i) (keyLe k l) k v (pair l w) nil (cons (pair k v) nil))\n" \
+  "      (trans (List (Prod Key Val)) (canonStepAt flagNo (keyLe k l) k v (pair l w) nil (cons (pair k v) nil)) (canonStepAt flagNo (flagIf (keyLe k l) flagNo flagYes) l w (pair k v) nil (cons (pair l w) nil)) (canonStepAt (keyEq l k) (keyLe l k) l w (pair k v) nil (cons (pair l w) nil))\n" \
+  "        (elim (fun (g : Flag) => Path (List (Prod Key Val)) (canonStepAt flagNo g k v (pair l w) nil (cons (pair k v) nil)) (canonStepAt flagNo (flagIf g flagNo flagYes) l w (pair k v) nil (cons (pair l w) nil))) refl refl (keyLe k l))\n" \
+  "        (fun (i : I) => canonStepAt (keyEqSymNo k l ne @ (~i)) (keyLeFlip k l ne @ (~i)) l w (pair k v) nil (cons (pair l w) nil)))\n" \
+  "def keyLeNotTrans : (a : Key) -> (b : Key) -> (c : Key) -> Path Flag (keyLe a c) flagNo -> Path Flag (keyLe b c) flagYes -> Path Flag (keyLe a b) flagNo :=\n" \
+  "  fun (a : Key) (b : Key) (c : Key) (pAC : Path Flag (keyLe a c) flagNo) (pBC : Path Flag (keyLe b c) flagYes) => elim (fun (f : Flag) => Path Flag (keyLe a b) f -> Path Flag f flagNo) (fun (p : Path Flag (keyLe a b) flagYes) => flagAbsurd Flag flagYes flagNo (trans Flag flagNo (keyLe a c) flagYes (fun (i : I) => pAC @ (~i)) (keyLeTrans a b c p pBC))) (fun (p : Path Flag (keyLe a b) flagNo) => refl) (keyLe a b) (fun (i : I) => keyLe a b)\n" \
+  "def insAt : (k : Key) -> (v : Val) -> (h : Prod Key Val) -> (t : List (Prod Key Val)) -> (e : Flag) -> Path Flag (keyEq k (first h)) e -> (le : Flag) -> Path Flag (keyLe k (first h)) le -> Path (List (Prod Key Val)) (canonInsert k v (cons h t)) (canonStepAt e le k v h t (canonInsert k v t)) :=\n" \
+  "  fun (k : Key) (v : Val) (h : Prod Key Val) (t : List (Prod Key Val)) (e : Flag) (pe : Path Flag (keyEq k (first h)) e) (le : Flag) (pl : Path Flag (keyLe k (first h)) le) => trans (List (Prod Key Val)) (canonInsert k v (cons h t)) (canonStep k v h t (canonInsert k v t)) (canonStepAt e le k v h t (canonInsert k v t)) (insCons k v h t) (fun (i : I) => canonStepAt (pe @ i) (pl @ i) k v h t (canonInsert k v t))\n" \
+  "def insCommEq : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (h : Prod Key Val) -> (t : List (Prod Key Val)) -> Path Flag (keyEq k l) flagNo -> Path Flag (keyEq l (first h)) flagYes -> (lL : Flag) -> Path Flag (keyLe l (first h)) lL -> (eK : Flag) -> Path Flag (keyEq k (first h)) eK -> (lK : Flag) -> Path Flag (keyLe k (first h)) lK -> Path (List (Prod Key Val)) (canonInsert k v (cons (pair l w) t)) (canonInsert l w (canonStepAt eK lK k v h t (canonInsert k v t))) :=\n" \
+  "  fun (k : Key) (l : Key) (v : Val) (w : Val) (h : Prod Key Val) (t : List (Prod Key Val)) (ne : Path Flag (keyEq k l) flagNo) (pEL : Path Flag (keyEq l (first h)) flagYes) (lL : Flag) (pLL : Path Flag (keyLe l (first h)) lL) (eK : Flag) =>\n" \
+  "    elim (fun (e : Flag) => Path Flag (keyEq k (first h)) e -> (lK : Flag) -> Path Flag (keyLe k (first h)) lK -> Path (List (Prod Key Val)) (canonInsert k v (cons (pair l w) t)) (canonInsert l w (canonStepAt e lK k v h t (canonInsert k v t))))\n" \
+  "      (fun (pE : Path Flag (keyEq k (first h)) flagYes) (g : Flag) (pG : Path Flag (keyLe k (first h)) g) => flagAbsurd (List (Prod Key Val)) (canonInsert k v (cons (pair l w) t)) (canonInsert l w (canonStepAt flagYes g k v h t (canonInsert k v t))) (trans Flag flagNo (keyEq k l) flagYes (fun (i : I) => ne @ (~i)) (trans Flag (keyEq k l) (keyEq k (first h)) flagYes (fun (i : I) => keyEq k (keyEqSound l (first h) pEL @ i)) pE)))\n" \
+  "      (fun (pE : Path Flag (keyEq k (first h)) flagNo) (g : Flag) => elim (fun (g2 : Flag) => Path Flag (keyLe k (first h)) g2 -> Path (List (Prod Key Val)) (canonInsert k v (cons (pair l w) t)) (canonInsert l w (canonStepAt flagNo g2 k v h t (canonInsert k v t))))\n" \
+  "        (fun (pG : Path Flag (keyLe k (first h)) flagYes) =>\n" \
+  "          trans (List (Prod Key Val)) (canonInsert k v (cons (pair l w) t)) (cons (pair k v) (cons (pair l w) t)) (canonInsert l w (cons (pair k v) (cons h t)))\n" \
+  "            (insAt k v (pair l w) t flagNo ne flagYes (trans Flag (keyLe k l) (keyLe k (first h)) flagYes (fun (i : I) => keyLe k (keyEqSound l (first h) pEL @ i)) pG))\n" \
+  "            (fun (j : I) => (trans (List (Prod Key Val)) (canonInsert l w (cons (pair k v) (cons h t))) (cons (pair k v) (canonInsert l w (cons h t))) (cons (pair k v) (cons (pair l w) t)) (insAt l w (pair k v) (cons h t) flagNo (keyEqSymNo k l ne) flagNo (keyLeAnti k l ne (trans Flag (keyLe k l) (keyLe k (first h)) flagYes (fun (i : I) => keyLe k (keyEqSound l (first h) pEL @ i)) pG))) (fun (i : I) => cons (pair k v) (insAt l w h t flagYes pEL lL pLL @ i))) @ (~j)))\n" \
+  "        (fun (pG : Path Flag (keyLe k (first h)) flagNo) =>\n" \
+  "          trans (List (Prod Key Val)) (canonInsert k v (cons (pair l w) t)) (cons (pair l w) (canonInsert k v t)) (canonInsert l w (cons h (canonInsert k v t)))\n" \
+  "            (insAt k v (pair l w) t flagNo ne flagNo (trans Flag (keyLe k l) (keyLe k (first h)) flagNo (fun (i : I) => keyLe k (keyEqSound l (first h) pEL @ i)) pG))\n" \
+  "            (fun (j : I) => insAt l w h (canonInsert k v t) flagYes pEL lL pLL @ (~j)))\n" \
+  "        g)\n" \
+  "      eK\n" \
+  "def insCommLt : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (h : Prod Key Val) -> (t : List (Prod Key Val)) -> Path Flag (keyEq k l) flagNo -> Path Flag (keyEq l (first h)) flagNo -> Path Flag (keyLe l (first h)) flagYes -> (eK : Flag) -> Path Flag (keyEq k (first h)) eK -> (lK : Flag) -> Path Flag (keyLe k (first h)) lK -> Path (List (Prod Key Val)) (canonInsert k v (cons (pair l w) (cons h t))) (canonInsert l w (canonStepAt eK lK k v h t (canonInsert k v t))) :=\n" \
+  "  fun (k : Key) (l : Key) (v : Val) (w : Val) (h : Prod Key Val) (t : List (Prod Key Val)) (ne : Path Flag (keyEq k l) flagNo) (pEL : Path Flag (keyEq l (first h)) flagNo) (pLL : Path Flag (keyLe l (first h)) flagYes) (eK : Flag) (pEK : Path Flag (keyEq k (first h)) eK) (lK : Flag) (pLK : Path Flag (keyLe k (first h)) lK) =>\n" \
+  "    elim (fun (c : Flag) => Path Flag (keyLe k l) c -> Path (List (Prod Key Val)) (canonInsert k v (cons (pair l w) (cons h t))) (canonInsert l w (canonStepAt eK lK k v h t (canonInsert k v t))))\n" \
+  "      (fun (pC : Path Flag (keyLe k l) flagYes) =>\n" \
+  "        trans (List (Prod Key Val)) (canonInsert k v (cons (pair l w) (cons h t))) (cons (pair k v) (cons (pair l w) (cons h t))) (canonInsert l w (canonStepAt eK lK k v h t (canonInsert k v t)))\n" \
+  "          (insAt k v (pair l w) (cons h t) flagNo ne flagYes pC)\n" \
+  "          (elim (fun (e : Flag) => Path Flag (keyEq k (first h)) e -> (g : Flag) -> Path Flag (keyLe k (first h)) g -> Path (List (Prod Key Val)) (cons (pair k v) (cons (pair l w) (cons h t))) (canonInsert l w (canonStepAt e g k v h t (canonInsert k v t))))\n" \
+  "            (fun (pE : Path Flag (keyEq k (first h)) flagYes) (g : Flag) (pG : Path Flag (keyLe k (first h)) g) => flagAbsurd (List (Prod Key Val)) (cons (pair k v) (cons (pair l w) (cons h t))) (canonInsert l w (canonStepAt flagYes g k v h t (canonInsert k v t))) (trans Flag flagNo (keyLe l k) flagYes (fun (i : I) => keyLeAnti k l ne pC @ (~i)) (trans Flag (keyLe l k) (keyLe l (first h)) flagYes (fun (i : I) => keyLe l (keyEqSound k (first h) pE @ i)) pLL)))\n" \
+  "            (fun (pE : Path Flag (keyEq k (first h)) flagNo) (g : Flag) (pG : Path Flag (keyLe k (first h)) g) =>\n" \
+  "              trans (List (Prod Key Val)) (cons (pair k v) (cons (pair l w) (cons h t))) (cons (pair k v) (canonInsert l w (cons h t))) (canonInsert l w (canonStepAt flagNo g k v h t (canonInsert k v t)))\n" \
+  "                (fun (j : I) => cons (pair k v) (insAt l w h t flagNo pEL flagYes pLL @ (~j)))\n" \
+  "                (trans (List (Prod Key Val)) (cons (pair k v) (canonInsert l w (cons h t))) (canonInsert l w (cons (pair k v) (cons h t))) (canonInsert l w (canonStepAt flagNo g k v h t (canonInsert k v t)))\n" \
+  "                  (fun (j : I) => insAt l w (pair k v) (cons h t) flagNo (keyEqSymNo k l ne) flagNo (keyLeAnti k l ne pC) @ (~j))\n" \
+  "                  (fun (j : I) => canonInsert l w (canonStepAt flagNo (trans Flag g (keyLe k (first h)) flagYes (fun (i : I) => pG @ (~i)) (keyLeTrans k l (first h) pC pLL) @ (~j)) k v h t (canonInsert k v t)))))\n" \
+  "            eK pEK lK pLK))\n" \
+  "      (fun (pC : Path Flag (keyLe k l) flagNo) =>\n" \
+  "        trans (List (Prod Key Val)) (canonInsert k v (cons (pair l w) (cons h t))) (cons (pair l w) (canonInsert k v (cons h t))) (canonInsert l w (canonStepAt eK lK k v h t (canonInsert k v t)))\n" \
+  "          (insAt k v (pair l w) (cons h t) flagNo ne flagNo pC)\n" \
+  "          (trans (List (Prod Key Val)) (cons (pair l w) (canonInsert k v (cons h t))) (cons (pair l w) (canonStepAt eK lK k v h t (canonInsert k v t))) (canonInsert l w (canonStepAt eK lK k v h t (canonInsert k v t)))\n" \
+  "            (fun (j : I) => cons (pair l w) (insAt k v h t eK pEK lK pLK @ j))\n" \
+  "            (elim (fun (e : Flag) => (g : Flag) -> Path (List (Prod Key Val)) (cons (pair l w) (canonStepAt e g k v h t (canonInsert k v t))) (canonInsert l w (canonStepAt e g k v h t (canonInsert k v t))))\n" \
+  "              (fun (g : Flag) => fun (j : I) => insAt l w (pair k v) t flagNo (keyEqSymNo k l ne) flagYes (keyLeTot k l ne pC) @ (~j))\n" \
+  "              (fun (g : Flag) => elim (fun (g2 : Flag) => Path (List (Prod Key Val)) (cons (pair l w) (canonStepAt flagNo g2 k v h t (canonInsert k v t))) (canonInsert l w (canonStepAt flagNo g2 k v h t (canonInsert k v t))))\n" \
+  "                (fun (j : I) => insAt l w (pair k v) (cons h t) flagNo (keyEqSymNo k l ne) flagYes (keyLeTot k l ne pC) @ (~j))\n" \
+  "                (fun (j : I) => insAt l w h (canonInsert k v t) flagNo pEL flagYes pLL @ (~j))\n" \
+  "                g)\n" \
+  "              eK lK)))\n" \
+  "      (keyLe k l) (fun (i : I) => keyLe k l)\n" \
+  "def insCommGt : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (h : Prod Key Val) -> (t : List (Prod Key Val)) -> Path Flag (keyEq k l) flagNo -> Path (List (Prod Key Val)) (canonInsert k v (canonInsert l w t)) (canonInsert l w (canonInsert k v t)) -> Path Flag (keyEq l (first h)) flagNo -> Path Flag (keyLe l (first h)) flagNo -> (eK : Flag) -> Path Flag (keyEq k (first h)) eK -> (lK : Flag) -> Path Flag (keyLe k (first h)) lK -> Path (List (Prod Key Val)) (canonInsert k v (cons h (canonInsert l w t))) (canonInsert l w (canonStepAt eK lK k v h t (canonInsert k v t))) :=\n" \
+  "  fun (k : Key) (l : Key) (v : Val) (w : Val) (h : Prod Key Val) (t : List (Prod Key Val)) (ne : Path Flag (keyEq k l) flagNo) (ih : Path (List (Prod Key Val)) (canonInsert k v (canonInsert l w t)) (canonInsert l w (canonInsert k v t))) (pEL : Path Flag (keyEq l (first h)) flagNo) (pLL : Path Flag (keyLe l (first h)) flagNo) (eK : Flag) (pEK : Path Flag (keyEq k (first h)) eK) (lK : Flag) (pLK : Path Flag (keyLe k (first h)) lK) =>\n" \
+  "    trans (List (Prod Key Val)) (canonInsert k v (cons h (canonInsert l w t))) (canonStepAt eK lK k v h (canonInsert l w t) (canonInsert k v (canonInsert l w t))) (canonInsert l w (canonStepAt eK lK k v h t (canonInsert k v t)))\n" \
+  "      (insAt k v h (canonInsert l w t) eK pEK lK pLK)\n" \
+  "      (elim (fun (e : Flag) => Path Flag (keyEq k (first h)) e -> (g : Flag) -> Path Flag (keyLe k (first h)) g -> Path (List (Prod Key Val)) (canonStepAt e g k v h (canonInsert l w t) (canonInsert k v (canonInsert l w t))) (canonInsert l w (canonStepAt e g k v h t (canonInsert k v t))))\n" \
+  "        (fun (pE : Path Flag (keyEq k (first h)) flagYes) (g : Flag) (pG : Path Flag (keyLe k (first h)) g) => fun (j : I) => insAt l w (pair k v) t flagNo (keyEqSymNo k l ne) flagNo (trans Flag (keyLe l k) (keyLe l (first h)) flagNo (fun (i : I) => keyLe l (keyEqSound k (first h) pE @ i)) pLL) @ (~j))\n" \
+  "        (fun (pE : Path Flag (keyEq k (first h)) flagNo) (g : Flag) => elim (fun (g2 : Flag) => Path Flag (keyLe k (first h)) g2 -> Path (List (Prod Key Val)) (canonStepAt flagNo g2 k v h (canonInsert l w t) (canonInsert k v (canonInsert l w t))) (canonInsert l w (canonStepAt flagNo g2 k v h t (canonInsert k v t))))\n" \
+  "          (fun (pG : Path Flag (keyLe k (first h)) flagYes) => fun (j : I) => (trans (List (Prod Key Val)) (canonInsert l w (cons (pair k v) (cons h t))) (cons (pair k v) (canonInsert l w (cons h t))) (cons (pair k v) (cons h (canonInsert l w t))) (insAt l w (pair k v) (cons h t) flagNo (keyEqSymNo k l ne) flagNo (keyLeNotTrans l k (first h) pLL pG)) (fun (i : I) => cons (pair k v) (insAt l w h t flagNo pEL flagNo pLL @ i))) @ (~j))\n" \
+  "          (fun (pG : Path Flag (keyLe k (first h)) flagNo) => trans (List (Prod Key Val)) (cons h (canonInsert k v (canonInsert l w t))) (cons h (canonInsert l w (canonInsert k v t))) (canonInsert l w (cons h (canonInsert k v t))) (fun (j : I) => cons h (ih @ j)) (fun (j : I) => insAt l w h (canonInsert k v t) flagNo pEL flagNo pLL @ (~j)))\n" \
+  "          g)\n" \
+  "        eK pEK lK pLK)\n" \
+  "def insCommAt : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (h : Prod Key Val) -> (t : List (Prod Key Val)) -> Path Flag (keyEq k l) flagNo -> Path (List (Prod Key Val)) (canonInsert k v (canonInsert l w t)) (canonInsert l w (canonInsert k v t)) -> (eL : Flag) -> Path Flag (keyEq l (first h)) eL -> (lL : Flag) -> Path Flag (keyLe l (first h)) lL -> (eK : Flag) -> Path Flag (keyEq k (first h)) eK -> (lK : Flag) -> Path Flag (keyLe k (first h)) lK -> Path (List (Prod Key Val)) (canonInsert k v (canonStepAt eL lL l w h t (canonInsert l w t))) (canonInsert l w (canonStepAt eK lK k v h t (canonInsert k v t))) :=\n" \
+  "  fun (k : Key) (l : Key) (v : Val) (w : Val) (h : Prod Key Val) (t : List (Prod Key Val)) (ne : Path Flag (keyEq k l) flagNo) (ih : Path (List (Prod Key Val)) (canonInsert k v (canonInsert l w t)) (canonInsert l w (canonInsert k v t))) (eL : Flag) =>\n" \
+  "    elim (fun (e : Flag) => Path Flag (keyEq l (first h)) e -> (lL : Flag) -> Path Flag (keyLe l (first h)) lL -> (eK : Flag) -> Path Flag (keyEq k (first h)) eK -> (lK : Flag) -> Path Flag (keyLe k (first h)) lK -> Path (List (Prod Key Val)) (canonInsert k v (canonStepAt e lL l w h t (canonInsert l w t))) (canonInsert l w (canonStepAt eK lK k v h t (canonInsert k v t))))\n" \
+  "      (fun (pEL : Path Flag (keyEq l (first h)) flagYes) (lL : Flag) (pLL : Path Flag (keyLe l (first h)) lL) => insCommEq k l v w h t ne pEL lL pLL)\n" \
+  "      (fun (pEL : Path Flag (keyEq l (first h)) flagNo) (lL : Flag) => elim (fun (g : Flag) => Path Flag (keyLe l (first h)) g -> (eK : Flag) -> Path Flag (keyEq k (first h)) eK -> (lK : Flag) -> Path Flag (keyLe k (first h)) lK -> Path (List (Prod Key Val)) (canonInsert k v (canonStepAt flagNo g l w h t (canonInsert l w t))) (canonInsert l w (canonStepAt eK lK k v h t (canonInsert k v t))))\n" \
+  "        (fun (pLL : Path Flag (keyLe l (first h)) flagYes) => insCommLt k l v w h t ne pEL pLL)\n" \
+  "        (fun (pLL : Path Flag (keyLe l (first h)) flagNo) => insCommGt k l v w h t ne ih pEL pLL)\n" \
+  "        lL)\n" \
+  "      eL\n" \
+  "def insComm : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (m : List (Prod Key Val)) -> Path Flag (keyEq k l) flagNo -> Path (List (Prod Key Val)) (canonInsert k v (canonInsert l w m)) (canonInsert l w (canonInsert k v m)) :=\n" \
+  "  fun (k : Key) (l : Key) (v : Val) (w : Val) (m : List (Prod Key Val)) (ne : Path Flag (keyEq k l) flagNo) => elim (fun (z : List (Prod Key Val)) => Path (List (Prod Key Val)) (canonInsert k v (canonInsert l w z)) (canonInsert l w (canonInsert k v z)))\n" \
+  "    (insCommNil k l v w ne)\n" \
+  "    (fun (h : Prod Key Val) (t : List (Prod Key Val)) (ih : Path (List (Prod Key Val)) (canonInsert k v (canonInsert l w t)) (canonInsert l w (canonInsert k v t))) =>\n" \
+  "      trans (List (Prod Key Val)) (canonInsert k v (canonInsert l w (cons h t))) (canonInsert k v (canonStep l w h t (canonInsert l w t))) (canonInsert l w (canonInsert k v (cons h t)))\n" \
+  "        (fun (i : I) => canonInsert k v (insCons l w h t @ i))\n" \
+  "        (trans (List (Prod Key Val)) (canonInsert k v (canonStep l w h t (canonInsert l w t))) (canonInsert l w (canonStep k v h t (canonInsert k v t))) (canonInsert l w (canonInsert k v (cons h t)))\n" \
+  "          (insCommAt k l v w h t ne ih (keyEq l (first h)) (fun (i : I) => keyEq l (first h)) (keyLe l (first h)) (fun (i : I) => keyLe l (first h)) (keyEq k (first h)) (fun (i : I) => keyEq k (first h)) (keyLe k (first h)) (fun (i : I) => keyLe k (first h)))\n" \
+  "          (fun (i : I) => canonInsert l w (insCons k v h t @ (~i)))))\n" \
+  "    m\n"
+
+static const char canon_set_nat_source[] =
+  CANON_SET_HEAD
+  "def canonEntryEq : Prod Key Val -> Prod Key Val -> Flag := prodEq Key Val keyEq natEq\n"
+  "def canonEntrySound : (a : Prod Key Val) -> (b : Prod Key Val) -> Path Flag (canonEntryEq a b) flagYes -> Path (Prod Key Val) a b := prodEqSound Key Val keyEq natEq keyEqSound natEqSound\n"
+  "def canonEntryRefl : (a : Prod Key Val) -> Path Flag (canonEntryEq a a) flagYes := prodEqRefl Key Val keyEq natEq keyEqRefl natEqRefl\n"
+  CANON_SET_TAIL;
+
+static const char canon_set_size_source[] =
+  CANON_SET_HEAD
+  "def canonEntryEq : Prod Key Val -> Prod Key Val -> Flag := prodEq Key Val keyEq sizeEq\n"
+  "def canonEntrySound : (a : Prod Key Val) -> (b : Prod Key Val) -> Path Flag (canonEntryEq a b) flagYes -> Path (Prod Key Val) a b := prodEqSound Key Val keyEq sizeEq keyEqSound sizeEqSound\n"
+  "def canonEntryRefl : (a : Prod Key Val) -> Path Flag (canonEntryEq a a) flagYes := prodEqRefl Key Val keyEq sizeEq keyEqRefl sizeEqRefl\n"
+  CANON_SET_TAIL;
+
+/* canon (quotient-lang S8 u4f4): the canonical list of a Store. It folds
+   the Store with canonInsert into List (Prod Key Val); insOver and insComm
+   are the two path arguments of storeFold. canon uses Store, storeFold
+   and the canon set block, thus the front end puts it after the last of
+   storeFold and insComm. With no storeFold or no insComm, it adds
+   nothing. */
+static const char *const CANON_AFTER[] = {"storeFold", "insComm"};
+
+static const char canon_source[] =
+  "def canon : Store -> List (Prod Key Val) := storeFold (List (Prod Key Val)) canonIsSet nil canonInsert insOver insComm\n";
+
+/* The u6a lemmas (quotient-lang S8 u6a, USER ruling Q-S8-8 (b)). canonGet q l
+   is the value of the first entry of l with the key q. canonLookup gives
+   canonGet q (canon m) = lookup m q. canonIsSorted gives that the keys of
+   canon m are strictly sorted, thus distinct. canonEntry gives lookup m k =
+   some v when canon m = canonApp a (cons (pair k v) b). storeFuse and
+   storeFoldInd do the elim on Store through a generic fold: an elim with
+   canon in the motive opens insComm and gets to the arena limit. The front
+   end adds the block after canon and lookup, only when the program text
+   names one of its defs. */
+static const char *const LEMMA_AFTER[] = {"canon", "lookup"};
+
+static const char canon_lemma_source[] =
+  "def canonGet : Key -> List (Prod Key Val) -> Maybe Val :=\n"
+  "  fun (q : Key) (l : List (Prod Key Val)) => elim (fun (z : List (Prod Key Val)) => Maybe Val) none (fun (h : Prod Key Val) (t : List (Prod Key Val)) (r : Maybe Val) => lookupSel (keyEq q (first h)) (second h) r) l\n"
+  "def getLess : (q : Key) -> (k : Key) -> (v : Val) -> (h : Prod Key Val) -> (t : List (Prod Key Val)) -> (r : List (Prod Key Val)) -> Path (Maybe Val) (canonGet q (canonStepAt flagNo flagYes k v h t r)) (lookupSel (keyEq q k) v (canonGet q (cons h t))) :=\n"
+  "  fun (q : Key) (k : Key) (v : Val) (h : Prod Key Val) (t : List (Prod Key Val)) (r : List (Prod Key Val)) => refl\n"
+  "def getMore : (q : Key) -> (k : Key) -> (v : Val) -> (h : Prod Key Val) -> (t : List (Prod Key Val)) -> (r : List (Prod Key Val)) -> Path (Maybe Val) (canonGet q (canonStepAt flagNo flagNo k v h t r)) (lookupSel (keyEq q (first h)) (second h) (canonGet q r)) :=\n"
+  "  fun (q : Key) (k : Key) (v : Val) (h : Prod Key Val) (t : List (Prod Key Val)) (r : List (Prod Key Val)) => refl\n"
+  "def getEq : (q : Key) -> (k : Key) -> (v : Val) -> (h : Prod Key Val) -> (t : List (Prod Key Val)) -> (r : List (Prod Key Val)) -> (le : Flag) -> Path Flag (keyEq k (first h)) flagYes -> Path (Maybe Val) (canonGet q (canonStepAt flagYes le k v h t r)) (lookupSel (keyEq q k) v (canonGet q (cons h t))) :=\n"
+  "  fun (q : Key) (k : Key) (v : Val) (h : Prod Key Val) (t : List (Prod Key Val)) (r : List (Prod Key Val)) (le : Flag) (pe : Path Flag (keyEq k (first h)) flagYes) =>\n"
+  "    trans (Maybe Val) (lookupSel (keyEq q k) v (canonGet q t)) (lookupSel (keyEq q k) v (lookupSel (keyEq q k) (second h) (canonGet q t))) (lookupSel (keyEq q k) v (lookupSel (keyEq q (first h)) (second h) (canonGet q t)))\n"
+  "      (fun (i : I) => lookupOver q k v (second h) (canonGet q t) @ (~i))\n"
+  "      (fun (i : I) => lookupSel (keyEq q k) v (lookupSel (keyEq q (keyEqSound k (first h) pe @ i)) (second h) (canonGet q t)))\n"
+  "def insGetAt : (q : Key) -> (k : Key) -> (v : Val) -> (h : Prod Key Val) -> (t : List (Prod Key Val)) -> Path (Maybe Val) (canonGet q (canonInsert k v t)) (lookupSel (keyEq q k) v (canonGet q t)) -> (e : Flag) -> Path Flag (keyEq k (first h)) e -> (le : Flag) -> Path Flag (keyLe k (first h)) le -> Path (Maybe Val) (canonGet q (canonStepAt e le k v h t (canonInsert k v t))) (lookupSel (keyEq q k) v (canonGet q (cons h t))) :=\n"
+  "  fun (q : Key) (k : Key) (v : Val) (h : Prod Key Val) (t : List (Prod Key Val)) (ih : Path (Maybe Val) (canonGet q (canonInsert k v t)) (lookupSel (keyEq q k) v (canonGet q t))) (e : Flag) =>\n"
+  "    elim (fun (f : Flag) => Path Flag (keyEq k (first h)) f -> (le : Flag) -> Path Flag (keyLe k (first h)) le -> Path (Maybe Val) (canonGet q (canonStepAt f le k v h t (canonInsert k v t))) (lookupSel (keyEq q k) v (canonGet q (cons h t))))\n"
+  "      (fun (pe : Path Flag (keyEq k (first h)) flagYes) (le : Flag) (pl : Path Flag (keyLe k (first h)) le) => getEq q k v h t (canonInsert k v t) le pe)\n"
+  "      (fun (pe : Path Flag (keyEq k (first h)) flagNo) (le : Flag) => elim (fun (g : Flag) => Path Flag (keyLe k (first h)) g -> Path (Maybe Val) (canonGet q (canonStepAt flagNo g k v h t (canonInsert k v t))) (lookupSel (keyEq q k) v (canonGet q (cons h t))))\n"
+  "        (fun (pl : Path Flag (keyLe k (first h)) flagYes) => refl)\n"
+  "        (fun (pl : Path Flag (keyLe k (first h)) flagNo) => trans (Maybe Val) (lookupSel (keyEq q (first h)) (second h) (canonGet q (canonInsert k v t))) (lookupSel (keyEq q (first h)) (second h) (lookupSel (keyEq q k) v (canonGet q t))) (lookupSel (keyEq q k) v (lookupSel (keyEq q (first h)) (second h) (canonGet q t))) (fun (i : I) => lookupSel (keyEq q (first h)) (second h) (ih @ i)) (lookupComm q (first h) k (second h) v (canonGet q t) (keyEqSymNo k (first h) pe)))\n"
+  "        le)\n"
+  "      e\n"
+  "def insGet : (q : Key) -> (k : Key) -> (v : Val) -> (l : List (Prod Key Val)) -> Path (Maybe Val) (canonGet q (canonInsert k v l)) (lookupSel (keyEq q k) v (canonGet q l)) :=\n"
+  "  fun (q : Key) (k : Key) (v : Val) (l : List (Prod Key Val)) => elim (fun (z : List (Prod Key Val)) => Path (Maybe Val) (canonGet q (canonInsert k v z)) (lookupSel (keyEq q k) v (canonGet q z))) refl\n"
+  "    (fun (h : Prod Key Val) (t : List (Prod Key Val)) (ih : Path (Maybe Val) (canonGet q (canonInsert k v t)) (lookupSel (keyEq q k) v (canonGet q t))) =>\n"
+  "      trans (Maybe Val) (canonGet q (canonInsert k v (cons h t))) (canonGet q (canonStep k v h t (canonInsert k v t))) (lookupSel (keyEq q k) v (canonGet q (cons h t)))\n"
+  "        (fun (i : I) => canonGet q (insCons k v h t @ i))\n"
+  "        (insGetAt q k v h t ih (keyEq k (first h)) (fun (i : I) => keyEq k (first h)) (keyLe k (first h)) (fun (i : I) => keyLe k (first h))))\n"
+  "    l\n"
+  "def storePropLine : (X : Type 0) -> (P : X -> Type 0) -> ((x : X) -> isProp (P x)) -> (x : X) -> (y : X) -> (p : Path X x y) -> (ex : P x) -> (ey : P y) -> PathP (fun (i : I) => P (p @ i)) ex ey :=\n"
+  "  fun (X : Type 0) (P : X -> Type 0) (hP : (x : X) -> isProp (P x)) (x : X) (y : X) (p : Path X x y) (ex : P x) (ey : P y) =>\n"
+  "    fun (i : I) => hcomp (P (p @ i)) (~i \\/ i) (fun (k : I) => [\n"
+  "      ~i -> hP (p @ i) (transp (fun (m : I) => P (p @ (i /\\ m))) i0 ex) ex @ k,\n"
+  "      i -> hP (p @ i) (transp (fun (m : I) => P (p @ (i /\\ m))) i0 ex) ey @ k ])\n"
+  "      (transp (fun (m : I) => P (p @ (i /\\ m))) i0 ex)\n"
+  "def storePropSquare : (X : Type 0) -> (P : X -> Type 0) -> ((x : X) -> isProp (P x)) -> (x : X) -> (y : X) -> (p : Path X x y) -> (q : Path X x y) -> (s : Path (Path X x y) p q) ->\n"
+  "  (ihx : P x) -> (ihy : P y) -> (ihp : PathP (fun (j : I) => P (p @ j)) ihx ihy) -> (ihq : PathP (fun (j : I) => P (q @ j)) ihx ihy) ->\n"
+  "  PathP (fun (i : I) => PathP (fun (j : I) => P ((s @ i) @ j)) ihx ihy) ihp ihq :=\n"
+  "  fun (X : Type 0) (P : X -> Type 0) (hP : (x : X) -> isProp (P x)) (x : X) (y : X) (p : Path X x y) (q : Path X x y) (s : Path (Path X x y) p q)\n"
+  "    (ihx : P x) (ihy : P y) (ihp : PathP (fun (j : I) => P (p @ j)) ihx ihy) (ihq : PathP (fun (j : I) => P (q @ j)) ihx ihy) =>\n"
+  "    fun (i : I) => fun (j : I) => hcomp (P ((s @ i) @ j)) (~i \\/ i \\/ ~j \\/ j) (fun (k : I) => [\n"
+  "      ~i -> hP ((s @ i) @ j) (transp (fun (m : I) => P ((s @ (i /\\ m)) @ (j /\\ m))) i0 ihx) (ihp @ j) @ k,\n"
+  "      i -> hP ((s @ i) @ j) (transp (fun (m : I) => P ((s @ (i /\\ m)) @ (j /\\ m))) i0 ihx) (ihq @ j) @ k,\n"
+  "      ~j -> hP ((s @ i) @ j) (transp (fun (m : I) => P ((s @ (i /\\ m)) @ (j /\\ m))) i0 ihx) ihx @ k,\n"
+  "      j -> hP ((s @ i) @ j) (transp (fun (m : I) => P ((s @ (i /\\ m)) @ (j /\\ m))) i0 ihx) ihy @ k ])\n"
+  "      (transp (fun (m : I) => P ((s @ (i /\\ m)) @ (j /\\ m))) i0 ihx)\n"
+  "def fusePut : (M : Type 0) -> (sM : isSet M) -> (e : M) -> (put : Key -> Val -> M -> M) -> (ov : (k : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path M (put k v (put k w m)) (put k v m)) -> (cm : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path Flag (keyEq k l) flagNo -> Path M (put k v (put l w m)) (put l w (put k v m))) -> (N : Type 0) -> (sN : isSet N) -> (e2 : N) -> (put2 : Key -> Val -> N -> N) -> (ov2 : (k : Key) -> (v : Val) -> (w : Val) -> (m : N) -> Path N (put2 k v (put2 k w m)) (put2 k v m)) -> (cm2 : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (m : N) -> Path Flag (keyEq k l) flagNo -> Path N (put2 k v (put2 l w m)) (put2 l w (put2 k v m))) -> (g : M -> N) -> (hput : (k : Key) -> (v : Val) -> (m : M) -> Path N (g (put k v m)) (put2 k v (g m))) -> (k : Key) -> (v : Val) -> (r : Store) -> Path N (g (storeFold M sM e put ov cm r)) (storeFold N sN e2 put2 ov2 cm2 r) -> Path N (g (storeFold M sM e put ov cm (fmPut k v r))) (storeFold N sN e2 put2 ov2 cm2 (fmPut k v r)) :=\n"
+  "  fun (M : Type 0) (sM : isSet M) (e : M) (put : Key -> Val -> M -> M) (ov : (k : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path M (put k v (put k w m)) (put k v m)) (cm : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path Flag (keyEq k l) flagNo -> Path M (put k v (put l w m)) (put l w (put k v m))) (N : Type 0) (sN : isSet N) (e2 : N) (put2 : Key -> Val -> N -> N) (ov2 : (k : Key) -> (v : Val) -> (w : Val) -> (m : N) -> Path N (put2 k v (put2 k w m)) (put2 k v m)) (cm2 : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (m : N) -> Path Flag (keyEq k l) flagNo -> Path N (put2 k v (put2 l w m)) (put2 l w (put2 k v m))) (g : M -> N) (hput : (k : Key) -> (v : Val) -> (m : M) -> Path N (g (put k v m)) (put2 k v (g m))) (k : Key) (v : Val) (r : Store) (ih : Path N (g (storeFold M sM e put ov cm r)) (storeFold N sN e2 put2 ov2 cm2 r)) => trans N (g (put k v (storeFold M sM e put ov cm r))) (put2 k v (g (storeFold M sM e put ov cm r))) (put2 k v (storeFold N sN e2 put2 ov2 cm2 r)) (hput k v (storeFold M sM e put ov cm r)) (fun (i : I) => put2 k v (ih @ i))\n"
+  "def storeFuse : (M : Type 0) -> (sM : isSet M) -> (e : M) -> (put : Key -> Val -> M -> M) -> (ov : (k : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path M (put k v (put k w m)) (put k v m)) -> (cm : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path Flag (keyEq k l) flagNo -> Path M (put k v (put l w m)) (put l w (put k v m))) -> (N : Type 0) -> (sN : isSet N) -> (e2 : N) -> (put2 : Key -> Val -> N -> N) -> (ov2 : (k : Key) -> (v : Val) -> (w : Val) -> (m : N) -> Path N (put2 k v (put2 k w m)) (put2 k v m)) -> (cm2 : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (m : N) -> Path Flag (keyEq k l) flagNo -> Path N (put2 k v (put2 l w m)) (put2 l w (put2 k v m))) -> (g : M -> N) -> (hput : (k : Key) -> (v : Val) -> (m : M) -> Path N (g (put k v m)) (put2 k v (g m))) -> Path N (g e) e2 -> (z : Store) -> Path N (g (storeFold M sM e put ov cm z)) (storeFold N sN e2 put2 ov2 cm2 z) :=\n"
+  "  fun (M : Type 0) (sM : isSet M) (e : M) (put : Key -> Val -> M -> M) (ov : (k : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path M (put k v (put k w m)) (put k v m)) (cm : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path Flag (keyEq k l) flagNo -> Path M (put k v (put l w m)) (put l w (put k v m))) (N : Type 0) (sN : isSet N) (e2 : N) (put2 : Key -> Val -> N -> N) (ov2 : (k : Key) -> (v : Val) -> (w : Val) -> (m : N) -> Path N (put2 k v (put2 k w m)) (put2 k v m)) (cm2 : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (m : N) -> Path Flag (keyEq k l) flagNo -> Path N (put2 k v (put2 l w m)) (put2 l w (put2 k v m))) (g : M -> N) (hput : (k : Key) -> (v : Val) -> (m : M) -> Path N (g (put k v m)) (put2 k v (g m))) (hE : Path N (g e) e2) (z : Store) => elim (fun (zz : Store) => Path N (g (storeFold M sM e put ov cm zz)) (storeFold N sN e2 put2 ov2 cm2 zz))\n"
+  "    hE\n"
+  "    (fun (k : Key) (v : Val) (r : Store) (ih : Path N (g (storeFold M sM e put ov cm r)) (storeFold N sN e2 put2 ov2 cm2 r)) => fusePut M sM e put ov cm N sN e2 put2 ov2 cm2 g hput k v r ih)\n"
+  "    (fun (k : Key) (v : Val) (w : Val) (r : Store) (ih : Path N (g (storeFold M sM e put ov cm r)) (storeFold N sN e2 put2 ov2 cm2 r)) => fun (i : I) => storePropLine Store (fun (zz : Store) => Path N (g (storeFold M sM e put ov cm zz)) (storeFold N sN e2 put2 ov2 cm2 zz)) (fun (zz : Store) => sN (g (storeFold M sM e put ov cm zz)) (storeFold N sN e2 put2 ov2 cm2 zz)) (fmPut k v (fmPut k w r)) (fmPut k v r) (fun (j : I) => fmOver k v w r j) (fusePut M sM e put ov cm N sN e2 put2 ov2 cm2 g hput k v (fmPut k w r) (fusePut M sM e put ov cm N sN e2 put2 ov2 cm2 g hput k w r ih)) (fusePut M sM e put ov cm N sN e2 put2 ov2 cm2 g hput k v r ih) @ i)\n"
+  "    (fun (k : Key) (l : Key) (v : Val) (w : Val) (r : Store) (ih : Path N (g (storeFold M sM e put ov cm r)) (storeFold N sN e2 put2 ov2 cm2 r)) (ne : Path Flag (keyEq k l) flagNo) => fun (i : I) => storePropLine Store (fun (zz : Store) => Path N (g (storeFold M sM e put ov cm zz)) (storeFold N sN e2 put2 ov2 cm2 zz)) (fun (zz : Store) => sN (g (storeFold M sM e put ov cm zz)) (storeFold N sN e2 put2 ov2 cm2 zz)) (fmPut k v (fmPut l w r)) (fmPut l w (fmPut k v r)) (fun (j : I) => fmComm k l v w r ne j) (fusePut M sM e put ov cm N sN e2 put2 ov2 cm2 g hput k v (fmPut l w r) (fusePut M sM e put ov cm N sN e2 put2 ov2 cm2 g hput l w r ih)) (fusePut M sM e put ov cm N sN e2 put2 ov2 cm2 g hput l w (fmPut k v r) (fusePut M sM e put ov cm N sN e2 put2 ov2 cm2 g hput k v r ih)) @ i)\n"
+  "    (fun (x : Store) (ihx : Path N (g (storeFold M sM e put ov cm x)) (storeFold N sN e2 put2 ov2 cm2 x)) (y : Store) (ihy : Path N (g (storeFold M sM e put ov cm y)) (storeFold N sN e2 put2 ov2 cm2 y)) (pa : Path Store x y) (ihp : PathP (fun (j : I) => Path N (g (storeFold M sM e put ov cm (pa @ j))) (storeFold N sN e2 put2 ov2 cm2 (pa @ j))) ihx ihy) (pb : Path Store x y) (ihq : PathP (fun (j : I) => Path N (g (storeFold M sM e put ov cm (pb @ j))) (storeFold N sN e2 put2 ov2 cm2 (pb @ j))) ihx ihy) =>\n"
+  "      fun (i : I) => fun (j : I) => (storePropSquare Store (fun (zz : Store) => Path N (g (storeFold M sM e put ov cm zz)) (storeFold N sN e2 put2 ov2 cm2 zz)) (fun (zz : Store) => sN (g (storeFold M sM e put ov cm zz)) (storeFold N sN e2 put2 ov2 cm2 zz)) x y pa pb (fun (c : I) => fun (d : I) => storeSquash x y pa pb c d) ihx ihy ihp ihq @ i) @ j) z\n"
+  "def canonLookup : (q : Key) -> (m : Store) -> Path (Maybe Val) (canonGet q (canon m)) (lookup m q) :=\n"
+  "  fun (q : Key) (m : Store) => storeFuse (List (Prod Key Val)) canonIsSet nil canonInsert insOver insComm (Maybe Val) (maybeIsSet Val valIsSet) none\n"
+  "    (fun (k : Key) (v : Val) (r : Maybe Val) => lookupSel (keyEq q k) v r)\n"
+  "    (fun (k : Key) (v : Val) (w : Val) (r : Maybe Val) => lookupOver q k v w r)\n"
+  "    (fun (k : Key) (l : Key) (v : Val) (w : Val) (r : Maybe Val) (ne : Path Flag (keyEq k l) flagNo) => lookupComm q k l v w r ne)\n"
+  "    (canonGet q) (fun (k : Key) (v : Val) (l : List (Prod Key Val)) => insGet q k v l) refl m\n"
+  "def flagAbsNY : (a : Flag) -> (b : Flag) -> Path Flag flagNo flagYes -> Path Flag a b :=\n"
+  "  fun (a : Flag) (b : Flag) (p : Path Flag flagNo flagYes) => fun (i : I) => elim (fun (z : Flag) => Flag) b a (p @ i)\n"
+  "def flagAbsYN : (a : Flag) -> (b : Flag) -> Path Flag flagYes flagNo -> Path Flag a b :=\n"
+  "  fun (a : Flag) (b : Flag) (p : Path Flag flagYes flagNo) => fun (i : I) => elim (fun (z : Flag) => Flag) a b (p @ i)\n"
+  "def andYesL : (x : Flag) -> (y : Flag) -> Path Flag (elim (fun (z : Flag) => Flag) y flagNo x) flagYes -> Path Flag x flagYes :=\n"
+  "  fun (x : Flag) => elim (fun (f : Flag) => (y : Flag) -> Path Flag (elim (fun (z : Flag) => Flag) y flagNo f) flagYes -> Path Flag f flagYes)\n"
+  "    (fun (y : Flag) (p : Path Flag y flagYes) => refl)\n"
+  "    (fun (y : Flag) (p : Path Flag flagNo flagYes) => p) x\n"
+  "def andYesR : (x : Flag) -> (y : Flag) -> Path Flag (elim (fun (z : Flag) => Flag) y flagNo x) flagYes -> Path Flag y flagYes :=\n"
+  "  fun (x : Flag) => elim (fun (f : Flag) => (y : Flag) -> Path Flag (elim (fun (z : Flag) => Flag) y flagNo f) flagYes -> Path Flag y flagYes)\n"
+  "    (fun (y : Flag) (p : Path Flag y flagYes) => p)\n"
+  "    (fun (y : Flag) (p : Path Flag flagNo flagYes) => flagAbsNY y flagYes p) x\n"
+  "def andYesI : (x : Flag) -> (y : Flag) -> Path Flag x flagYes -> Path Flag y flagYes -> Path Flag (elim (fun (z : Flag) => Flag) y flagNo x) flagYes :=\n"
+  "  fun (x : Flag) (y : Flag) (px : Path Flag x flagYes) (py : Path Flag y flagYes) => trans Flag (elim (fun (z : Flag) => Flag) y flagNo x) y flagYes (fun (i : I) => elim (fun (z : Flag) => Flag) y flagNo (px @ i)) py\n"
+  "def notYesL : (x : Flag) -> (y : Flag) -> Path Flag (elim (fun (z : Flag) => Flag) flagNo y x) flagYes -> Path Flag x flagNo :=\n"
+  "  fun (x : Flag) => elim (fun (f : Flag) => (y : Flag) -> Path Flag (elim (fun (z : Flag) => Flag) flagNo y f) flagYes -> Path Flag f flagNo)\n"
+  "    (fun (y : Flag) (p : Path Flag flagNo flagYes) => flagAbsNY flagYes flagNo p)\n"
+  "    (fun (y : Flag) (p : Path Flag y flagYes) => refl) x\n"
+  "def notYesR : (x : Flag) -> (y : Flag) -> Path Flag (elim (fun (z : Flag) => Flag) flagNo y x) flagYes -> Path Flag y flagYes :=\n"
+  "  fun (x : Flag) => elim (fun (f : Flag) => (y : Flag) -> Path Flag (elim (fun (z : Flag) => Flag) flagNo y f) flagYes -> Path Flag y flagYes)\n"
+  "    (fun (y : Flag) (p : Path Flag flagNo flagYes) => flagAbsNY y flagYes p)\n"
+  "    (fun (y : Flag) (p : Path Flag y flagYes) => p) x\n"
+  "def keyBelow : Key -> Key -> Flag := fun (a : Key) (c : Key) => elim (fun (z : Flag) => Flag) flagNo (keyLe a c) (keyEq a c)\n"
+  "def belowMake : (a : Key) -> (c : Key) -> Path Flag (keyEq a c) flagNo -> Path Flag (keyLe a c) flagYes -> Path Flag (keyBelow a c) flagYes :=\n"
+  "  fun (a : Key) (c : Key) (pe : Path Flag (keyEq a c) flagNo) (pl : Path Flag (keyLe a c) flagYes) => trans Flag (keyBelow a c) (keyLe a c) flagYes (fun (i : I) => elim (fun (z : Flag) => Flag) flagNo (keyLe a c) (pe @ i)) pl\n"
+  "def belowNeAt : (k : Key) -> (a : Key) -> (c : Key) -> Path Flag (keyLe k a) flagYes -> Path Flag (keyEq a c) flagNo -> Path Flag (keyLe a c) flagYes -> (f : Flag) -> Path Flag (keyEq k c) f -> Path Flag (keyEq k c) flagNo :=\n"
+  "  fun (k : Key) (a : Key) (c : Key) (lka : Path Flag (keyLe k a) flagYes) (nac : Path Flag (keyEq a c) flagNo) (lac : Path Flag (keyLe a c) flagYes) (f : Flag) =>\n"
+  "    elim (fun (g : Flag) => Path Flag (keyEq k c) g -> Path Flag (keyEq k c) flagNo)\n"
+  "      (fun (pe : Path Flag (keyEq k c) flagYes) => flagAbsYN (keyEq k c) flagNo (trans Flag flagYes (keyLe c a) flagNo (fun (i : I) => trans Flag (keyLe c a) (keyLe k a) flagYes (fun (j : I) => keyLe (keyEqSound k c pe @ (~j)) a) lka @ (~i)) (keyLeAnti a c nac lac)))\n"
+  "      (fun (pe : Path Flag (keyEq k c) flagNo) => pe) f\n"
+  "def belowTrans : (k : Key) -> (a : Key) -> (c : Key) -> Path Flag (keyBelow k a) flagYes -> Path Flag (keyBelow a c) flagYes -> Path Flag (keyBelow k c) flagYes :=\n"
+  "  fun (k : Key) (a : Key) (c : Key) (p1 : Path Flag (keyBelow k a) flagYes) (p2 : Path Flag (keyBelow a c) flagYes) =>\n"
+  "    belowMake k c (belowNeAt k a c (notYesR (keyEq k a) (keyLe k a) p1) (notYesL (keyEq a c) (keyLe a c) p2) (notYesR (keyEq a c) (keyLe a c) p2) (keyEq k c) (fun (i : I) => keyEq k c))\n"
+  "      (keyLeTrans k a c (notYesR (keyEq k a) (keyLe k a) p1) (notYesR (keyEq a c) (keyLe a c) p2))\n"
+  "def keysAbove : Key -> List (Prod Key Val) -> Flag := fun (a : Key) (l : List (Prod Key Val)) => elim (fun (z : List (Prod Key Val)) => Flag) flagYes (fun (h : Prod Key Val) (t : List (Prod Key Val)) (r : Flag) => elim (fun (z : Flag) => Flag) r flagNo (keyBelow a (first h))) l\n"
+  "def keysSorted : List (Prod Key Val) -> Flag := fun (l : List (Prod Key Val)) => elim (fun (z : List (Prod Key Val)) => Flag) flagYes (fun (h : Prod Key Val) (t : List (Prod Key Val)) (r : Flag) => elim (fun (z : Flag) => Flag) r flagNo (keysAbove (first h) t)) l\n"
+  "def aboveLower : (k : Key) -> (a : Key) -> Path Flag (keyBelow k a) flagYes -> (t : List (Prod Key Val)) -> Path Flag (keysAbove a t) flagYes -> Path Flag (keysAbove k t) flagYes :=\n"
+  "  fun (k : Key) (a : Key) (p : Path Flag (keyBelow k a) flagYes) (t : List (Prod Key Val)) => elim (fun (z : List (Prod Key Val)) => Path Flag (keysAbove a z) flagYes -> Path Flag (keysAbove k z) flagYes)\n"
+  "    (fun (q : Path Flag (keysAbove a nil) flagYes) => refl)\n"
+  "    (fun (h : Prod Key Val) (t2 : List (Prod Key Val)) (ih : Path Flag (keysAbove a t2) flagYes -> Path Flag (keysAbove k t2) flagYes) (q : Path Flag (keysAbove a (cons h t2)) flagYes) =>\n"
+  "      andYesI (keyBelow k (first h)) (keysAbove k t2) (belowTrans k a (first h) p (andYesL (keyBelow a (first h)) (keysAbove a t2) q)) (ih (andYesR (keyBelow a (first h)) (keysAbove a t2) q)))\n"
+  "    t\n"
+  "def insAboveAt : (c : Key) -> (k : Key) -> (v : Val) -> (h : Prod Key Val) -> (t : List (Prod Key Val)) -> (Path Flag (keysAbove c t) flagYes -> Path Flag (keysAbove c (canonInsert k v t)) flagYes) -> Path Flag (keysAbove c (cons h t)) flagYes -> Path Flag (keyBelow c k) flagYes -> (e : Flag) -> (le : Flag) -> Path Flag (keysAbove c (canonStepAt e le k v h t (canonInsert k v t))) flagYes :=\n"
+  "  fun (c : Key) (k : Key) (v : Val) (h : Prod Key Val) (t : List (Prod Key Val)) (ih : Path Flag (keysAbove c t) flagYes -> Path Flag (keysAbove c (canonInsert k v t)) flagYes) (q : Path Flag (keysAbove c (cons h t)) flagYes) (ck : Path Flag (keyBelow c k) flagYes) (e : Flag) (le : Flag) =>\n"
+  "    elim (fun (f : Flag) => Path Flag (keysAbove c (canonStepAt f le k v h t (canonInsert k v t))) flagYes)\n"
+  "      (andYesI (keyBelow c k) (keysAbove c t) ck (andYesR (keyBelow c (first h)) (keysAbove c t) q))\n"
+  "      (elim (fun (g : Flag) => Path Flag (keysAbove c (canonStepAt flagNo g k v h t (canonInsert k v t))) flagYes)\n"
+  "        (andYesI (keyBelow c k) (keysAbove c (cons h t)) ck q)\n"
+  "        (andYesI (keyBelow c (first h)) (keysAbove c (canonInsert k v t)) (andYesL (keyBelow c (first h)) (keysAbove c t) q) (ih (andYesR (keyBelow c (first h)) (keysAbove c t) q)))\n"
+  "        le)\n"
+  "      e\n"
+  "def insAbove : (c : Key) -> (k : Key) -> (v : Val) -> Path Flag (keyBelow c k) flagYes -> (t : List (Prod Key Val)) -> Path Flag (keysAbove c t) flagYes -> Path Flag (keysAbove c (canonInsert k v t)) flagYes :=\n"
+  "  fun (c : Key) (k : Key) (v : Val) (ck : Path Flag (keyBelow c k) flagYes) (t : List (Prod Key Val)) => elim (fun (z : List (Prod Key Val)) => Path Flag (keysAbove c z) flagYes -> Path Flag (keysAbove c (canonInsert k v z)) flagYes)\n"
+  "    (fun (q : Path Flag (keysAbove c nil) flagYes) => andYesI (keyBelow c k) (keysAbove c nil) ck refl)\n"
+  "    (fun (h : Prod Key Val) (t2 : List (Prod Key Val)) (ih : Path Flag (keysAbove c t2) flagYes -> Path Flag (keysAbove c (canonInsert k v t2)) flagYes) (q : Path Flag (keysAbove c (cons h t2)) flagYes) =>\n"
+  "      trans Flag (keysAbove c (canonInsert k v (cons h t2))) (keysAbove c (canonStep k v h t2 (canonInsert k v t2))) flagYes (fun (i : I) => keysAbove c (insCons k v h t2 @ i)) (insAboveAt c k v h t2 ih q ck (keyEq k (first h)) (keyLe k (first h))))\n"
+  "    t\n"
+  "def insSortedAt : (k : Key) -> (v : Val) -> (h : Prod Key Val) -> (t : List (Prod Key Val)) -> (Path Flag (keysSorted t) flagYes -> Path Flag (keysSorted (canonInsert k v t)) flagYes) -> Path Flag (keysSorted (cons h t)) flagYes -> (e : Flag) -> Path Flag (keyEq k (first h)) e -> (le : Flag) -> Path Flag (keyLe k (first h)) le -> Path Flag (keysSorted (canonStepAt e le k v h t (canonInsert k v t))) flagYes :=\n"
+  "  fun (k : Key) (v : Val) (h : Prod Key Val) (t : List (Prod Key Val)) (ih : Path Flag (keysSorted t) flagYes -> Path Flag (keysSorted (canonInsert k v t)) flagYes) (q : Path Flag (keysSorted (cons h t)) flagYes) (e : Flag) =>\n"
+  "    elim (fun (f : Flag) => Path Flag (keyEq k (first h)) f -> (le : Flag) -> Path Flag (keyLe k (first h)) le -> Path Flag (keysSorted (canonStepAt f le k v h t (canonInsert k v t))) flagYes)\n"
+  "      (fun (pe : Path Flag (keyEq k (first h)) flagYes) (le : Flag) (pl : Path Flag (keyLe k (first h)) le) =>\n"
+  "        andYesI (keysAbove k t) (keysSorted t) (trans Flag (keysAbove k t) (keysAbove (first h) t) flagYes (fun (i : I) => keysAbove (keyEqSound k (first h) pe @ i) t) (andYesL (keysAbove (first h) t) (keysSorted t) q)) (andYesR (keysAbove (first h) t) (keysSorted t) q))\n"
+  "      (fun (pe : Path Flag (keyEq k (first h)) flagNo) (le : Flag) => elim (fun (g : Flag) => Path Flag (keyLe k (first h)) g -> Path Flag (keysSorted (canonStepAt flagNo g k v h t (canonInsert k v t))) flagYes)\n"
+  "        (fun (pl : Path Flag (keyLe k (first h)) flagYes) => andYesI (keysAbove k (cons h t)) (keysSorted (cons h t)) (andYesI (keyBelow k (first h)) (keysAbove k t) (belowMake k (first h) pe pl) (aboveLower k (first h) (belowMake k (first h) pe pl) t (andYesL (keysAbove (first h) t) (keysSorted t) q))) q)\n"
+  "        (fun (pl : Path Flag (keyLe k (first h)) flagNo) => andYesI (keysAbove (first h) (canonInsert k v t)) (keysSorted (canonInsert k v t)) (insAbove (first h) k v (belowMake (first h) k (keyEqSymNo k (first h) pe) (keyLeTot k (first h) pe pl)) t (andYesL (keysAbove (first h) t) (keysSorted t) q)) (ih (andYesR (keysAbove (first h) t) (keysSorted t) q)))\n"
+  "        le)\n"
+  "      e\n"
+  "def insSorted : (k : Key) -> (v : Val) -> (l : List (Prod Key Val)) -> Path Flag (keysSorted l) flagYes -> Path Flag (keysSorted (canonInsert k v l)) flagYes :=\n"
+  "  fun (k : Key) (v : Val) (l : List (Prod Key Val)) => elim (fun (z : List (Prod Key Val)) => Path Flag (keysSorted z) flagYes -> Path Flag (keysSorted (canonInsert k v z)) flagYes)\n"
+  "    (fun (q : Path Flag (keysSorted nil) flagYes) => refl)\n"
+  "    (fun (h : Prod Key Val) (t : List (Prod Key Val)) (ih : Path Flag (keysSorted t) flagYes -> Path Flag (keysSorted (canonInsert k v t)) flagYes) (q : Path Flag (keysSorted (cons h t)) flagYes) =>\n"
+  "      trans Flag (keysSorted (canonInsert k v (cons h t))) (keysSorted (canonStep k v h t (canonInsert k v t))) flagYes (fun (i : I) => keysSorted (insCons k v h t @ i)) (insSortedAt k v h t ih q (keyEq k (first h)) (fun (i : I) => keyEq k (first h)) (keyLe k (first h)) (fun (i : I) => keyLe k (first h))))\n"
+  "    l\n"
+  "def storeFoldInd : (M : Type 0) -> (sM : isSet M) -> (e : M) -> (put : Key -> Val -> M -> M) -> (ov : (k : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path M (put k v (put k w m)) (put k v m)) -> (cm : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path Flag (keyEq k l) flagNo -> Path M (put k v (put l w m)) (put l w (put k v m))) -> (Q : M -> Type 0) -> (hQ : (x : M) -> isProp (Q x)) -> (qe : Q e) -> (qput : (k : Key) -> (v : Val) -> (m : M) -> Q m -> Q (put k v m)) -> (z : Store) -> Q (storeFold M sM e put ov cm z) :=\n"
+  "  fun (M : Type 0) (sM : isSet M) (e : M) (put : Key -> Val -> M -> M) (ov : (k : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path M (put k v (put k w m)) (put k v m)) (cm : (k : Key) -> (l : Key) -> (v : Val) -> (w : Val) -> (m : M) -> Path Flag (keyEq k l) flagNo -> Path M (put k v (put l w m)) (put l w (put k v m))) (Q : M -> Type 0) (hQ : (x : M) -> isProp (Q x)) (qe : Q e) (qput : (k : Key) -> (v : Val) -> (m : M) -> Q m -> Q (put k v m)) (z : Store) => elim (fun (zz : Store) => Q (storeFold M sM e put ov cm zz))\n"
+  "    qe\n"
+  "    (fun (k : Key) (v : Val) (r : Store) (ih : Q (storeFold M sM e put ov cm r)) => qput k v (storeFold M sM e put ov cm r) ih)\n"
+  "    (fun (k : Key) (v : Val) (w : Val) (r : Store) (ih : Q (storeFold M sM e put ov cm r)) => fun (i : I) => storePropLine Store (fun (zz : Store) => Q (storeFold M sM e put ov cm zz)) (fun (zz : Store) => hQ (storeFold M sM e put ov cm zz)) (fmPut k v (fmPut k w r)) (fmPut k v r) (fun (j : I) => fmOver k v w r j) (qput k v (put k w (storeFold M sM e put ov cm r)) (qput k w (storeFold M sM e put ov cm r) ih)) (qput k v (storeFold M sM e put ov cm r) ih) @ i)\n"
+  "    (fun (k : Key) (l : Key) (v : Val) (w : Val) (r : Store) (ih : Q (storeFold M sM e put ov cm r)) (ne : Path Flag (keyEq k l) flagNo) => fun (i : I) => storePropLine Store (fun (zz : Store) => Q (storeFold M sM e put ov cm zz)) (fun (zz : Store) => hQ (storeFold M sM e put ov cm zz)) (fmPut k v (fmPut l w r)) (fmPut l w (fmPut k v r)) (fun (j : I) => fmComm k l v w r ne j) (qput k v (put l w (storeFold M sM e put ov cm r)) (qput l w (storeFold M sM e put ov cm r) ih)) (qput l w (put k v (storeFold M sM e put ov cm r)) (qput k v (storeFold M sM e put ov cm r) ih)) @ i)\n"
+  "    (fun (x : Store) (ihx : Q (storeFold M sM e put ov cm x)) (y : Store) (ihy : Q (storeFold M sM e put ov cm y)) (pa : Path Store x y) (ihp : PathP (fun (j : I) => Q (storeFold M sM e put ov cm (pa @ j))) ihx ihy) (pb : Path Store x y) (ihq : PathP (fun (j : I) => Q (storeFold M sM e put ov cm (pb @ j))) ihx ihy) =>\n"
+  "      fun (i : I) => fun (j : I) => (storePropSquare Store (fun (zz : Store) => Q (storeFold M sM e put ov cm zz)) (fun (zz : Store) => hQ (storeFold M sM e put ov cm zz)) x y pa pb (fun (c : I) => fun (d : I) => storeSquash x y pa pb c d) ihx ihy ihp ihq @ i) @ j) z\n"
+  "def canonApp : List (Prod Key Val) -> List (Prod Key Val) -> List (Prod Key Val) := fun (a : List (Prod Key Val)) (b : List (Prod Key Val)) => elim (fun (z : List (Prod Key Val)) => List (Prod Key Val)) b (fun (h : Prod Key Val) (t : List (Prod Key Val)) (r : List (Prod Key Val)) => cons h r) a\n"
+  "def aboveEntry : (c : Key) -> (k : Key) -> (v : Val) -> (b : List (Prod Key Val)) -> (a : List (Prod Key Val)) -> Path Flag (keysAbove c (canonApp a (cons (pair k v) b))) flagYes -> Path Flag (keyEq k c) flagNo :=\n"
+  "  fun (c : Key) (k : Key) (v : Val) (b : List (Prod Key Val)) (a : List (Prod Key Val)) => elim (fun (z : List (Prod Key Val)) => Path Flag (keysAbove c (canonApp z (cons (pair k v) b))) flagYes -> Path Flag (keyEq k c) flagNo)\n"
+  "    (fun (q : Path Flag (keysAbove c (cons (pair k v) b)) flagYes) => keyEqSymNo c k (notYesL (keyEq c k) (keyLe c k) (andYesL (keyBelow c k) (keysAbove c b) q)))\n"
+  "    (fun (h : Prod Key Val) (t : List (Prod Key Val)) (ih : Path Flag (keysAbove c (canonApp t (cons (pair k v) b))) flagYes -> Path Flag (keyEq k c) flagNo) (q : Path Flag (keysAbove c (cons h (canonApp t (cons (pair k v) b)))) flagYes) => ih (andYesR (keyBelow c (first h)) (keysAbove c (canonApp t (cons (pair k v) b))) q))\n"
+  "    a\n"
+  "def entryGet : (k : Key) -> (v : Val) -> (b : List (Prod Key Val)) -> (a : List (Prod Key Val)) -> Path Flag (keysSorted (canonApp a (cons (pair k v) b))) flagYes -> Path (Maybe Val) (canonGet k (canonApp a (cons (pair k v) b))) (some v) :=\n"
+  "  fun (k : Key) (v : Val) (b : List (Prod Key Val)) (a : List (Prod Key Val)) => elim (fun (z : List (Prod Key Val)) => Path Flag (keysSorted (canonApp z (cons (pair k v) b))) flagYes -> Path (Maybe Val) (canonGet k (canonApp z (cons (pair k v) b))) (some v))\n"
+  "    (fun (q : Path Flag (keysSorted (cons (pair k v) b)) flagYes) => fun (i : I) => lookupSel (keyEqRefl k @ i) v (canonGet k b))\n"
+  "    (fun (h : Prod Key Val) (t : List (Prod Key Val)) (ih : Path Flag (keysSorted (canonApp t (cons (pair k v) b))) flagYes -> Path (Maybe Val) (canonGet k (canonApp t (cons (pair k v) b))) (some v)) (q : Path Flag (keysSorted (cons h (canonApp t (cons (pair k v) b)))) flagYes) =>\n"
+  "      trans (Maybe Val) (lookupSel (keyEq k (first h)) (second h) (canonGet k (canonApp t (cons (pair k v) b)))) (canonGet k (canonApp t (cons (pair k v) b))) (some v)\n"
+  "        (fun (i : I) => lookupSel (aboveEntry (first h) k v b t (andYesL (keysAbove (first h) (canonApp t (cons (pair k v) b))) (keysSorted (canonApp t (cons (pair k v) b))) q) @ i) (second h) (canonGet k (canonApp t (cons (pair k v) b))))\n"
+  "        (ih (andYesR (keysAbove (first h) (canonApp t (cons (pair k v) b))) (keysSorted (canonApp t (cons (pair k v) b))) q)))\n"
+  "    a\n"
+  "def flagIsSet : isSet Flag := eqIsSet Flag flagEq flagEqSound flagEqRefl\n"
+  "def canonIsSorted : (m : Store) -> Path Flag (keysSorted (canon m)) flagYes :=\n"
+  "  fun (m : Store) => storeFoldInd (List (Prod Key Val)) canonIsSet nil canonInsert insOver insComm (fun (l : List (Prod Key Val)) => Path Flag (keysSorted l) flagYes) (fun (l : List (Prod Key Val)) => flagIsSet (keysSorted l) flagYes) refl (fun (k : Key) (v : Val) (l : List (Prod Key Val)) (p : Path Flag (keysSorted l) flagYes) => insSorted k v l p) m\n"
+  "def canonEntry : (m : Store) -> (k : Key) -> (v : Val) -> (a : List (Prod Key Val)) -> (b : List (Prod Key Val)) -> Path (List (Prod Key Val)) (canon m) (canonApp a (cons (pair k v) b)) -> Path (Maybe Val) (lookup m k) (some v) :=\n"
+  "  fun (m : Store) (k : Key) (v : Val) (a : List (Prod Key Val)) (b : List (Prod Key Val)) (pe : Path (List (Prod Key Val)) (canon m) (canonApp a (cons (pair k v) b))) =>\n"
+  "    trans (Maybe Val) (lookup m k) (canonGet k (canon m)) (some v) (fun (i : I) => canonLookup k m @ (~i))\n"
+  "      (trans (Maybe Val) (canonGet k (canon m)) (canonGet k (canonApp a (cons (pair k v) b))) (some v) (fun (i : I) => canonGet k (pe @ i))\n"
+  "        (entryGet k v b a (trans Flag (keysSorted (canonApp a (cons (pair k v) b))) (keysSorted (canon m)) flagYes (fun (i : I) => keysSorted (pe @ (~i))) (canonIsSorted m))))\n";
+
+/* The Merkle root, proof and verifier (quotient-lang S8 u5, USER rulings
+   Q-S8-3 (b) and Q-S8-7 (a)): a right spine over canon. root of nil is
+   emptyDigest, and root of e :: es is nodeDigest (storeLeaf e) (root es).
+   inclProof q l gives the leaf digests before the first entry with the key
+   q, and the root of the entries after it. inclVerify k v p gives the root
+   that the proof p computes for the entry (k, v). A verifier compares it
+   with the published root (Digest has no equality row). The block names
+   canon, thus canon comes in with it. The front end adds the block after
+   canon and the SIG_PROGRAM names storeLeaf, nodeDigest and emptyDigest,
+   only when the program text names one of its defs and emptyDigest. */
+static const char *const MERKLE_AFTER[] = {"canon", "storeLeaf", "nodeDigest", "emptyDigest"};
+
+static const char merkle_source[] =
+  "def root : List (Prod Key Val) -> Digest := fun (l : List (Prod Key Val)) => elim (fun (z : List (Prod Key Val)) => Digest) emptyDigest (fun (h : Prod Key Val) (t : List (Prod Key Val)) (r : Digest) => nodeDigest (storeLeaf (first h) (second h)) r) l\n"
+  "def storeRoot : Store -> Digest := fun (s : Store) => root (canon s)\n"
+  "def inclProof : Key -> List (Prod Key Val) -> Prod (List Digest) Digest :=\n"
+  "  fun (q : Key) (l : List (Prod Key Val)) => elim (fun (z : List (Prod Key Val)) => Prod (List Digest) Digest) (pair nil emptyDigest)\n"
+  "    (fun (h : Prod Key Val) (t : List (Prod Key Val)) (r : Prod (List Digest) Digest) => elim (fun (f : Flag) => Prod (List Digest) Digest) (pair nil (root t)) (pair (cons (storeLeaf (first h) (second h)) (first r)) (second r)) (keyEq q (first h))) l\n"
+  "def inclVerify : Key -> Val -> Prod (List Digest) Digest -> Digest :=\n"
+  "  fun (k : Key) (v : Val) (p : Prod (List Digest) Digest) => elim (fun (z : List Digest) => Digest) (nodeDigest (storeLeaf k v) (second p)) (fun (d : Digest) (t : List Digest) (r : Digest) => nodeDigest d r) (first p)\n";
+
+/* u6b3 (Q-S8-10 (a)): the three O3 rows (an assumption each, no body),
+   spliced after storeLeaf, nodeDigest and emptyDigest when the program
+   text names one of them. check.c check_axiom admits them. */
+static const char *const O3_AFTER[] = {"storeLeaf", "nodeDigest", "emptyDigest"};
+
+static const char o3_source[] =
+  "axiom nodeDigestInj : (a : Digest) -> (b : Digest) -> (c : Digest) -> (d : Digest) -> Path Digest (nodeDigest a b) (nodeDigest c d) -> Prod (Path Digest a c) (Path Digest b d)\n"
+  "axiom storeLeafInj : (k : Key) -> (k2 : Key) -> (v : Val) -> (v2 : Val) -> Path Digest (storeLeaf k v) (storeLeaf k2 v2) -> Prod (Path Key k k2) (Path Val v v2)\n"
+  "axiom nodeNotEmpty : (a : Digest) -> (b : Digest) -> Path Digest (nodeDigest a b) emptyDigest -> Path Flag flagNo flagYes\n";
+
+/* u8a1 (USER ruling Q-S8-4 (a), PLAN O1): the O1 row rootInj. Two stores
+   with the same root are equal. The row is false for the arithmetic
+   storeLeaf and nodeDigest of a use cell, thus it is an assumption with
+   no body (the O3 form). The front end puts it directly after storeRoot
+   (merkle_source) when the program text names rootInj, Valid or compose.
+   Such a program also gets the merkle block (with emptyDigest in the
+   text). check.c check_axiom admits the row. */
+static const char *const O1_AFTER[] = {"storeRoot"};
+
+static const char o1_source[] =
+  "axiom rootInj : (a : Store) -> (b : Store) -> Path Digest (storeRoot a) (storeRoot b) -> Path Store a b\n";
+
+/* u6b6: the incl block (inclEntry in the accumulator form, the list
+   lemma appSnoc and inclSound). The front end puts it directly after
+   inclVerify when the program text names one of its defs and
+   emptyDigest. Then it also adds the merkle, o3, lemma and canon
+   blocks. The o3 block comes before the merkle block (the two have the
+   same last anchor), thus inclVerify is after the O3 rows. */
+static const char *const INCL_AFTER[] = {"inclVerify", "canonIsSorted"};
+
+static const char incl_source[] =
+  "def appSnoc : (a : List (Prod Key Val)) -> (h : Prod Key Val) -> (t : List (Prod Key Val)) -> Path (List (Prod Key Val)) (canonApp a (cons h t)) (canonApp (canonApp a (cons h nil)) t) :=\n"
+  "  fun (a : List (Prod Key Val)) (h : Prod Key Val) (t : List (Prod Key Val)) => elim (fun (z : List (Prod Key Val)) => Path (List (Prod Key Val)) (canonApp z (cons h t)) (canonApp (canonApp z (cons h nil)) t))\n"
+  "    refl\n"
+  "    (fun (x : Prod Key Val) (xs : List (Prod Key Val)) (ih : Path (List (Prod Key Val)) (canonApp xs (cons h t)) (canonApp (canonApp xs (cons h nil)) t)) => fun (i : I) => cons x (ih @ i))\n"
+  "    a\n"
+  "def inclEntry : (k : Key) -> (v : Val) -> (r : Digest) -> (ds : List Digest) -> (l : List (Prod Key Val)) -> (a : List (Prod Key Val)) -> Path Digest (inclVerify k v (pair ds r)) (root l) -> Path Flag (keysSorted (canonApp a l)) flagYes -> Path (Maybe Val) (canonGet k (canonApp a l)) (some v) :=\n"
+  "  fun (k : Key) (v : Val) (r : Digest) (ds : List Digest) => elim (fun (z : List Digest) => (l : List (Prod Key Val)) -> (a : List (Prod Key Val)) -> Path Digest (inclVerify k v (pair z r)) (root l) -> Path Flag (keysSorted (canonApp a l)) flagYes -> Path (Maybe Val) (canonGet k (canonApp a l)) (some v))\n"
+  "    (fun (l : List (Prod Key Val)) => elim (fun (y : List (Prod Key Val)) => (a : List (Prod Key Val)) -> Path Digest (inclVerify k v (pair nil r)) (root y) -> Path Flag (keysSorted (canonApp a y)) flagYes -> Path (Maybe Val) (canonGet k (canonApp a y)) (some v))\n"
+  "      (fun (a : List (Prod Key Val)) (pv : Path Digest (inclVerify k v (pair nil r)) (root nil)) (ps : Path Flag (keysSorted (canonApp a nil)) flagYes) => flagAbsurd (Maybe Val) (canonGet k (canonApp a nil)) (some v) (nodeNotEmpty (storeLeaf k v) r pv))\n"
+  "      (fun (h : Prod Key Val) (t : List (Prod Key Val)) (ih : (a : List (Prod Key Val)) -> Path Digest (inclVerify k v (pair nil r)) (root t) -> Path Flag (keysSorted (canonApp a t)) flagYes -> Path (Maybe Val) (canonGet k (canonApp a t)) (some v)) (a : List (Prod Key Val)) (pv : Path Digest (inclVerify k v (pair nil r)) (root (cons h t))) (ps : Path Flag (keysSorted (canonApp a (cons h t))) flagYes) =>\n"
+  "        trans (Maybe Val) (canonGet k (canonApp a (cons h t))) (canonGet (first h) (canonApp a (cons h t))) (some v)\n"
+  "          (fun (i : I) => canonGet ((first (storeLeafInj k (first h) v (second h) (first (nodeDigestInj (storeLeaf k v) r (storeLeaf (first h) (second h)) (root t) pv)))) @ i) (canonApp a (cons h t)))\n"
+  "          (trans (Maybe Val) (canonGet (first h) (canonApp a (cons h t))) (some (second h)) (some v)\n"
+  "            (entryGet (first h) (second h) t a ps)\n"
+  "            (fun (i : I) => some ((second (storeLeafInj k (first h) v (second h) (first (nodeDigestInj (storeLeaf k v) r (storeLeaf (first h) (second h)) (root t) pv)))) @ (~i)))))\n"
+  "      l)\n"
+  "    (fun (d : Digest) (ds2 : List Digest) (ih : (l : List (Prod Key Val)) -> (a : List (Prod Key Val)) -> Path Digest (inclVerify k v (pair ds2 r)) (root l) -> Path Flag (keysSorted (canonApp a l)) flagYes -> Path (Maybe Val) (canonGet k (canonApp a l)) (some v)) (l : List (Prod Key Val)) =>\n"
+  "      elim (fun (y : List (Prod Key Val)) => (a : List (Prod Key Val)) -> Path Digest (inclVerify k v (pair (cons d ds2) r)) (root y) -> Path Flag (keysSorted (canonApp a y)) flagYes -> Path (Maybe Val) (canonGet k (canonApp a y)) (some v))\n"
+  "      (fun (a : List (Prod Key Val)) (pv : Path Digest (inclVerify k v (pair (cons d ds2) r)) (root nil)) (ps : Path Flag (keysSorted (canonApp a nil)) flagYes) => flagAbsurd (Maybe Val) (canonGet k (canonApp a nil)) (some v) (nodeNotEmpty d (inclVerify k v (pair ds2 r)) pv))\n"
+  "      (fun (h : Prod Key Val) (t : List (Prod Key Val)) (ih2 : (a : List (Prod Key Val)) -> Path Digest (inclVerify k v (pair (cons d ds2) r)) (root t) -> Path Flag (keysSorted (canonApp a t)) flagYes -> Path (Maybe Val) (canonGet k (canonApp a t)) (some v)) (a : List (Prod Key Val)) (pv : Path Digest (inclVerify k v (pair (cons d ds2) r)) (root (cons h t))) (ps : Path Flag (keysSorted (canonApp a (cons h t))) flagYes) =>\n"
+  "        trans (Maybe Val) (canonGet k (canonApp a (cons h t))) (canonGet k (canonApp (canonApp a (cons h nil)) t)) (some v)\n"
+  "          (fun (i : I) => canonGet k (appSnoc a h t @ i))\n"
+  "          (ih t (canonApp a (cons h nil)) (second (nodeDigestInj d (inclVerify k v (pair ds2 r)) (storeLeaf (first h) (second h)) (root t) pv))\n"
+  "            (trans Flag (keysSorted (canonApp (canonApp a (cons h nil)) t)) (keysSorted (canonApp a (cons h t))) flagYes (fun (i : I) => keysSorted (appSnoc a h t @ (~i))) ps)))\n"
+  "      l)\n"
+  "    ds\n"
+  "def inclSound : (m : Store) -> (k : Key) -> (v : Val) -> (p : Prod (List Digest) Digest) -> Path Digest (inclVerify k v p) (storeRoot m) -> Path (Maybe Val) (lookup m k) (some v) :=\n"
+  "  fun (m : Store) (k : Key) (v : Val) (p : Prod (List Digest) Digest) (pf : Path Digest (inclVerify k v p) (storeRoot m)) =>\n"
+  "    trans (Maybe Val) (lookup m k) (canonGet k (canon m)) (some v) (fun (i : I) => canonLookup k m @ (~i))\n"
+  "      (inclEntry k v (second p) (first p) (canon m) nil pf (canonIsSorted m))\n";
+
+/* 1 when C can be part of a name in program text. */
+static int name_char(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+/* 1 when TEXT (LEN bytes) holds the N bytes of WORD as a full name. */
+static int text_names(const char *text, size_t len, const char *word, size_t n) {
+  size_t i;
+  for (i = 0; n > 0 && i + n <= len; i++)
+    if (memcmp(text + i, word, n) == 0 && (i == 0 || !name_char(text[i - 1])) && (i + n == len || !name_char(text[i + n])))
+      return 1;
+  return 0;
+}
+
+/* 1 when TEXT names a def of the kernel text BLOCK. Each line of BLOCK
+   that starts with "def " or "def rec " gives one def name. */
+static int text_names_block(const char *text, size_t len, const char *block) {
+  const char *at = block;
+  while (at != NULL) {
+    const char *name = strncmp(at, "def rec ", 8) == 0 ? at + 8 : strncmp(at, "def ", 4) == 0 ? at + 4 : NULL;
+    size_t n = 0;
+    while (name != NULL && name_char(name[n]))
+      n++;
+    if (name != NULL && text_names(text, len, name, n))
+      return 1;
+    at = strchr(at, '\n');
+    at = at != NULL ? at + 1 : NULL;
+  }
+  return 0;
+}
+
+/* The canon set block and canon (quotient-lang S8 u4f4c): the front end
+   adds them only when the program text names one of their defs. The
+   insComm proofs are long. Without this rule, step-hygiene (Val := Size)
+   gets to the arena limit of 1 GiB. A program def with one of these names
+   also names it, thus the front end refuses that def as before. */
+static int store_after_val(Arena *arena, size_t first, const char *text, size_t len, DeclList *out, Diag *diag) {
+  int form = val_form(out, first);
+  const char *set_src = form == 1 ? canon_set_size_source : canon_set_nat_source;
+  size_t set_len = form == 1 ? sizeof canon_set_size_source - 1u : sizeof canon_set_nat_source - 1u;
+  int incl = text_names_block(text, len, incl_source) && text_names(text, len, "emptyDigest", 11u);
+  int o1 = text_names(text, len, "rootInj", 7u) || text_names(text, len, "Valid", 5u) || text_names(text, len, "compose", 7u);
+  int merkle = incl || ((o1 || text_names_block(text, len, merkle_source)) && text_names(text, len, "emptyDigest", 11u));
+  int lemma = incl || text_names_block(text, len, canon_lemma_source);
+  int o3 = incl || text_names(text, len, "nodeDigestInj", 13u) || text_names(text, len, "storeLeafInj", 12u) || text_names(text, len, "nodeNotEmpty", 12u);
+  int canon = merkle || lemma || text_names_block(text, len, set_src) || text_names_block(text, len, canon_source);
+  return splice_after(arena, first, STORE_AFTER, 2u, STORE_SOURCE_NAME, store_source, sizeof store_source - 1u, out, diag)
+      && splice_after(arena, first, LOOKUP_AFTER, 2u, STORE_SOURCE_NAME, lookup_source, sizeof lookup_source - 1u, out, diag)
+      && splice_after(arena, first, STATE_AFTER, 2u, STORE_SOURCE_NAME, state_source, sizeof state_source - 1u, out, diag)
+      && (!canon || splice_after(arena, first, CANON_SET_AFTER, 2u, STORE_SOURCE_NAME, set_src, set_len, out, diag))
+      && (!canon || splice_after(arena, first, CANON_AFTER, 2u, STORE_SOURCE_NAME, canon_source, sizeof canon_source - 1u, out, diag))
+      && (!lemma || splice_after(arena, first, LEMMA_AFTER, 2u, STORE_SOURCE_NAME, canon_lemma_source, sizeof canon_lemma_source - 1u, out, diag))
+      && (!merkle || splice_after(arena, first, MERKLE_AFTER, 4u, STORE_SOURCE_NAME, merkle_source, sizeof merkle_source - 1u, out, diag))
+      && (!(o1 && merkle) || splice_after(arena, first, O1_AFTER, 1u, STORE_SOURCE_NAME, o1_source, sizeof o1_source - 1u, out, diag))
+      && (!o3 || splice_after(arena, first, O3_AFTER, 3u, STORE_SOURCE_NAME, o3_source, sizeof o3_source - 1u, out, diag))
+      && (!incl || splice_after(arena, first, INCL_AFTER, 2u, STORE_SOURCE_NAME, incl_source, sizeof incl_source - 1u, out, diag));
+}
+
+/* The UTxO prelude (quotient-lang S8 u7a2, USER ruling Q-S8-6 (a)). It is
+   the family of store_source with these renames: Store UTxO, Key OutRef,
+   Val Output, keyEq outRefEq, the fm and store names to utxo names, and
+   each field f to u + F (W/s8/u7-plan.txt). A program cannot declare a
+   family (rule R1), thus the kernel adds it. It goes directly after the
+   last of the program defs outRefEq and Output, only when the program
+   defines the two. */
+static const char *const UTXO_AFTER[] = {"outRefEq", "Output"};
+
+static const char utxo_source[] =
+  "family UTxO := utxoEmpty\n"
+  "  | utxoPut (uPutK : OutRef) (uPutV : Output) (uPutM : UTxO)\n"
+  "  | utxoOver (uOverK : OutRef) (uOverV : Output) (uOverW : Output) (uOverM : UTxO) (uOverI : I)\n"
+  "    [ ~uOverI -> utxoPut uOverK uOverV (utxoPut uOverK uOverW uOverM), uOverI -> utxoPut uOverK uOverV uOverM ]\n"
+  "  | utxoComm (uCommK : OutRef) (uCommL : OutRef) (uCommV : Output) (uCommW : Output) (uCommM : UTxO) (uCommNe : Path Flag (outRefEq uCommK uCommL) flagNo) (uCommI : I)\n"
+  "    [ ~uCommI -> utxoPut uCommK uCommV (utxoPut uCommL uCommW uCommM), uCommI -> utxoPut uCommL uCommW (utxoPut uCommK uCommV uCommM) ]\n"
+  "  | utxoSquash (uStoreFrom : UTxO) (uStoreTo : UTxO) (uStoreLeft : Path UTxO uStoreFrom uStoreTo) (uStoreRight : Path UTxO uStoreFrom uStoreTo) (uStoreI : I) (uStoreJ : I)\n"
+  "    [ ~uStoreI -> uStoreLeft @ uStoreJ, uStoreI -> uStoreRight @ uStoreJ, ~uStoreJ -> uStoreFrom, uStoreJ -> uStoreTo ]\n"
+  "def utxoFold : (M : Type 0) -> isSet M -> (e : M) -> (put : OutRef -> Output -> M -> M) -> ((k : OutRef) -> (v : Output) -> (w : Output) -> (m : M) -> Path M (put k v (put k w m)) (put k v m)) -> ((k : OutRef) -> (l : OutRef) -> (v : Output) -> (w : Output) -> (m : M) -> Path Flag (outRefEq k l) flagNo -> Path M (put k v (put l w m)) (put l w (put k v m))) -> UTxO -> M :=\n"
+  "  fun (M : Type 0) (s : isSet M) (e : M) (put : OutRef -> Output -> M -> M) (ov : (k : OutRef) -> (v : Output) -> (w : Output) -> (m : M) -> Path M (put k v (put k w m)) (put k v m)) (cm : (k : OutRef) -> (l : OutRef) -> (v : Output) -> (w : Output) -> (m : M) -> Path Flag (outRefEq k l) flagNo -> Path M (put k v (put l w m)) (put l w (put k v m))) (t : UTxO) =>\n"
+  "    fold e (fun (k : OutRef) (v : Output) (m : M) => put k v m)\n"
+  "      (fun (k : OutRef) (v : Output) (w : Output) (m : M) => fun (uOverI : I) => ov k v w m @ uOverI)\n"
+  "      (fun (k : OutRef) (l : OutRef) (v : Output) (w : Output) (m : M) (p : Path Flag (outRefEq k l) flagNo) => fun (uCommI : I) => cm k l v w m p @ uCommI)\n"
+  "      (fun (x : M) (y : M) (p : Path M x y) (q : Path M x y) => fun (uStoreI : I) => fun (uStoreJ : I) => (s x y p q @ uStoreI) @ uStoreJ) t\n"
+  "def utxoIsSet : isSet UTxO := fun (x : UTxO) (y : UTxO) (p : Path UTxO x y) (q : Path UTxO x y) => fun (i : I) => fun (j : I) => utxoSquash x y p q i j\n";
+
+/* The UTxO prelude (quotient-lang S8 u7a3, USER rulings Q-S8-10 (a) and
+   Q-S8-11 (a)): the canon, the get and the spend of UTxO, and its root.
+   It is a copy of the canon part of the store prelude with the UTxO
+   names. It has its own copies of the generic eq lemmas (uEqNorm*),
+   because the store copies come only with Val. It uses the four program
+   proofs for the outRefEq and outRefLe facts. The cset is the entry eq
+   by the form of the program def Output: Size gives sizeEq and Nat gives
+   natEq. With another form, the front end adds only the family. The
+   front end adds the cset after outRefEq, Output, outRefLe, the four
+   proofs and natIsSet, then the main block after the cset. A program
+   without Val has no set prelude: then the front end first adds the set
+   prelude after the four proofs. The root block goes after utxoSpend and
+   the SIG_PROGRAM names utxoLeaf, nodeDigest and emptyDigest. */
+static const char *const UTXO_PROOF_AFTER[] = {"outRefEq", "Output", "outRefLe", "outRefEqSound", "outRefEqRefl", "outRefLeFlip", "outRefLeTrans", "natIsSet"};
+static const char *const UTXO_MAIN_AFTER[] = {"uCanonEntryRefl"};
+static const char *const UTXO_ROOT_AFTER[] = {"utxoSpend", "utxoLeaf", "nodeDigest", "emptyDigest"};
+
+static const char utxo_cset_nat_source[] =
+  "def uCanonEntryEq : Prod OutRef Output -> Prod OutRef Output -> Flag := prodEq OutRef Output outRefEq natEq\n"
+  "def uCanonEntrySound : (a : Prod OutRef Output) -> (b : Prod OutRef Output) -> Path Flag (uCanonEntryEq a b) flagYes -> Path (Prod OutRef Output) a b := prodEqSound OutRef Output outRefEq natEq outRefEqSound natEqSound\n"
+  "def uCanonEntryRefl : (a : Prod OutRef Output) -> Path Flag (uCanonEntryEq a a) flagYes := prodEqRefl OutRef Output outRefEq natEq outRefEqRefl natEqRefl\n";
+
+static const char utxo_cset_size_source[] =
+  "def uCanonEntryEq : Prod OutRef Output -> Prod OutRef Output -> Flag := prodEq OutRef Output outRefEq sizeEq\n"
+  "def uCanonEntrySound : (a : Prod OutRef Output) -> (b : Prod OutRef Output) -> Path Flag (uCanonEntryEq a b) flagYes -> Path (Prod OutRef Output) a b := prodEqSound OutRef Output outRefEq sizeEq outRefEqSound sizeEqSound\n"
+  "def uCanonEntryRefl : (a : Prod OutRef Output) -> Path Flag (uCanonEntryEq a a) flagYes := prodEqRefl OutRef Output outRefEq sizeEq outRefEqRefl sizeEqRefl\n";
+
+static const char utxo_canon_source[] =
+  "def uLookupSel : Flag -> Output -> Maybe Output -> Maybe Output := fun (f : Flag) (v : Output) (r : Maybe Output) => elim (fun (z : Flag) => Maybe Output) (some v) r f\n"
+  "def uEqNormAt : (A : Type 0) -> (eqA : A -> A -> Flag) -> ((a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> (a : A) -> (x : A) -> Path A a x -> (f : Flag) -> Path Flag (eqA a x) f -> Path A a x :=\n"
+  "  fun (A : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (a : A) (x : A) (p : Path A a x) (f : Flag) =>\n"
+  "    elim (fun (g : Flag) => Path Flag (eqA a x) g -> Path A a x) (fun (e : Path Flag (eqA a x) flagYes) => sA a x e) (fun (e : Path Flag (eqA a x) flagNo) => p) f\n"
+  "def uEqNorm : (A : Type 0) -> (eqA : A -> A -> Flag) -> ((a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> (a : A) -> (x : A) -> Path A a x -> Path A a x :=\n"
+  "  fun (A : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (a : A) (x : A) (p : Path A a x) => uEqNormAt A eqA sA a x p (eqA a x) (fun (i : I) => eqA a x)\n"
+  "def uEqNormConst : (A : Type 0) -> (eqA : A -> A -> Flag) -> (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> ((a : A) -> Path Flag (eqA a a) flagYes) -> (a : A) -> (x : A) -> (p : Path A a x) -> (q : Path A a x) -> Path (Path A a x) (uEqNorm A eqA sA a x p) (uEqNorm A eqA sA a x q) :=\n"
+  "  fun (A : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (rA : (a : A) -> Path Flag (eqA a a) flagYes) (a : A) (x : A) (p : Path A a x) (q : Path A a x) =>\n"
+  "    (elim (fun (g : Flag) => (e : Path Flag (eqA a x) g) -> Path (Path A a x) (uEqNormAt A eqA sA a x p g e) (uEqNormAt A eqA sA a x q g e))\n"
+  "      (fun (e : Path Flag (eqA a x) flagYes) => fun (j : I) => sA a x e)\n"
+  "      (fun (e : Path Flag (eqA a x) flagNo) => setAbsurd (Path A a x) p q (trans Flag flagNo (eqA a x) flagYes (fun (j : I) => e @ (~j)) (trans Flag (eqA a x) (eqA a a) flagYes (fun (j : I) => eqA a (p @ (~j))) (rA a))))\n"
+  "      (eqA a x)) (fun (i : I) => eqA a x)\n"
+  "def uEqIsSet : (A : Type 0) -> (eqA : A -> A -> Flag) -> ((a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) -> ((a : A) -> Path Flag (eqA a a) flagYes) -> isSet A :=\n"
+  "  fun (A : Type 0) (eqA : A -> A -> Flag) (sA : (a : A) -> (b : A) -> Path Flag (eqA a b) flagYes -> Path A a b) (rA : (a : A) -> Path Flag (eqA a a) flagYes) => stableIsSet A (uEqNorm A eqA sA) (uEqNormConst A eqA sA rA)\n"
+  "def outRefIsSet : isSet OutRef := uEqIsSet OutRef outRefEq outRefEqSound outRefEqRefl\n"
+  "def uCanonIsSet : isSet (List (Prod OutRef Output)) := uEqIsSet (List (Prod OutRef Output)) (listEq (Prod OutRef Output) uCanonEntryEq) (listEqSound (Prod OutRef Output) uCanonEntryEq uCanonEntrySound) (listEqRefl (Prod OutRef Output) uCanonEntryEq uCanonEntryRefl)\n"
+  "def uCanonStepAt : Flag -> Flag -> OutRef -> Output -> Prod OutRef Output -> List (Prod OutRef Output) -> List (Prod OutRef Output) -> List (Prod OutRef Output) :=\n"
+  "  fun (e : Flag) (le : Flag) (k : OutRef) (v : Output) (h : Prod OutRef Output) (t : List (Prod OutRef Output)) (r : List (Prod OutRef Output)) => flagIf e (cons (pair k v) t) (flagIf le (cons (pair k v) (cons h t)) (cons h r))\n"
+  "def uCanonStep : OutRef -> Output -> Prod OutRef Output -> List (Prod OutRef Output) -> List (Prod OutRef Output) -> List (Prod OutRef Output) :=\n"
+  "  fun (k : OutRef) (v : Output) (h : Prod OutRef Output) (t : List (Prod OutRef Output)) (r : List (Prod OutRef Output)) => uCanonStepAt (outRefEq k (first h)) (outRefLe k (first h)) k v h t r\n"
+  "def uCanonPara : OutRef -> Output -> List (Prod OutRef Output) -> Prod (List (Prod OutRef Output)) (List (Prod OutRef Output)) :=\n"
+  "  fun (k : OutRef) (v : Output) (m : List (Prod OutRef Output)) => fold (fun (h : Prod OutRef Output) (acc : Prod (List (Prod OutRef Output)) (List (Prod OutRef Output))) => pair (cons h (first acc)) (uCanonStep k v h (first acc) (second acc))) (pair nil (cons (pair k v) nil)) m\n"
+  "def uCanonInsert : OutRef -> Output -> List (Prod OutRef Output) -> List (Prod OutRef Output) :=\n"
+  "  fun (k : OutRef) (v : Output) (m : List (Prod OutRef Output)) => second (uCanonPara k v m)\n"
+  "def uInsFirst : (k : OutRef) -> (v : Output) -> (m : List (Prod OutRef Output)) -> Path (List (Prod OutRef Output)) (first (uCanonPara k v m)) m :=\n"
+  "  fun (k : OutRef) (v : Output) (m : List (Prod OutRef Output)) => elim (fun (z : List (Prod OutRef Output)) => Path (List (Prod OutRef Output)) (first (uCanonPara k v z)) z) refl (fun (h : Prod OutRef Output) (t : List (Prod OutRef Output)) (ih : Path (List (Prod OutRef Output)) (first (uCanonPara k v t)) t) => fun (i : I) => cons h (ih @ i)) m\n"
+  "def uInsCons : (k : OutRef) -> (v : Output) -> (h : Prod OutRef Output) -> (t : List (Prod OutRef Output)) -> Path (List (Prod OutRef Output)) (uCanonInsert k v (cons h t)) (uCanonStep k v h t (uCanonInsert k v t)) :=\n"
+  "  fun (k : OutRef) (v : Output) (h : Prod OutRef Output) (t : List (Prod OutRef Output)) => fun (i : I) => uCanonStep k v h (uInsFirst k v t @ i) (uCanonInsert k v t)\n"
+  "def uInsHit : (k : OutRef) -> (v : Output) -> (w : Output) -> (t : List (Prod OutRef Output)) -> Path (List (Prod OutRef Output)) (uCanonInsert k v (cons (pair k w) t)) (cons (pair k v) t) :=\n"
+  "  fun (k : OutRef) (v : Output) (w : Output) (t : List (Prod OutRef Output)) => trans (List (Prod OutRef Output)) (uCanonInsert k v (cons (pair k w) t)) (uCanonStep k v (pair k w) t (uCanonInsert k v t)) (cons (pair k v) t) (uInsCons k v (pair k w) t) (fun (i : I) => uCanonStepAt (outRefEqRefl k @ i) (outRefLe k k) k v (pair k w) t (uCanonInsert k v t))\n"
+  "def uInsOverAt : (k : OutRef) -> (v : Output) -> (w : Output) -> (h : Prod OutRef Output) -> (t : List (Prod OutRef Output)) -> Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonInsert k w t)) (uCanonInsert k v t) -> (e : Flag) -> Path Flag (outRefEq k (first h)) e -> (le : Flag) -> Path Flag (outRefLe k (first h)) le -> Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonStepAt e le k w h t (uCanonInsert k w t))) (uCanonStepAt e le k v h t (uCanonInsert k v t)) :=\n"
+  "  fun (k : OutRef) (v : Output) (w : Output) (h : Prod OutRef Output) (t : List (Prod OutRef Output)) (ih : Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonInsert k w t)) (uCanonInsert k v t)) (e : Flag) =>\n"
+  "    elim (fun (f : Flag) => Path Flag (outRefEq k (first h)) f -> (le : Flag) -> Path Flag (outRefLe k (first h)) le -> Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonStepAt f le k w h t (uCanonInsert k w t))) (uCanonStepAt f le k v h t (uCanonInsert k v t)))\n"
+  "      (fun (pe : Path Flag (outRefEq k (first h)) flagYes) (le : Flag) (pl : Path Flag (outRefLe k (first h)) le) => uInsHit k v w t)\n"
+  "      (fun (pe : Path Flag (outRefEq k (first h)) flagNo) (le : Flag) =>\n"
+  "        elim (fun (g : Flag) => Path Flag (outRefLe k (first h)) g -> Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonStepAt flagNo g k w h t (uCanonInsert k w t))) (uCanonStepAt flagNo g k v h t (uCanonInsert k v t)))\n"
+  "          (fun (pl : Path Flag (outRefLe k (first h)) flagYes) => uInsHit k v w (cons h t))\n"
+  "          (fun (pl : Path Flag (outRefLe k (first h)) flagNo) => trans (List (Prod OutRef Output)) (uCanonInsert k v (cons h (uCanonInsert k w t))) (uCanonStep k v h (uCanonInsert k w t) (uCanonInsert k v (uCanonInsert k w t))) (cons h (uCanonInsert k v t)) (uInsCons k v h (uCanonInsert k w t)) (trans (List (Prod OutRef Output)) (uCanonStep k v h (uCanonInsert k w t) (uCanonInsert k v (uCanonInsert k w t))) (cons h (uCanonInsert k v (uCanonInsert k w t))) (cons h (uCanonInsert k v t)) (fun (i : I) => uCanonStepAt (pe @ i) (pl @ i) k v h (uCanonInsert k w t) (uCanonInsert k v (uCanonInsert k w t))) (fun (i : I) => cons h (ih @ i))))\n"
+  "          le)\n"
+  "      e\n"
+  "def uInsOver : (k : OutRef) -> (v : Output) -> (w : Output) -> (m : List (Prod OutRef Output)) -> Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonInsert k w m)) (uCanonInsert k v m) :=\n"
+  "  fun (k : OutRef) (v : Output) (w : Output) (m : List (Prod OutRef Output)) => elim (fun (z : List (Prod OutRef Output)) => Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonInsert k w z)) (uCanonInsert k v z))\n"
+  "    (fun (i : I) => uCanonStepAt (outRefEqRefl k @ i) (outRefLe k k) k v (pair k w) nil (cons (pair k v) nil))\n"
+  "    (fun (h : Prod OutRef Output) (t : List (Prod OutRef Output)) (ih : Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonInsert k w t)) (uCanonInsert k v t)) =>\n"
+  "      trans (List (Prod OutRef Output)) (uCanonInsert k v (uCanonInsert k w (cons h t))) (uCanonInsert k v (uCanonStep k w h t (uCanonInsert k w t))) (uCanonInsert k v (cons h t))\n"
+  "        (fun (i : I) => uCanonInsert k v (uInsCons k w h t @ i))\n"
+  "        (trans (List (Prod OutRef Output)) (uCanonInsert k v (uCanonStep k w h t (uCanonInsert k w t))) (uCanonStep k v h t (uCanonInsert k v t)) (uCanonInsert k v (cons h t))\n"
+  "          (uInsOverAt k v w h t ih (outRefEq k (first h)) (fun (i : I) => outRefEq k (first h)) (outRefLe k (first h)) (fun (i : I) => outRefLe k (first h)))\n"
+  "          (fun (i : I) => uInsCons k v h t @ (~i))))\n"
+  "    m\n"
+  "def outRefEqSymNo : (k : OutRef) -> (l : OutRef) -> Path Flag (outRefEq k l) flagNo -> Path Flag (outRefEq l k) flagNo :=\n"
+  "  fun (k : OutRef) (l : OutRef) (ne : Path Flag (outRefEq k l) flagNo) => elim (fun (f : Flag) => Path Flag (outRefEq l k) f -> Path Flag f flagNo) (fun (p : Path Flag (outRefEq l k) flagYes) => flagAbsurd Flag flagYes flagNo (trans Flag flagNo (outRefEq k l) flagYes (fun (i : I) => ne @ (~i)) (trans Flag (outRefEq k l) (outRefEq k k) flagYes (fun (i : I) => outRefEq k (outRefEqSound l k p @ i)) (outRefEqRefl k)))) (fun (p : Path Flag (outRefEq l k) flagNo) => refl) (outRefEq l k) (fun (i : I) => outRefEq l k)\n"
+  "def outRefLeAnti : (k : OutRef) -> (l : OutRef) -> Path Flag (outRefEq k l) flagNo -> Path Flag (outRefLe k l) flagYes -> Path Flag (outRefLe l k) flagNo :=\n"
+  "  fun (k : OutRef) (l : OutRef) (ne : Path Flag (outRefEq k l) flagNo) (p : Path Flag (outRefLe k l) flagYes) => trans Flag (outRefLe l k) (flagIf (outRefLe k l) flagNo flagYes) flagNo (outRefLeFlip k l ne) (fun (i : I) => flagIf (p @ i) flagNo flagYes)\n"
+  "def outRefLeTot : (k : OutRef) -> (l : OutRef) -> Path Flag (outRefEq k l) flagNo -> Path Flag (outRefLe k l) flagNo -> Path Flag (outRefLe l k) flagYes :=\n"
+  "  fun (k : OutRef) (l : OutRef) (ne : Path Flag (outRefEq k l) flagNo) (p : Path Flag (outRefLe k l) flagNo) => trans Flag (outRefLe l k) (flagIf (outRefLe k l) flagNo flagYes) flagYes (outRefLeFlip k l ne) (fun (i : I) => flagIf (p @ i) flagNo flagYes)\n"
+  "def uInsCommNil : (k : OutRef) -> (l : OutRef) -> (v : Output) -> (w : Output) -> Path Flag (outRefEq k l) flagNo -> Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonInsert l w nil)) (uCanonInsert l w (uCanonInsert k v nil)) :=\n"
+  "  fun (k : OutRef) (l : OutRef) (v : Output) (w : Output) (ne : Path Flag (outRefEq k l) flagNo) =>\n"
+  "    trans (List (Prod OutRef Output)) (uCanonStepAt (outRefEq k l) (outRefLe k l) k v (pair l w) nil (cons (pair k v) nil)) (uCanonStepAt flagNo (outRefLe k l) k v (pair l w) nil (cons (pair k v) nil)) (uCanonStepAt (outRefEq l k) (outRefLe l k) l w (pair k v) nil (cons (pair l w) nil))\n"
+  "      (fun (i : I) => uCanonStepAt (ne @ i) (outRefLe k l) k v (pair l w) nil (cons (pair k v) nil))\n"
+  "      (trans (List (Prod OutRef Output)) (uCanonStepAt flagNo (outRefLe k l) k v (pair l w) nil (cons (pair k v) nil)) (uCanonStepAt flagNo (flagIf (outRefLe k l) flagNo flagYes) l w (pair k v) nil (cons (pair l w) nil)) (uCanonStepAt (outRefEq l k) (outRefLe l k) l w (pair k v) nil (cons (pair l w) nil))\n"
+  "        (elim (fun (g : Flag) => Path (List (Prod OutRef Output)) (uCanonStepAt flagNo g k v (pair l w) nil (cons (pair k v) nil)) (uCanonStepAt flagNo (flagIf g flagNo flagYes) l w (pair k v) nil (cons (pair l w) nil))) refl refl (outRefLe k l))\n"
+  "        (fun (i : I) => uCanonStepAt (outRefEqSymNo k l ne @ (~i)) (outRefLeFlip k l ne @ (~i)) l w (pair k v) nil (cons (pair l w) nil)))\n"
+  "def outRefLeNotTrans : (a : OutRef) -> (b : OutRef) -> (c : OutRef) -> Path Flag (outRefLe a c) flagNo -> Path Flag (outRefLe b c) flagYes -> Path Flag (outRefLe a b) flagNo :=\n"
+  "  fun (a : OutRef) (b : OutRef) (c : OutRef) (pAC : Path Flag (outRefLe a c) flagNo) (pBC : Path Flag (outRefLe b c) flagYes) => elim (fun (f : Flag) => Path Flag (outRefLe a b) f -> Path Flag f flagNo) (fun (p : Path Flag (outRefLe a b) flagYes) => flagAbsurd Flag flagYes flagNo (trans Flag flagNo (outRefLe a c) flagYes (fun (i : I) => pAC @ (~i)) (outRefLeTrans a b c p pBC))) (fun (p : Path Flag (outRefLe a b) flagNo) => refl) (outRefLe a b) (fun (i : I) => outRefLe a b)\n"
+  "def uInsAt : (k : OutRef) -> (v : Output) -> (h : Prod OutRef Output) -> (t : List (Prod OutRef Output)) -> (e : Flag) -> Path Flag (outRefEq k (first h)) e -> (le : Flag) -> Path Flag (outRefLe k (first h)) le -> Path (List (Prod OutRef Output)) (uCanonInsert k v (cons h t)) (uCanonStepAt e le k v h t (uCanonInsert k v t)) :=\n"
+  "  fun (k : OutRef) (v : Output) (h : Prod OutRef Output) (t : List (Prod OutRef Output)) (e : Flag) (pe : Path Flag (outRefEq k (first h)) e) (le : Flag) (pl : Path Flag (outRefLe k (first h)) le) => trans (List (Prod OutRef Output)) (uCanonInsert k v (cons h t)) (uCanonStep k v h t (uCanonInsert k v t)) (uCanonStepAt e le k v h t (uCanonInsert k v t)) (uInsCons k v h t) (fun (i : I) => uCanonStepAt (pe @ i) (pl @ i) k v h t (uCanonInsert k v t))\n"
+  "def uInsCommEq : (k : OutRef) -> (l : OutRef) -> (v : Output) -> (w : Output) -> (h : Prod OutRef Output) -> (t : List (Prod OutRef Output)) -> Path Flag (outRefEq k l) flagNo -> Path Flag (outRefEq l (first h)) flagYes -> (lL : Flag) -> Path Flag (outRefLe l (first h)) lL -> (eK : Flag) -> Path Flag (outRefEq k (first h)) eK -> (lK : Flag) -> Path Flag (outRefLe k (first h)) lK -> Path (List (Prod OutRef Output)) (uCanonInsert k v (cons (pair l w) t)) (uCanonInsert l w (uCanonStepAt eK lK k v h t (uCanonInsert k v t))) :=\n"
+  "  fun (k : OutRef) (l : OutRef) (v : Output) (w : Output) (h : Prod OutRef Output) (t : List (Prod OutRef Output)) (ne : Path Flag (outRefEq k l) flagNo) (pEL : Path Flag (outRefEq l (first h)) flagYes) (lL : Flag) (pLL : Path Flag (outRefLe l (first h)) lL) (eK : Flag) =>\n"
+  "    elim (fun (e : Flag) => Path Flag (outRefEq k (first h)) e -> (lK : Flag) -> Path Flag (outRefLe k (first h)) lK -> Path (List (Prod OutRef Output)) (uCanonInsert k v (cons (pair l w) t)) (uCanonInsert l w (uCanonStepAt e lK k v h t (uCanonInsert k v t))))\n"
+  "      (fun (pE : Path Flag (outRefEq k (first h)) flagYes) (g : Flag) (pG : Path Flag (outRefLe k (first h)) g) => flagAbsurd (List (Prod OutRef Output)) (uCanonInsert k v (cons (pair l w) t)) (uCanonInsert l w (uCanonStepAt flagYes g k v h t (uCanonInsert k v t))) (trans Flag flagNo (outRefEq k l) flagYes (fun (i : I) => ne @ (~i)) (trans Flag (outRefEq k l) (outRefEq k (first h)) flagYes (fun (i : I) => outRefEq k (outRefEqSound l (first h) pEL @ i)) pE)))\n"
+  "      (fun (pE : Path Flag (outRefEq k (first h)) flagNo) (g : Flag) => elim (fun (g2 : Flag) => Path Flag (outRefLe k (first h)) g2 -> Path (List (Prod OutRef Output)) (uCanonInsert k v (cons (pair l w) t)) (uCanonInsert l w (uCanonStepAt flagNo g2 k v h t (uCanonInsert k v t))))\n"
+  "        (fun (pG : Path Flag (outRefLe k (first h)) flagYes) =>\n"
+  "          trans (List (Prod OutRef Output)) (uCanonInsert k v (cons (pair l w) t)) (cons (pair k v) (cons (pair l w) t)) (uCanonInsert l w (cons (pair k v) (cons h t)))\n"
+  "            (uInsAt k v (pair l w) t flagNo ne flagYes (trans Flag (outRefLe k l) (outRefLe k (first h)) flagYes (fun (i : I) => outRefLe k (outRefEqSound l (first h) pEL @ i)) pG))\n"
+  "            (fun (j : I) => (trans (List (Prod OutRef Output)) (uCanonInsert l w (cons (pair k v) (cons h t))) (cons (pair k v) (uCanonInsert l w (cons h t))) (cons (pair k v) (cons (pair l w) t)) (uInsAt l w (pair k v) (cons h t) flagNo (outRefEqSymNo k l ne) flagNo (outRefLeAnti k l ne (trans Flag (outRefLe k l) (outRefLe k (first h)) flagYes (fun (i : I) => outRefLe k (outRefEqSound l (first h) pEL @ i)) pG))) (fun (i : I) => cons (pair k v) (uInsAt l w h t flagYes pEL lL pLL @ i))) @ (~j)))\n"
+  "        (fun (pG : Path Flag (outRefLe k (first h)) flagNo) =>\n"
+  "          trans (List (Prod OutRef Output)) (uCanonInsert k v (cons (pair l w) t)) (cons (pair l w) (uCanonInsert k v t)) (uCanonInsert l w (cons h (uCanonInsert k v t)))\n"
+  "            (uInsAt k v (pair l w) t flagNo ne flagNo (trans Flag (outRefLe k l) (outRefLe k (first h)) flagNo (fun (i : I) => outRefLe k (outRefEqSound l (first h) pEL @ i)) pG))\n"
+  "            (fun (j : I) => uInsAt l w h (uCanonInsert k v t) flagYes pEL lL pLL @ (~j)))\n"
+  "        g)\n"
+  "      eK\n"
+  "def uInsCommLt : (k : OutRef) -> (l : OutRef) -> (v : Output) -> (w : Output) -> (h : Prod OutRef Output) -> (t : List (Prod OutRef Output)) -> Path Flag (outRefEq k l) flagNo -> Path Flag (outRefEq l (first h)) flagNo -> Path Flag (outRefLe l (first h)) flagYes -> (eK : Flag) -> Path Flag (outRefEq k (first h)) eK -> (lK : Flag) -> Path Flag (outRefLe k (first h)) lK -> Path (List (Prod OutRef Output)) (uCanonInsert k v (cons (pair l w) (cons h t))) (uCanonInsert l w (uCanonStepAt eK lK k v h t (uCanonInsert k v t))) :=\n"
+  "  fun (k : OutRef) (l : OutRef) (v : Output) (w : Output) (h : Prod OutRef Output) (t : List (Prod OutRef Output)) (ne : Path Flag (outRefEq k l) flagNo) (pEL : Path Flag (outRefEq l (first h)) flagNo) (pLL : Path Flag (outRefLe l (first h)) flagYes) (eK : Flag) (pEK : Path Flag (outRefEq k (first h)) eK) (lK : Flag) (pLK : Path Flag (outRefLe k (first h)) lK) =>\n"
+  "    elim (fun (c : Flag) => Path Flag (outRefLe k l) c -> Path (List (Prod OutRef Output)) (uCanonInsert k v (cons (pair l w) (cons h t))) (uCanonInsert l w (uCanonStepAt eK lK k v h t (uCanonInsert k v t))))\n"
+  "      (fun (pC : Path Flag (outRefLe k l) flagYes) =>\n"
+  "        trans (List (Prod OutRef Output)) (uCanonInsert k v (cons (pair l w) (cons h t))) (cons (pair k v) (cons (pair l w) (cons h t))) (uCanonInsert l w (uCanonStepAt eK lK k v h t (uCanonInsert k v t)))\n"
+  "          (uInsAt k v (pair l w) (cons h t) flagNo ne flagYes pC)\n"
+  "          (elim (fun (e : Flag) => Path Flag (outRefEq k (first h)) e -> (g : Flag) -> Path Flag (outRefLe k (first h)) g -> Path (List (Prod OutRef Output)) (cons (pair k v) (cons (pair l w) (cons h t))) (uCanonInsert l w (uCanonStepAt e g k v h t (uCanonInsert k v t))))\n"
+  "            (fun (pE : Path Flag (outRefEq k (first h)) flagYes) (g : Flag) (pG : Path Flag (outRefLe k (first h)) g) => flagAbsurd (List (Prod OutRef Output)) (cons (pair k v) (cons (pair l w) (cons h t))) (uCanonInsert l w (uCanonStepAt flagYes g k v h t (uCanonInsert k v t))) (trans Flag flagNo (outRefLe l k) flagYes (fun (i : I) => outRefLeAnti k l ne pC @ (~i)) (trans Flag (outRefLe l k) (outRefLe l (first h)) flagYes (fun (i : I) => outRefLe l (outRefEqSound k (first h) pE @ i)) pLL)))\n"
+  "            (fun (pE : Path Flag (outRefEq k (first h)) flagNo) (g : Flag) (pG : Path Flag (outRefLe k (first h)) g) =>\n"
+  "              trans (List (Prod OutRef Output)) (cons (pair k v) (cons (pair l w) (cons h t))) (cons (pair k v) (uCanonInsert l w (cons h t))) (uCanonInsert l w (uCanonStepAt flagNo g k v h t (uCanonInsert k v t)))\n"
+  "                (fun (j : I) => cons (pair k v) (uInsAt l w h t flagNo pEL flagYes pLL @ (~j)))\n"
+  "                (trans (List (Prod OutRef Output)) (cons (pair k v) (uCanonInsert l w (cons h t))) (uCanonInsert l w (cons (pair k v) (cons h t))) (uCanonInsert l w (uCanonStepAt flagNo g k v h t (uCanonInsert k v t)))\n"
+  "                  (fun (j : I) => uInsAt l w (pair k v) (cons h t) flagNo (outRefEqSymNo k l ne) flagNo (outRefLeAnti k l ne pC) @ (~j))\n"
+  "                  (fun (j : I) => uCanonInsert l w (uCanonStepAt flagNo (trans Flag g (outRefLe k (first h)) flagYes (fun (i : I) => pG @ (~i)) (outRefLeTrans k l (first h) pC pLL) @ (~j)) k v h t (uCanonInsert k v t)))))\n"
+  "            eK pEK lK pLK))\n"
+  "      (fun (pC : Path Flag (outRefLe k l) flagNo) =>\n"
+  "        trans (List (Prod OutRef Output)) (uCanonInsert k v (cons (pair l w) (cons h t))) (cons (pair l w) (uCanonInsert k v (cons h t))) (uCanonInsert l w (uCanonStepAt eK lK k v h t (uCanonInsert k v t)))\n"
+  "          (uInsAt k v (pair l w) (cons h t) flagNo ne flagNo pC)\n"
+  "          (trans (List (Prod OutRef Output)) (cons (pair l w) (uCanonInsert k v (cons h t))) (cons (pair l w) (uCanonStepAt eK lK k v h t (uCanonInsert k v t))) (uCanonInsert l w (uCanonStepAt eK lK k v h t (uCanonInsert k v t)))\n"
+  "            (fun (j : I) => cons (pair l w) (uInsAt k v h t eK pEK lK pLK @ j))\n"
+  "            (elim (fun (e : Flag) => (g : Flag) -> Path (List (Prod OutRef Output)) (cons (pair l w) (uCanonStepAt e g k v h t (uCanonInsert k v t))) (uCanonInsert l w (uCanonStepAt e g k v h t (uCanonInsert k v t))))\n"
+  "              (fun (g : Flag) => fun (j : I) => uInsAt l w (pair k v) t flagNo (outRefEqSymNo k l ne) flagYes (outRefLeTot k l ne pC) @ (~j))\n"
+  "              (fun (g : Flag) => elim (fun (g2 : Flag) => Path (List (Prod OutRef Output)) (cons (pair l w) (uCanonStepAt flagNo g2 k v h t (uCanonInsert k v t))) (uCanonInsert l w (uCanonStepAt flagNo g2 k v h t (uCanonInsert k v t))))\n"
+  "                (fun (j : I) => uInsAt l w (pair k v) (cons h t) flagNo (outRefEqSymNo k l ne) flagYes (outRefLeTot k l ne pC) @ (~j))\n"
+  "                (fun (j : I) => uInsAt l w h (uCanonInsert k v t) flagNo pEL flagYes pLL @ (~j))\n"
+  "                g)\n"
+  "              eK lK)))\n"
+  "      (outRefLe k l) (fun (i : I) => outRefLe k l)\n"
+  "def uInsCommGt : (k : OutRef) -> (l : OutRef) -> (v : Output) -> (w : Output) -> (h : Prod OutRef Output) -> (t : List (Prod OutRef Output)) -> Path Flag (outRefEq k l) flagNo -> Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonInsert l w t)) (uCanonInsert l w (uCanonInsert k v t)) -> Path Flag (outRefEq l (first h)) flagNo -> Path Flag (outRefLe l (first h)) flagNo -> (eK : Flag) -> Path Flag (outRefEq k (first h)) eK -> (lK : Flag) -> Path Flag (outRefLe k (first h)) lK -> Path (List (Prod OutRef Output)) (uCanonInsert k v (cons h (uCanonInsert l w t))) (uCanonInsert l w (uCanonStepAt eK lK k v h t (uCanonInsert k v t))) :=\n"
+  "  fun (k : OutRef) (l : OutRef) (v : Output) (w : Output) (h : Prod OutRef Output) (t : List (Prod OutRef Output)) (ne : Path Flag (outRefEq k l) flagNo) (ih : Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonInsert l w t)) (uCanonInsert l w (uCanonInsert k v t))) (pEL : Path Flag (outRefEq l (first h)) flagNo) (pLL : Path Flag (outRefLe l (first h)) flagNo) (eK : Flag) (pEK : Path Flag (outRefEq k (first h)) eK) (lK : Flag) (pLK : Path Flag (outRefLe k (first h)) lK) =>\n"
+  "    trans (List (Prod OutRef Output)) (uCanonInsert k v (cons h (uCanonInsert l w t))) (uCanonStepAt eK lK k v h (uCanonInsert l w t) (uCanonInsert k v (uCanonInsert l w t))) (uCanonInsert l w (uCanonStepAt eK lK k v h t (uCanonInsert k v t)))\n"
+  "      (uInsAt k v h (uCanonInsert l w t) eK pEK lK pLK)\n"
+  "      (elim (fun (e : Flag) => Path Flag (outRefEq k (first h)) e -> (g : Flag) -> Path Flag (outRefLe k (first h)) g -> Path (List (Prod OutRef Output)) (uCanonStepAt e g k v h (uCanonInsert l w t) (uCanonInsert k v (uCanonInsert l w t))) (uCanonInsert l w (uCanonStepAt e g k v h t (uCanonInsert k v t))))\n"
+  "        (fun (pE : Path Flag (outRefEq k (first h)) flagYes) (g : Flag) (pG : Path Flag (outRefLe k (first h)) g) => fun (j : I) => uInsAt l w (pair k v) t flagNo (outRefEqSymNo k l ne) flagNo (trans Flag (outRefLe l k) (outRefLe l (first h)) flagNo (fun (i : I) => outRefLe l (outRefEqSound k (first h) pE @ i)) pLL) @ (~j))\n"
+  "        (fun (pE : Path Flag (outRefEq k (first h)) flagNo) (g : Flag) => elim (fun (g2 : Flag) => Path Flag (outRefLe k (first h)) g2 -> Path (List (Prod OutRef Output)) (uCanonStepAt flagNo g2 k v h (uCanonInsert l w t) (uCanonInsert k v (uCanonInsert l w t))) (uCanonInsert l w (uCanonStepAt flagNo g2 k v h t (uCanonInsert k v t))))\n"
+  "          (fun (pG : Path Flag (outRefLe k (first h)) flagYes) => fun (j : I) => (trans (List (Prod OutRef Output)) (uCanonInsert l w (cons (pair k v) (cons h t))) (cons (pair k v) (uCanonInsert l w (cons h t))) (cons (pair k v) (cons h (uCanonInsert l w t))) (uInsAt l w (pair k v) (cons h t) flagNo (outRefEqSymNo k l ne) flagNo (outRefLeNotTrans l k (first h) pLL pG)) (fun (i : I) => cons (pair k v) (uInsAt l w h t flagNo pEL flagNo pLL @ i))) @ (~j))\n"
+  "          (fun (pG : Path Flag (outRefLe k (first h)) flagNo) => trans (List (Prod OutRef Output)) (cons h (uCanonInsert k v (uCanonInsert l w t))) (cons h (uCanonInsert l w (uCanonInsert k v t))) (uCanonInsert l w (cons h (uCanonInsert k v t))) (fun (j : I) => cons h (ih @ j)) (fun (j : I) => uInsAt l w h (uCanonInsert k v t) flagNo pEL flagNo pLL @ (~j)))\n"
+  "          g)\n"
+  "        eK pEK lK pLK)\n"
+  "def uInsCommAt : (k : OutRef) -> (l : OutRef) -> (v : Output) -> (w : Output) -> (h : Prod OutRef Output) -> (t : List (Prod OutRef Output)) -> Path Flag (outRefEq k l) flagNo -> Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonInsert l w t)) (uCanonInsert l w (uCanonInsert k v t)) -> (eL : Flag) -> Path Flag (outRefEq l (first h)) eL -> (lL : Flag) -> Path Flag (outRefLe l (first h)) lL -> (eK : Flag) -> Path Flag (outRefEq k (first h)) eK -> (lK : Flag) -> Path Flag (outRefLe k (first h)) lK -> Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonStepAt eL lL l w h t (uCanonInsert l w t))) (uCanonInsert l w (uCanonStepAt eK lK k v h t (uCanonInsert k v t))) :=\n"
+  "  fun (k : OutRef) (l : OutRef) (v : Output) (w : Output) (h : Prod OutRef Output) (t : List (Prod OutRef Output)) (ne : Path Flag (outRefEq k l) flagNo) (ih : Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonInsert l w t)) (uCanonInsert l w (uCanonInsert k v t))) (eL : Flag) =>\n"
+  "    elim (fun (e : Flag) => Path Flag (outRefEq l (first h)) e -> (lL : Flag) -> Path Flag (outRefLe l (first h)) lL -> (eK : Flag) -> Path Flag (outRefEq k (first h)) eK -> (lK : Flag) -> Path Flag (outRefLe k (first h)) lK -> Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonStepAt e lL l w h t (uCanonInsert l w t))) (uCanonInsert l w (uCanonStepAt eK lK k v h t (uCanonInsert k v t))))\n"
+  "      (fun (pEL : Path Flag (outRefEq l (first h)) flagYes) (lL : Flag) (pLL : Path Flag (outRefLe l (first h)) lL) => uInsCommEq k l v w h t ne pEL lL pLL)\n"
+  "      (fun (pEL : Path Flag (outRefEq l (first h)) flagNo) (lL : Flag) => elim (fun (g : Flag) => Path Flag (outRefLe l (first h)) g -> (eK : Flag) -> Path Flag (outRefEq k (first h)) eK -> (lK : Flag) -> Path Flag (outRefLe k (first h)) lK -> Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonStepAt flagNo g l w h t (uCanonInsert l w t))) (uCanonInsert l w (uCanonStepAt eK lK k v h t (uCanonInsert k v t))))\n"
+  "        (fun (pLL : Path Flag (outRefLe l (first h)) flagYes) => uInsCommLt k l v w h t ne pEL pLL)\n"
+  "        (fun (pLL : Path Flag (outRefLe l (first h)) flagNo) => uInsCommGt k l v w h t ne ih pEL pLL)\n"
+  "        lL)\n"
+  "      eL\n"
+  "def uInsComm : (k : OutRef) -> (l : OutRef) -> (v : Output) -> (w : Output) -> (m : List (Prod OutRef Output)) -> Path Flag (outRefEq k l) flagNo -> Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonInsert l w m)) (uCanonInsert l w (uCanonInsert k v m)) :=\n"
+  "  fun (k : OutRef) (l : OutRef) (v : Output) (w : Output) (m : List (Prod OutRef Output)) (ne : Path Flag (outRefEq k l) flagNo) => elim (fun (z : List (Prod OutRef Output)) => Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonInsert l w z)) (uCanonInsert l w (uCanonInsert k v z)))\n"
+  "    (uInsCommNil k l v w ne)\n"
+  "    (fun (h : Prod OutRef Output) (t : List (Prod OutRef Output)) (ih : Path (List (Prod OutRef Output)) (uCanonInsert k v (uCanonInsert l w t)) (uCanonInsert l w (uCanonInsert k v t))) =>\n"
+  "      trans (List (Prod OutRef Output)) (uCanonInsert k v (uCanonInsert l w (cons h t))) (uCanonInsert k v (uCanonStep l w h t (uCanonInsert l w t))) (uCanonInsert l w (uCanonInsert k v (cons h t)))\n"
+  "        (fun (i : I) => uCanonInsert k v (uInsCons l w h t @ i))\n"
+  "        (trans (List (Prod OutRef Output)) (uCanonInsert k v (uCanonStep l w h t (uCanonInsert l w t))) (uCanonInsert l w (uCanonStep k v h t (uCanonInsert k v t))) (uCanonInsert l w (uCanonInsert k v (cons h t)))\n"
+  "          (uInsCommAt k l v w h t ne ih (outRefEq l (first h)) (fun (i : I) => outRefEq l (first h)) (outRefLe l (first h)) (fun (i : I) => outRefLe l (first h)) (outRefEq k (first h)) (fun (i : I) => outRefEq k (first h)) (outRefLe k (first h)) (fun (i : I) => outRefLe k (first h)))\n"
+  "          (fun (i : I) => uCanonInsert l w (uInsCons k v h t @ (~i)))))\n"
+  "    m\n"
+  "def utxoCanon : UTxO -> List (Prod OutRef Output) := utxoFold (List (Prod OutRef Output)) uCanonIsSet nil uCanonInsert uInsOver uInsComm\n"
+  "def uCanonGet : OutRef -> List (Prod OutRef Output) -> Maybe Output :=\n"
+  "  fun (q : OutRef) (l : List (Prod OutRef Output)) => elim (fun (z : List (Prod OutRef Output)) => Maybe Output) none (fun (h : Prod OutRef Output) (t : List (Prod OutRef Output)) (r : Maybe Output) => uLookupSel (outRefEq q (first h)) (second h) r) l\n"
+  "def utxoGet : OutRef -> UTxO -> Maybe Output := fun (r : OutRef) (m : UTxO) => uCanonGet r (utxoCanon m)\n"
+  "def uDrop : OutRef -> List (Prod OutRef Output) -> List (Prod OutRef Output) := fun (q : OutRef) (l : List (Prod OutRef Output)) => elim (fun (z : List (Prod OutRef Output)) => List (Prod OutRef Output)) nil (fun (h : Prod OutRef Output) (t : List (Prod OutRef Output)) (r : List (Prod OutRef Output)) => flagIf (outRefEq q (first h)) r (cons h r)) l\n"
+  "def uBuild : List (Prod OutRef Output) -> UTxO := fun (l : List (Prod OutRef Output)) => elim (fun (z : List (Prod OutRef Output)) => UTxO) utxoEmpty (fun (h : Prod OutRef Output) (t : List (Prod OutRef Output)) (r : UTxO) => utxoPut (first h) (second h) r) l\n"
+  "def utxoSpend : OutRef -> UTxO -> Maybe UTxO := fun (r : OutRef) (m : UTxO) => option none (fun (v : Output) => some (uBuild (uDrop r (utxoCanon m)))) (utxoGet r m)\n";
+
+static const char utxo_root_source[] =
+  "def uRoot : List (Prod OutRef Output) -> Digest := fun (l : List (Prod OutRef Output)) => elim (fun (z : List (Prod OutRef Output)) => Digest) emptyDigest (fun (h : Prod OutRef Output) (t : List (Prod OutRef Output)) (r : Digest) => nodeDigest (utxoLeaf (first h) (second h)) r) l\n"
+  "def utxoRoot : UTxO -> Digest := fun (s : UTxO) => uRoot (utxoCanon s)\n";
+
+static int utxo_after_val(Arena *arena, size_t first, DeclList *out, Diag *diag) {
+  int form = def_form(out, first, "Output");
+  int noset = def_at(out, first, "setAbsurd") == out->count;
+  const char *cset = form == 1 ? utxo_cset_size_source : utxo_cset_nat_source;
+  size_t cset_len = form == 1 ? sizeof utxo_cset_size_source - 1u : sizeof utxo_cset_nat_source - 1u;
+  return splice_after(arena, first, UTXO_AFTER, 2u, STORE_SOURCE_NAME, utxo_source, sizeof utxo_source - 1u, out, diag)
+      && (!noset || form == 0 || splice_after(arena, first, UTXO_PROOF_AFTER, 7u, SET_SOURCE_NAME, set_source, sizeof set_source - 1u, out, diag))
+      && (form == 0 || splice_after(arena, first, UTXO_PROOF_AFTER, 8u, STORE_SOURCE_NAME, cset, cset_len, out, diag))
+      && (form == 0 || splice_after(arena, first, UTXO_MAIN_AFTER, 1u, STORE_SOURCE_NAME, utxo_canon_source, sizeof utxo_canon_source - 1u, out, diag))
+      && (form == 0 || splice_after(arena, first, UTXO_ROOT_AFTER, 4u, STORE_SOURCE_NAME, utxo_root_source, sizeof utxo_root_source - 1u, out, diag));
+}
+
 /* The trace monoid (quotient-lang S6 u3, USER ruling Q-S6-10 (a)): a
    fixed family Trace over Body, not a domain family with a relation
    parameter (R1 refuses one). The interval fields have new names, so a
@@ -1861,6 +3239,24 @@ static size_t program_def_at(const DeclList *out, size_t first, const char *name
 static const char *com_slot(Arena *arena, const char *f, const char *g) {
   const char *pre = front_prefixed(arena, "commute", f);
   return pre != NULL ? front_prefixed(arena, pre, g) : NULL;
+}
+
+/* u8a2: the defs Valid and compose (PLAN L7 and E4). Valid r r2 is the
+   truncated claim that a trace takes a store with the root r to a store
+   with the root r2. compose joins two such claims: it uses rootInj one
+   time and evalAppend one time. The front end puts the two defs directly
+   after the later of inclVerify and evalAppend when the program text
+   names Valid or compose. When one of the two anchors is not in the
+   program, it adds nothing. */
+static const char *const VALID_AFTER[] = {"inclVerify", "evalAppend"};
+
+static const char valid_source[] =
+  "def Valid : Digest -> Digest -> Type 0 := fun (r : Digest) (r2 : Digest) => Trunc1 (Sigma (s : Store) (Sigma (s2 : Store) (Sigma (t : Trace) (Prod (Path Digest (storeRoot s) r) (Prod (Path Digest (storeRoot s2) r2) (Path (Maybe State) (traceEval t (storeState s)) (some (storeState s2))))))))\n"
+  "def compose : (r : Digest) -> (r2 : Digest) -> (r3 : Digest) -> Valid r r2 -> Valid r2 r3 -> Valid r r3 := fun (r : Digest) (r2 : Digest) (r3 : Digest) (v : Valid r r2) (w : Valid r2 r3) => fold (fun (x : Sigma (s : Store) (Sigma (s2 : Store) (Sigma (t : Trace) (Prod (Path Digest (storeRoot s) r) (Prod (Path Digest (storeRoot s2) r2) (Path (Maybe State) (traceEval t (storeState s)) (some (storeState s2)))))))) => fold (fun (y : Sigma (s : Store) (Sigma (s2 : Store) (Sigma (t : Trace) (Prod (Path Digest (storeRoot s) r2) (Prod (Path Digest (storeRoot s2) r3) (Path (Maybe State) (traceEval t (storeState s)) (some (storeState s2)))))))) => trunc1 (Sigma (s : Store) (Sigma (s2 : Store) (Sigma (t : Trace) (Prod (Path Digest (storeRoot s) r) (Prod (Path Digest (storeRoot s2) r3) (Path (Maybe State) (traceEval t (storeState s)) (some (storeState s2)))))))) (pack (witness x) (pack (witness (payload y)) (pack (traceAppend (witness (payload (payload x))) (witness (payload (payload y)))) (pair (first (payload (payload (payload x)))) (pair (first (second (payload (payload (payload y))))) (fun (i : I) => hcomp (Maybe State) (~i \\/ i) (fun (k3 : I) => [ ~i -> traceEval (traceAppend (witness (payload (payload x))) (witness (payload (payload y)))) (storeState (witness x)), i -> (second (second (payload (payload (payload y))))) @ k3 ]) (hcomp (Maybe State) (~i \\/ i) (fun (k2 : I) => [ ~i -> traceEval (traceAppend (witness (payload (payload x))) (witness (payload (payload y)))) (storeState (witness x)), i -> traceEval (witness (payload (payload y))) (storeState ((rootInj (witness (payload x)) (witness y) (fun (j : I) => hcomp Digest (~j \\/ j) (fun (m : I) => [ ~j -> storeRoot (witness (payload x)), j -> (first (payload (payload (payload y)))) @ (~m) ]) ((first (second (payload (payload (payload x))))) @ j))) @ k2)) ]) (hcomp (Maybe State) (~i \\/ i) (fun (k1 : I) => [ ~i -> traceEval (traceAppend (witness (payload (payload x))) (witness (payload (payload y)))) (storeState (witness x)), i -> bind ((second (second (payload (payload (payload x))))) @ k1) (fun (u : State) => traceEval (witness (payload (payload y))) u) ]) ((evalAppend (witness (payload (payload x))) (witness (payload (payload y))) @ i) (storeState (witness x)))))))))))) (fun (a : Valid r r3) (b : Valid r r3) => fun (i : I) => squash1 (Sigma (s : Store) (Sigma (s2 : Store) (Sigma (t : Trace) (Prod (Path Digest (storeRoot s) r) (Prod (Path Digest (storeRoot s2) r3) (Path (Maybe State) (traceEval t (storeState s)) (some (storeState s2)))))))) a b i) w) (fun (a : Valid r r3) (b : Valid r r3) => fun (i : I) => squash1 (Sigma (s : Store) (Sigma (s2 : Store) (Sigma (t : Trace) (Prod (Path Digest (storeRoot s) r) (Prod (Path Digest (storeRoot s2) r3) (Path (Maybe State) (traceEval t (storeState s)) (some (storeState s2)))))))) a b i) v\n";
+
+static int valid_after_val(Arena *arena, size_t first, const char *text, size_t len, DeclList *out, Diag *diag) {
+  int valid = text_names(text, len, "Valid", 5u) || text_names(text, len, "compose", 7u);
+  return !valid || splice_after(arena, first, VALID_AFTER, 2u, STORE_SOURCE_NAME, valid_source, sizeof valid_source - 1u, out, diag);
 }
 
 static int body_commute(Arena *arena, size_t first, DeclList *out, Diag *diag) {
@@ -2279,6 +3675,8 @@ int front_load(Arena *arena, const char *source, const char *text, size_t len, D
       && key_after_key(arena, first, out, diag)
       && step_after_val(arena, first, out, diag)
       && set_after_step(arena, first, out, diag)
+      && store_after_val(arena, first, text, len, out, diag)
+      && utxo_after_val(arena, first, out, diag)
       && step_defs(arena, first, out)
       && body_family(arena, first, out)
       && body_eq_after_body(arena, first, out, diag)
@@ -2288,6 +3686,7 @@ int front_load(Arena *arena, const char *source, const char *text, size_t len, D
       && foata_after_trace(arena, first, out, diag)
       && foata_eq_after_foata(arena, first, out, diag)
       && body_commute(arena, first, out, diag)
+      && valid_after_val(arena, first, text, len, out, diag)
       && auth_after_witness(arena, first, out, diag)
       && agg_after_sig(arena, first, out, diag)
       && qc_after_signs(arena, first, out, diag);
@@ -2309,6 +3708,8 @@ int front_load_domain(Arena *arena, const char *source, const char *domain, cons
       && key_after_key(arena, first, out, diag)
       && step_after_val(arena, first, out, diag)
       && set_after_step(arena, first, out, diag)
+      && store_after_val(arena, first, text, len, out, diag)
+      && utxo_after_val(arena, first, out, diag)
       && step_defs(arena, first, out)
       && body_family(arena, first, out)
       && body_eq_after_body(arena, first, out, diag)
@@ -2318,6 +3719,7 @@ int front_load_domain(Arena *arena, const char *source, const char *domain, cons
       && foata_after_trace(arena, first, out, diag)
       && foata_eq_after_foata(arena, first, out, diag)
       && body_commute(arena, first, out, diag)
+      && valid_after_val(arena, first, text, len, out, diag)
       && auth_after_witness(arena, first, out, diag)
       && agg_after_sig(arena, first, out, diag)
       && qc_after_signs(arena, first, out, diag);

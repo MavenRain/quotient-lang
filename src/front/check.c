@@ -829,7 +829,7 @@ static const Core *rule_refl(Call *k) {
   if (!path_ends(c, e, e->args[0], e->args[0]))
     return NULL;
   k->type = e;
-  return core_bind(c, CORE_PLAM, "_", NULL, quote_value(c->m, c->level + 1u, e->args[0]));
+  return core_bind(c, CORE_PLAM, "_", NULL, quote_lazy(c->m, c->level + 1u, e->args[0]));
 }
 
 static const Core *rule_part(Call *k) {
@@ -1307,9 +1307,9 @@ static const Core *case_fields(Checker *c, const CtorInfo *ctor, const Env *env,
     if (c->elim_motive == NULL && field->over_recursive && !field->path && !field->recursive)
       return nul(FAIL(c, "HIT_BOUNDARY", "the fold of %s has no case type for the field %s: a field over an earlier recursive field must be Path F x y, with x and y earlier recursive fields", ctor->name, field->name));
     if (c->elim_motive != NULL)
-      types[i] = quote_value(m, at, eval_core(m, env, field->type));
+      types[i] = quote_lazy(m, at, eval_core(m, env, field->type));
     else
-      types[i] = field->path ? core_ends(c, CORE_PATHP, "_", NULL, quote_value(m, at + 1u, sort_res(c, field->type->b, res)), quote_value(m, at, val_var(m, c->level + field->ends[0])), quote_value(m, at, val_var(m, c->level + field->ends[1]))) : quote_value(m, at, field->recursive ? sort_res(c, field->type, res) : eval_core(m, env, field->type));
+      types[i] = field->path ? core_ends(c, CORE_PATHP, "_", NULL, quote_lazy(m, at + 1u, sort_res(c, field->type->b, res)), quote_value(m, at, val_var(m, c->level + field->ends[0])), quote_value(m, at, val_var(m, c->level + field->ends[1]))) : quote_lazy(m, at, field->recursive ? sort_res(c, field->type, res) : eval_core(m, env, field->type));
     ihs[i] = ih ? ih_type(c, ctor, field, env, at) : NULL;
     env = env_push(m, env, val_var(m, at));
     if (types[i] == NULL || env == NULL || (ih && ihs[i] == NULL))
@@ -1324,7 +1324,7 @@ static const Core *case_fields(Checker *c, const CtorInfo *ctor, const Env *env,
 
 /* The type of the fold case of CTOR: the fields, then RES. */
 static const Value *case_type(Checker *c, const CtorInfo *ctor, const Env *env, const Value *res) {
-  return here(c, case_fields(c, ctor, env, res, quote_value(c->m, c->level + ctor->field_count, res)));
+  return here(c, case_fields(c, ctor, env, res, quote_lazy(c->m, c->level + ctor->field_count, res)));
 }
 
 /* The fold image of V, a boundary value of a path constructor of FAM at the
@@ -1931,7 +1931,7 @@ static const Core *hcomp_branch(Checker *c, const char *name, const Core *a, con
     acted = NULL;
     tail = &acted;
     for (s = scope; s != NULL; s = s->next) {
-      type = quote_value(c->m, c->level, s->type);
+      type = quote_lazy(c->m, c->level, s->type);
       copy = arena_alloc(c->m->arena, sizeof *copy);
       if (type == NULL || copy == NULL)
         return nul(c->m->diag->set ? 0 : FAIL(c, "OOM", "out of memory"));
@@ -3212,7 +3212,7 @@ static const Core *elab_papp(Checker *c, const Term *t, const Value *hint, const
     return nul(FAIL(c, "TYPE_MISMATCH", "@ needs a path of type PathP L a b, found a term of type %s", show(c, pt)));
   r = check(c, t->right, interval_type(c));
   *type = r == NULL ? NULL : closure_apply(c->m, pt, here(c, r));
-  return finish(c, core_ends(c, CORE_PAPP, NULL, p, r, quote_value(c->m, c->level, pt->args[0]), quote_value(c->m, c->level, pt->args[1])), hint, type);
+  return finish(c, core_ends(c, CORE_PAPP, NULL, p, r, quote_lazy(c->m, c->level, pt->args[0]), quote_lazy(c->m, c->level, pt->args[1])), hint, type);
 }
 
 /* ~r, r /\ s and r \/ s: the operands and the result are in I. */
@@ -4140,6 +4140,23 @@ static const SigRow SIGNATURE[] = {
   {"nodeEq", SIG_PROGRAM},
   {"quorum", SIG_PROGRAM},
   {"signs", SIG_PROGRAM},
+  {"valZero", SIG_PROGRAM},
+  {"storeLeaf", SIG_PROGRAM},
+  {"nodeDigest", SIG_PROGRAM},
+  {"emptyDigest", SIG_PROGRAM},
+  /* The UTxO names (quotient-lang S8 u7, USER rulings Q-S8-5 (a) and
+     Q-S8-6 (a)): the program defines them after OutRef and Output. */
+  {"outRefEq", SIG_PROGRAM},
+  {"outRefLe", SIG_PROGRAM},
+  {"utxoLeaf", SIG_PROGRAM},
+  {"outRefEqSound", SIG_PROGRAM},
+  {"outRefEqRefl", SIG_PROGRAM},
+  {"outRefLeFlip", SIG_PROGRAM},
+  {"outRefLeTrans", SIG_PROGRAM},
+  {"nodeDigestInj", SIG_DEFINED},
+  {"storeLeafInj", SIG_DEFINED},
+  {"nodeNotEmpty", SIG_DEFINED},
+  {"rootInj", SIG_DEFINED},
   {"QC", SIG_DEFINED},
   {"agg", SIG_DEFINED},
   /* The kernel gives these names at slice S5 (PLAN section 12). */
@@ -4162,6 +4179,9 @@ static const SigRow SIGNATURE[] = {
   {"canon", SIG_DEFINED},
   {"root", SIG_DEFINED},
   {"compose", SIG_DEFINED},
+  /* The kernel gives these names at slice S8 unit 3 (the Store FinMap). */
+  {"Store", SIG_DEFINED},
+  {"lookup", SIG_DEFINED},
 };
 
 #define SIG_COUNT ((uint32_t)(sizeof SIGNATURE / sizeof SIGNATURE[0]))
@@ -4270,6 +4290,21 @@ static const Value *sig_arrow(Checker *c, const Value *tv, uint32_t level, const
   if (want == NULL || !conv_values(m, level, tv->dom, want))
     return NULL;
   return closure_apply(m, tv, val_var(m, level));
+}
+
+/* The Merkle names (quotient-lang S8 u5, USER ruling Q-S8-3 (b)): TV must
+   be DOMS [0] -> .. -> DOMS [COUNT - 1] -> Digest. Each name is a def. */
+static const char *const STORE_LEAF_DOMS[] = {"Key", "Val"};
+static const char *const NODE_DIGEST_DOMS[] = {"Digest", "Digest"};
+
+static int sig_digest_arrows(Checker *c, const Value *tv, const char *const *doms, uint32_t count) {
+  Machine *m = c->m;
+  uint32_t digest = sig_def_index(m, "Digest");
+  const Value *cod = tv;
+  uint32_t i;
+  for (i = 0; i < count && cod != NULL; i++)
+    cod = sig_arrow(c, cod, c->level + i, doms[i]);
+  return digest != m->def_count && cod != NULL && conv_values(m, c->level + count, cod, sig_global_value(m, digest));
 }
 
 /* REFUSE_EQ_UNDECIDABLE (quotient-lang S6 u8, N7, USER rulings Q-S6-6
@@ -4411,6 +4446,8 @@ static int program_keyspace(const Checker *c) {
    (a)). Each one is a def of the program. */
 static const char *const NODE_EQ_DOMS[] = {"Node", "Node"};
 static const char *const SIGNS_DOMS[] = {"Node", "Body", "Sig"};
+static const char *const OUT_REF_DOMS[] = {"OutRef", "OutRef"};
+static const char *const UTXO_LEAF_DOMS[] = {"OutRef", "Output"};
 
 /* 1 if TV is the function type from the defs NAMES, in this order, to the
    type of btrue. Each domain converts with the def of its name, at one
@@ -4425,6 +4462,73 @@ static int sig_bit_arrows(Checker *c, const Value *tv, const char *const *names,
   return bit != m->def_count && cod != NULL && conv_values(m, c->level + count, cod, m->defs[bit].type);
 }
 
+/* 1 if TV is the function type from the defs NAMES, in this order, to
+   Flag (quotient-lang S8 u7, USER rulings Q-S8-5 (a) and Q-S8-6 (a)).
+   Each domain converts with the def of its name, at one level more than
+   the domain before it. Flag is a core name, not a def, so its value
+   comes from check_type of a made term (the form of eq_decidable). */
+static int sig_flag_arrows(Checker *c, const Value *tv, const char *const *names, uint32_t count) {
+  Term flag;
+  const Value *want;
+  const Value *cod = tv;
+  uint32_t i;
+  memset(&flag, 0, sizeof flag);
+  flag.kind = TERM_VAR;
+  flag.name = "Flag";
+  want = eq_type_value(c, &flag);
+  for (i = 0; i < count && cod != NULL; i++)
+    cod = sig_arrow(c, cod, c->level + i, names[i]);
+  return want != NULL && cod != NULL && conv_values(c->m, c->level + count, cod, want);
+}
+
+/* Q-S8-10 (a): the four OutRef proof rows. The type of each row is the
+   type of a key lemma of kernel/key-eq.lang (keyEqSound, keyEqRefl,
+   keyLeFlip and keyLeTrans) with OutRef for Key, outRefEq for keyEq and
+   outRefLe for keyLe. The program gives the proofs. */
+static const char *const OUT_REF_PROOFS[][2] = {
+  {"outRefEqSound", "(x : OutRef) -> (y : OutRef) -> Path Flag (outRefEq x y) flagYes -> Path OutRef x y"},
+  {"outRefEqRefl", "(x : OutRef) -> Path Flag (outRefEq x x) flagYes"},
+  {"outRefLeFlip", "(x : OutRef) -> (y : OutRef) -> Path Flag (outRefEq x y) flagNo -> Path Flag (outRefLe y x) (flagIf (outRefLe x y) flagNo flagYes)"},
+  {"outRefLeTrans", "(x : OutRef) -> (y : OutRef) -> (z : OutRef) -> Path Flag (outRefLe x y) flagYes -> Path Flag (outRefLe y z) flagYes -> Path Flag (outRefLe x z) flagYes"}};
+#define OUT_REF_PROOF_COUNT (sizeof OUT_REF_PROOFS / sizeof OUT_REF_PROOFS[0])
+/* The index of NAME in OUT_REF_PROOFS; OUT_REF_PROOF_COUNT if NAME is not
+   an OutRef proof row. */
+static size_t out_ref_proof_row(const char *name) {
+  size_t i;
+  for (i = 0; i < OUT_REF_PROOF_COUNT && strcmp(OUT_REF_PROOFS[i][0], name) != 0; i++)
+    ;
+  return i;
+}
+/* 1 if TV converts with the type of the OutRef proof row NAME. The type
+   comes from check_type of the parsed text of the row (a made def, as for
+   the cell text of a cofamily). The text names the program defs OutRef,
+   outRefEq and outRefLe: if the program does not define them before NAME,
+   the text does not check, and the row is refused. The diagnostic of a
+   failed parse is not kept. */
+static int out_ref_proof_ok(Checker *c, const char *name, const Value *tv) {
+  Machine *m = c->m;
+  size_t i = out_ref_proof_row(name);
+  TokenList toks = {0};
+  DeclList list = {NULL, 0, 0};
+  Diag saved = *m->diag;
+  const Value *want = NULL;
+  char *text;
+  size_t cap;
+  int ok;
+  if (i == OUT_REF_PROOF_COUNT)
+    return 0;
+  cap = strlen(OUT_REF_PROOFS[i][1]) + 64u;
+  text = arena_alloc(m->arena, cap);
+  if (text == NULL)
+    return 0;
+  snprintf(text, cap, "def outRefProof : %s := flagYes", OUT_REF_PROOFS[i][1]);
+  ok = lex_internal(m->arena, "out-ref-proof", text, strlen(text), &toks, m->diag) && parse_source(m->arena, "out-ref-proof", ORIGIN_DOMAIN, &toks, &list, m->diag) && list.count == 1u;
+  if (!ok)
+    *m->diag = saved;
+  else
+    want = eq_type_value(c, list.items[0].type);
+  return want != NULL && conv_values(m, c->level, tv, want);
+}
 /* 1 if TV converts with Pfin Node -> Sum Unit Unit (USER ruling Q-S4-5
    (a)): the type of pfinIn at A := Node after the equality and the
    element. That type does not contain them, so each one is the fresh
@@ -4449,14 +4553,32 @@ static int quorum_ok(Checker *c, const Value *tv) {
    bagFold arguments must have their bagFold types at Sig. USER ruling
    Q-S4-5 (a): nodeEq, quorum and signs must have the types Node -> Node
    -> Sum Unit Unit, Pfin Node -> Sum Unit Unit and Node -> Body -> Sig ->
-   Sum Unit Unit. */
+   Sum Unit Unit. USER ruling Q-S8-2 (a): valZero must have the type Val
+   (the type converts with the def Val). USER rulings Q-S8-5 (a) and
+   Q-S8-6 (a): outRefEq and outRefLe must have the type OutRef -> OutRef
+   -> Flag, and utxoLeaf the type OutRef -> Output -> Digest. */
 static int program_type(Checker *c, const char *name, const Value *tv) {
   Machine *m = c->m;
   uint32_t bit = sig_def_index(m, "btrue");
   uint32_t digest = sig_def_index(m, "Digest");
+  uint32_t val = sig_def_index(m, "Val");
   const Value *cod = sig_arrow(c, tv, c->level, "Body");
   if (sig_arg_name(name))
     return sig_arg_ok(c, name, tv);
+  if (strcmp(name, "valZero") == 0)
+    return val != m->def_count && conv_values(m, c->level, tv, sig_global_value(m, val));
+  if (strcmp(name, "emptyDigest") == 0)
+    return digest != m->def_count && conv_values(m, c->level, tv, sig_global_value(m, digest));
+  if (strcmp(name, "storeLeaf") == 0)
+    return sig_digest_arrows(c, tv, STORE_LEAF_DOMS, 2u);
+  if (strcmp(name, "nodeDigest") == 0)
+    return sig_digest_arrows(c, tv, NODE_DIGEST_DOMS, 2u);
+  if (strcmp(name, "outRefEq") == 0 || strcmp(name, "outRefLe") == 0)
+    return sig_flag_arrows(c, tv, OUT_REF_DOMS, 2u);
+  if (strcmp(name, "utxoLeaf") == 0)
+    return sig_digest_arrows(c, tv, UTXO_LEAF_DOMS, 2u);
+  if (out_ref_proof_row(name) != OUT_REF_PROOF_COUNT)
+    return out_ref_proof_ok(c, name, tv);
   if (strcmp(name, "nodeEq") == 0)
     return sig_bit_arrows(c, tv, NODE_EQ_DOMS, 2u);
   if (strcmp(name, "quorum") == 0)
@@ -4503,6 +4625,14 @@ static int check_sig(Checker *c, const Decl *d, const Value *tv, const Core *bod
       return program_type(c, d->name, tv) ? 1 : FAIL(c, "REFUSE_SIG", "quorum must have the type Pfin Node -> Sum Unit Unit (PLAN section 4, USER rulings Q-S4-5 (a) and Q-S4-6 (a))");
     if (strcmp(d->name, "signs") == 0)
       return program_type(c, d->name, tv) ? 1 : FAIL(c, "REFUSE_SIG", "signs must have the type Node -> Body -> Sig -> Sum Unit Unit (PLAN section 4, USER rulings Q-S4-5 (a) and Q-S4-6 (a))");
+    if (strcmp(d->name, "valZero") == 0)
+      return program_type(c, d->name, tv) ? 1 : FAIL(c, "REFUSE_SIG", "valZero must have the type Val: storeState gives valZero for a missing key (USER ruling Q-S8-2 (a))");
+    if (strcmp(d->name, "storeLeaf") == 0 || strcmp(d->name, "nodeDigest") == 0 || strcmp(d->name, "emptyDigest") == 0)
+      return program_type(c, d->name, tv) ? 1 : FAIL(c, "REFUSE_SIG", "%s must have its Merkle type: storeLeaf : Key -> Val -> Digest, nodeDigest : Digest -> Digest -> Digest and emptyDigest : Digest (USER ruling Q-S8-3 (b))", d->name);
+    if (strcmp(d->name, "outRefEq") == 0 || strcmp(d->name, "outRefLe") == 0 || strcmp(d->name, "utxoLeaf") == 0)
+      return program_type(c, d->name, tv) ? 1 : FAIL(c, "REFUSE_SIG", "%s must have its UTxO type: outRefEq : OutRef -> OutRef -> Flag, outRefLe : OutRef -> OutRef -> Flag and utxoLeaf : OutRef -> Output -> Digest (USER rulings Q-S8-5 (a) and Q-S8-6 (a))", d->name);
+    if (out_ref_proof_row(d->name) != OUT_REF_PROOF_COUNT)
+      return program_type(c, d->name, tv) ? 1 : FAIL(c, "REFUSE_SIG", "%s must have the type %s: the type of its key lemma (kernel/key-eq.lang) with OutRef for Key, outRefEq for keyEq and outRefLe for keyLe, after the program defs OutRef, outRefEq and outRefLe (USER ruling Q-S8-10 (a))", d->name, OUT_REF_PROOFS[out_ref_proof_row(d->name)][1]);
     if (sig_arg_name(d->name))
       return program_type(c, d->name, tv) ? 1 : FAIL(c, "REFUSE_SIG", "%s must have the type of its bagFold argument at Sig, after the earlier bagFold arguments (PLAN section 4, USER rulings Q-S4-4 (a) and Q-S4-6 (a))", d->name);
     return program_type(c, d->name, tv) ? 1 : FAIL(c, "REFUSE_SIG", "witnessOk must have the type Body -> Witness -> Sum Unit Unit (PLAN section 4, USER ruling Q-S4-6 (a))");
@@ -4610,7 +4740,7 @@ static int check_def_body(Checker *c, const Decl *d, const Value *tv, const Core
   /* Rule O7 (S5): the domain marks its law defs; a program def is law-only
      when its type or its body uses a law-only name. Kit mode sets the flag
      but does not refuse. */
-  tc = program ? quote_value(m, c->level, tv) : NULL;
+  tc = program ? quote_lazy(m, c->level, tv) : NULL;
   if (program && tc == NULL)
     return FAIL(c, "OOM", "out of memory");
   law = program ? law_uses(m, trunc, syntax_type) || law_uses(m, trunc, tc) || law_uses(m, trunc, body) : d->is_law;
@@ -4622,6 +4752,43 @@ static int check_def_body(Checker *c, const Decl *d, const Value *tv, const Core
   info->type = tv;
   info->value = NULL;
   info->law_only = law;
+  m->def_count++;
+  return 1;
+}
+
+/* u6b3 (Q-S8-10 (a)): the O3 rows of the Merkle hash. They are false for
+   the arithmetic storeLeaf and nodeDigest of a use cell, thus each row is
+   an assumption with no body. Only the kernel block o3_source (front.c)
+   gives them; a program axiom keeps REFUSE_AXIOM (rule R2). The O1 row
+   rootInj (u8a1, front.c o1_source) has the same form. */
+static const char *const O3_ROWS[] = {"nodeDigestInj", "storeLeafInj", "nodeNotEmpty", "rootInj"};
+
+static int o3_row(const char *name) {
+  size_t i;
+  for (i = 0; name != NULL && i < sizeof O3_ROWS / sizeof O3_ROWS[0]; i++)
+    if (strcmp(O3_ROWS[i], name) == 0)
+      return 1;
+  return 0;
+}
+
+/* u6b3: an O3 row has a checked type and an opaque body, the op OP_AXIOM
+   with the def number: its value stays stuck (eval.c reduce_op). The row
+   is law-only (rule O7): a program def that uses it must be a law. */
+static int check_axiom(Checker *c, const Decl *d) {
+  Machine *m = c->m;
+  uint64_t level = 0;
+  const Core *t = check_type(c, d->type, &level);
+  const Value *tv = t == NULL ? NULL : here(c, t);
+  const Core *body = tv == NULL ? NULL : core_op(c, OP_AXIOM, m->def_count, 0, NULL, 0);
+  DefInfo *info = &m->defs[m->def_count];
+  if (body == NULL)
+    return 0;
+  info->name = d->name;
+  info->origin = d->origin;
+  info->body = body;
+  info->type = tv;
+  info->value = NULL;
+  info->law_only = 1;
   m->def_count++;
   return 1;
 }
@@ -5542,7 +5709,7 @@ static int check_decl(Checker *c, const Decl *d) {
     return FAIL(c, "REFUSE_DATA", "a program cannot declare a cofamily (rule R1); only domain/domain.lang can");
   if (d->is_law && d->origin == ORIGIN_PROGRAM)
     return FAIL(c, "REFUSE_DATA", "a program cannot declare a law def (rule O7); only domain/domain.lang can");
-  if (d->kind == DECL_AXIOM)
+  if (d->kind == DECL_AXIOM && !(d->origin == ORIGIN_DOMAIN && o3_row(d->name)))
     return FAIL(c, "REFUSE_AXIOM", "an axiom has no proof (rule R2)");
   if (d->is_rec)
     return FAIL(c, "REFUSE_REC", "def rec is refused (rule R3); use fold or unfold");
@@ -5563,8 +5730,9 @@ static int check_decl(Checker *c, const Decl *d) {
     return check_keyspace(c, d);
   case DECL_STEP:
     return step_check(c, d);
-  case DECL_DEF:
   case DECL_AXIOM:
+    return check_axiom(c, d);
+  case DECL_DEF:
     break;
   }
   return check_def(c, d);

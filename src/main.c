@@ -45,7 +45,7 @@ static const struct {
 };
 
 static int usage(FILE *err) {
-  fputs("usage: langc [--kit] check PROG\n"
+  fputs("usage: langc [--kit] check PROG [--json]\n"
         "       langc [--kit] eval PROG NAME [ARGS...]\n"
         "       langc [--kit] ir PROG\n"
         "       langc [--kit] abi PROG [--text]\n"
@@ -85,6 +85,9 @@ static int parse_options(int argc, char **argv, Options *opt, Diag *diag) {
   opt->prog_path = argv[2];
   switch (opt->command) {
     case CMD_CHECK:
+      /* u6b5: check --json also gives the O3 rows that the program uses. */
+      opt->json = argc == 4 && strcmp(argv[3], "--json") == 0;
+      return argc == 3 || opt->json ? 1 : diag_fail(diag, "USAGE", NULL, "check takes only --json after the program");
     case CMD_IND:
     case CMD_IR:
       return argc == 3 ? 1 : diag_fail(diag, "USAGE", NULL, "too many arguments");
@@ -230,6 +233,76 @@ static int ind_print(const IndMatrix *ind, FILE *out) {
   return ferror(out) ? 1 : 0;
 }
 
+/* u6b5: mark each definition that t reaches through CORE_GLOBAL. The rows
+   are the rows of history_ok (check.c). A NULL child is a leaf. */
+static void core_reach(const Machine *m, const Core *t, unsigned char *seen) {
+  uint32_t i;
+  if (t == NULL)
+    return;
+  switch (t->kind) {
+  case CORE_VAR:
+  case CORE_NAT:
+  case CORE_UNIV:
+  case CORE_IZERO:
+  case CORE_IONE:
+    return;
+  case CORE_GLOBAL:
+    if (t->index < m->def_count && !seen[t->index]) {
+      seen[t->index] = 1;
+      core_reach(m, m->defs[t->index].body, seen);
+    }
+    return;
+  case CORE_LAM:
+  case CORE_PI:
+  case CORE_SIGMA:
+  case CORE_PLAM:
+  case CORE_APP:
+  case CORE_INEG:
+  case CORE_IMEET:
+  case CORE_IJOIN:
+    core_reach(m, t->a, seen);
+    core_reach(m, t->b, seen);
+    return;
+  case CORE_PATHP:
+  case CORE_PAPP:
+    core_reach(m, t->a, seen);
+    core_reach(m, t->b, seen);
+    core_reach(m, t->args[0], seen);
+    core_reach(m, t->args[1], seen);
+    return;
+  case CORE_OP:
+    /* Readback can embed an assumption in a refl body without a global. */
+    if (t->op == OP_AXIOM && t->inst < m->def_count)
+      seen[t->inst] = 1;
+    for (i = 0; i < t->argc; i++)
+      core_reach(m, t->args[i], seen);
+    return;
+  }
+}
+
+/* u6b5: check --json. The O3 rows (the defs with an OP_AXIOM body) that a
+   program definition reaches, in definition order. */
+static int axioms_print(const Machine *m, FILE *out) {
+  unsigned char seen[m->def_count + 1u];
+  uint32_t i;
+  int first = 1;
+  memset(seen, 0, sizeof seen);
+  for (i = 0; i < m->def_count; i++) {
+    if (m->defs[i].origin == ORIGIN_PROGRAM)
+      core_reach(m, m->defs[i].body, seen);
+  }
+  fputs("{\"ok\":true,\"axioms\":[", out);
+  for (i = 0; i < m->def_count; i++) {
+    const Core *b = m->defs[i].body;
+    if (seen[i] && b != NULL && b->kind == CORE_OP && b->op == OP_AXIOM) {
+      fprintf(out, "%s\"%s\"", first ? "" : ",", m->defs[i].name);
+      first = 0;
+    }
+  }
+  fputs("]}\n", out);
+  return ferror(out) ? 1 : 0;
+}
+
 static int run(const Options *opt, Arena *arena, Diag *diag) {
   char *text = NULL;
   size_t len = 0;
@@ -240,6 +313,7 @@ static int run(const Options *opt, Arena *arena, Diag *diag) {
   if (!check_program(arena, &decls, &machine, diag, opt->mode)) return 1;
   switch (opt->command) {
     case CMD_CHECK:
+      if (opt->json) return axioms_print(&machine, stdout);
       puts("ok");
       return 0;
     case CMD_EVAL:

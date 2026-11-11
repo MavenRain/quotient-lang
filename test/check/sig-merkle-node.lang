@@ -1,0 +1,3 @@
+-- nodeDigest must have the type Digest -> Digest -> Digest (USER ruling Q-S8-3 (b)).
+def Digest : Type 0 := Nat
+def nodeDigest : Digest -> Digest := fun (a : Digest) => a

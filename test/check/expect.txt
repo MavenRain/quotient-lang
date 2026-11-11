@@ -90,6 +90,12 @@ sig-defined.lang REFUSE_SIG
 sig-slot-universe.lang REFUSE_SIG
 sig-slot-family.lang REFUSE_SIG
 sig-domain-name.lang REFUSE_SIG
+sig-store.lang REFUSE_SIG
+sig-lookup.lang REFUSE_SIG
+sig-valzero.lang REFUSE_SIG
+sig-merkle-leaf.lang REFUSE_SIG
+sig-merkle-node.lang REFUSE_SIG
+sig-merkle-empty.lang REFUSE_SIG
 elim-case-type.lang TYPE_MISMATCH
 elim-case-count.lang TYPE_MISMATCH
 elim-scrutinee.lang TYPE_MISMATCH
@@ -247,3 +253,11 @@ ledger-fold-noglue.lang TYPE_MISMATCH
 ledger-glue-type.lang TYPE_MISMATCH
 prefix-wrong-k.lang PATH_END
 body-eq-seal.lang PATH_END
+sig-utxo-eq.lang REFUSE_SIG
+sig-utxo-le.lang REFUSE_SIG
+sig-utxo-leaf.lang REFUSE_SIG
+sig-utxo-eq-sound.lang REFUSE_SIG
+sig-utxo-eq-refl.lang REFUSE_SIG
+sig-utxo-le-flip.lang REFUSE_SIG
+sig-utxo-le-trans.lang REFUSE_SIG
+sig-utxo-order.lang REFUSE_SIG

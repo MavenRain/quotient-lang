@@ -71,7 +71,7 @@ The compiler enforces these rules:
 ## CLI
 
 ```sh
-build/langc check PROG
+build/langc check PROG [--json]
 build/langc eval PROG NAME [ARGS...]
 build/langc ir PROG
 build/langc abi PROG
@@ -79,6 +79,16 @@ build/langc build PROG -o OUT [--runtime]
 ```
 
 - `check` prints `ok`, or refuses the program.
+- `check PROG --json` prints one line of JSON for an accepted program,
+  for example the line of `--kit check examples/incl-sound.lang --json`:
+  `{"ok":true,"axioms":["nodeDigestInj","storeLeafInj","nodeNotEmpty"]}`.
+  The `axioms` list gives each O3 row (a hash assumption of PLAN O3, with
+  no body) that a program definition uses, directly or through other
+  definitions. The list is in definition order, not in the order of the
+  uses. Only the bodies of the definitions count: a name in the declared
+  type of a definition is not a use. When no definition uses an O3 row,
+  the list is empty. `--json` must come after `PROG`. A refused program
+  gives the diagnostic on stderr and no JSON.
 - `eval` prints the normal form of `NAME`. Each argument is a decimal
   number. An entry has no trap (see "No traps").
 - `ir` prints the first-order IR. It has one `func` for each entry.

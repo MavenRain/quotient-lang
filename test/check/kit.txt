@@ -114,3 +114,14 @@ ledger-fold-noglue.lang
 ledger-glue-type.lang
 prefix-wrong-k.lang
 body-eq-seal.lang
+sig-merkle-leaf.lang
+sig-merkle-node.lang
+sig-merkle-empty.lang
+sig-utxo-eq.lang
+sig-utxo-le.lang
+sig-utxo-leaf.lang
+sig-utxo-eq-sound.lang
+sig-utxo-eq-refl.lang
+sig-utxo-le-flip.lang
+sig-utxo-le-trans.lang
+sig-utxo-order.lang

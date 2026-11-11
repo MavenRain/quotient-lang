@@ -1,0 +1,31 @@
+-- The UTxO get and spend (quotient-lang S8 u7, PLAN E2, USER rulings
+-- Q-S8-6 (a), Q-S8-10 (a) and Q-S8-11 (a)). The program gives OutRef,
+-- Output, outRefEq, outRefLe, the SIG_PROGRAM names utxoLeaf, nodeDigest
+-- and emptyDigest, and the four proofs outRefEqSound, outRefEqRefl,
+-- outRefLeFlip and outRefLeTrans. The kernel adds the UTxO family, its
+-- canon, utxoGet, utxoSpend and utxoRoot. Here an output reference and an
+-- output are Nat, thus the proofs are the Nat proofs. The program has no
+-- Val, thus it has no store. A second spend of the same reference gives
+-- none.
+keyspace Bal : Nat -> Key
+def Digest : Type 0 := Nat
+def digestAdd : Nat -> Nat -> Nat := fun (x : Nat) (y : Nat) => option x (fun (s : Nat) => s) (natAdd x y)
+def nodeDigest : Digest -> Digest -> Digest := fun (a : Digest) (b : Digest) => digestAdd (digestAdd a (digestAdd a a)) (digestAdd b 1)
+def emptyDigest : Digest := 0
+def OutRef : Type 0 := Nat
+def Output : Type 0 := Nat
+def outRefEq : OutRef -> OutRef -> Flag := fun (a : OutRef) (b : OutRef) => natEq a b
+def demoUtxo : UTxO := utxoPut 2 9 (utxoPut 1 5 utxoEmpty)
+def outRefLe : OutRef -> OutRef -> Flag := fun (a : OutRef) (b : OutRef) => natLe a b
+def utxoLeaf : OutRef -> Output -> Digest := fun (k : OutRef) (v : Output) => digestAdd v 1
+def outRefEqSound : (a : OutRef) -> (b : OutRef) -> Path Flag (outRefEq a b) flagYes -> Path OutRef a b := natEqSound
+def outRefEqRefl : (a : OutRef) -> Path Flag (outRefEq a a) flagYes := natEqRefl
+def outRefLeFlip : (a : OutRef) -> (b : OutRef) -> Path Flag (outRefEq a b) flagNo -> Path Flag (outRefLe b a) (flagIf (outRefLe a b) flagNo flagYes) := natLeFlip
+def outRefLeTrans : (a : OutRef) -> (b : OutRef) -> (c : OutRef) -> Path Flag (outRefLe a b) flagYes -> Path Flag (outRefLe b c) flagYes -> Path Flag (outRefLe a c) flagYes := natLeTrans
+def demoGet : Maybe Output := utxoGet 1 demoUtxo
+def demoSpend : Maybe UTxO := utxoSpend 1 demoUtxo
+def demoSpendTwice : Maybe UTxO := option none (fun (u : UTxO) => utxoSpend 1 u) (utxoSpend 1 demoUtxo)
+def demoGetAfter : Maybe Output := option none (fun (u : UTxO) => utxoGet 1 u) (utxoSpend 1 demoUtxo)
+def demoGetOther : Maybe Output := option none (fun (u : UTxO) => utxoGet 2 u) (utxoSpend 1 demoUtxo)
+def demoRoot : Digest := utxoRoot demoUtxo
+def demoSpendMiss : Maybe UTxO := utxoSpend 3 demoUtxo

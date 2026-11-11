@@ -41,3 +41,9 @@ prefix.lang
 body-eq.lang
 body-eq-hygiene.lang
 foata.lang
+finmap.lang
+keyorder.lang
+merkle.lang
+incl-sound.lang
+utxo.lang
+valid.lang

@@ -16,10 +16,10 @@ consts Fd Fd: ind-if (a.z != b.z)
 verdicts Pay Pay: ind-if (a.to != b.from) and (a.to != b.to) and (a.from != b.to)
 verdicts Pay Cast: ind
 verdicts Pay Tally: ind
-verdicts Pay Store: ind
+verdicts Pay Vault: ind
 verdicts Cast Cast: ind-if (a.voter != b.voter)
 verdicts Cast Tally: ind
-verdicts Cast Store: ind
+verdicts Cast Vault: ind
 verdicts Tally Tally: dep
-verdicts Tally Store: ind
-verdicts Store Store: ind-if (a.k != b.k or a.j != b.j)
+verdicts Tally Vault: ind
+verdicts Vault Vault: ind-if (a.k != b.k or a.j != b.j)

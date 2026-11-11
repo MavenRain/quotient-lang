@@ -88,7 +88,8 @@ typedef enum {
      Nat is a Nat that is not 0: the type carries the fact. */
   OP_NONZERO,      /* NonZero Nat: a type */
   OP_NONZERO_OF,   /* nonZero x: some x, or none when x is 0 */
-  OP_NONZERO_VALUE /* nonZeroValue x: the base value; stuck on an open x */
+  OP_NONZERO_VALUE, /* nonZeroValue x: the base value; stuck on an open x */
+  OP_AXIOM /* u6b3 (Q-S8-10 (a)): an O3 row; inst is its def number; the value is always stuck */
 } Op;
 
 /* The instance of pure, map, bind and filter (formers F5 and F8). */
@@ -461,6 +462,10 @@ const Value *closure_apply(Machine *m, const Value *binder, const Value *arg);
 /* 1 when A and B have the same normal form. LEVEL is the next free level. */
 int conv_values(Machine *m, uint32_t level, const Value *a, const Value *b);
 const Core *quote_value(Machine *m, uint32_t level, const Value *v);
+/* The readback of V in lazy mode (S8): a Core closure keeps its body, with
+   no apply. The result is not a normal form, but eval of it gives the same
+   value. Use it for a Core to eval or to scan, not for a printed form. */
+const Core *quote_lazy(Machine *m, uint32_t level, const Value *v);
 /* Writes V in the surface syntax. NAMES gives the names of the levels below
    NAME_COUNT. */
 int value_print(Machine *m, const char *const *names, uint32_t name_count, const Value *v, char *buf, size_t cap);

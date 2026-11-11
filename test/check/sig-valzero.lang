@@ -1,0 +1,3 @@
+-- valZero must have the type Val (USER ruling Q-S8-2 (a)).
+def Val : Type 0 := Size
+def valZero : Size -> Size := fun (n : Size) => n

@@ -30,7 +30,7 @@ static const char *const OP_NAMES[] = {
   [OP_SYSTEM] = "system", [OP_HCOMP] = "hcomp", [OP_FIN] = "Fin",
   [OP_FIN_ADD] = "finAdd", [OP_FIN_NEG] = "finNeg", [OP_FIN_CASE] = "finCase",
   [OP_GLUE] = "Glue", [OP_GLUE_ELEM] = "glue", [OP_UNGLUE] = "unglue",
-  [OP_NONZERO] = "NonZero", [OP_NONZERO_OF] = "nonZero", [OP_NONZERO_VALUE] = "nonZeroValue"
+  [OP_NONZERO] = "NonZero", [OP_NONZERO_OF] = "nonZero", [OP_NONZERO_VALUE] = "nonZeroValue", [OP_AXIOM] = "axiom#"
 };
 
 /* The number of arguments of each operation. VARIES: it comes from the
@@ -53,7 +53,7 @@ static const unsigned char OP_ARITY[] = {
   [OP_SYSTEM] = VARIES, [OP_HCOMP] = 4, [OP_FIN] = 1, [OP_FIN_ADD] = 3,
   [OP_FIN_NEG] = 2, [OP_FIN_CASE] = VARIES, [OP_GLUE] = 3, [OP_GLUE_ELEM] = 3,
   [OP_UNGLUE] = 4,
-  [OP_NONZERO] = 1, [OP_NONZERO_OF] = 1, [OP_NONZERO_VALUE] = 1
+  [OP_NONZERO] = 1, [OP_NONZERO_OF] = 1, [OP_NONZERO_VALUE] = 1, [OP_AXIOM] = 0
 };
 
 typedef enum {
@@ -1601,12 +1601,45 @@ static const Value *nat_eq_open(Machine *m, const Value *const *a, uint32_t s) {
   return nat_test(m, OP_NAT_EQ, b, 2u);
 }
 
+/* The natLe rules when an argument is not a literal: natLe 0 b is
+   flagYes, natLe (natSucc a) 0 is flagNo, and natLe (natSucc a)
+   (natSucc b) is natLe a b. A literal n > 0 is natSucc (n - 1). A proof
+   by elim on Nat (natLeFlip, S8 u4d) needs these rules. The rules agree
+   with x <= y on literals. NULL when no rule applies. */
+static int nat_lit_is(const Value *v, uint64_t n) {
+  return v->kind == VAL_NAT && v->nat == n;
+}
+
+static const Value *nat_pred_of(Machine *m, const Value *v) {
+  return succ_head(v) ? v->args[0] : val_nat(m, v->nat - 1u);
+}
+
+static const Value *nat_le_open(Machine *m, const Value *const *a) {
+  const Value *b[2];
+  if (nat_lit_is(a[0], 0u))
+    return flag(m, 1);
+  if (!succ_head(a[0]) && !succ_head(a[1]))
+    return NULL;
+  if (nat_lit_is(a[1], 0u))
+    return flag(m, 0);
+  if (!succ_head(a[0]) && a[0]->kind != VAL_NAT)
+    return NULL;
+  if (!succ_head(a[1]) && a[1]->kind != VAL_NAT)
+    return NULL;
+  b[0] = nat_pred_of(m, a[0]);
+  b[1] = nat_pred_of(m, a[1]);
+  return nat_test(m, OP_NAT_LE, b, 2u);
+}
+
 static const Value *nat_test(Machine *m, Op op, const Value *const *a, uint32_t n) {
   const Value *out;
   uint64_t x = 0;
   uint64_t y = 0;
   uint32_t s = succ_head(a[0]) ? 0u : 1u;
   const Value *open = op == OP_NAT_EQ && succ_head(a[s]) ? nat_eq_open(m, a, s) : NULL;
+  if (open != NULL)
+    return open;
+  open = op == OP_NAT_LE ? nat_le_open(m, a) : NULL;
   if (open != NULL)
     return open;
   if (!nat_args(m, op, a, n, &x, &y, &out))
@@ -2214,6 +2247,7 @@ static const Value *transp_data(Machine *m, const Value *head, const Value *line
   case OP_UNGLUE:
   case OP_NONZERO_OF:
   case OP_NONZERO_VALUE:
+  case OP_AXIOM:
     return internal(m, "a transport along a line that is not a type");
   }
   return transp_stuck(m, line, phi, base);
@@ -3162,6 +3196,9 @@ static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, 
     return nonzero_of(m, a, n);
   case OP_NONZERO_VALUE:
     return nonzero_value(m, a, n);
+  case OP_AXIOM:
+    /* u6b3: an O3 row has no body; its value stays stuck. */
+    return val_op(m, VAL_STUCK, OP_AXIOM, inst, 0, a, n);
   case OP_FM_LEN:
     return fm_len(m, a, n);
   case OP_VALUE_COUNT:
@@ -3265,9 +3302,26 @@ const Value *eval_core(Machine *m, const Env *env, const Core *c) {
   return v;
 }
 
-/* Eta: a function is equal to G when the two agree on a fresh variable. */
+/* Two closures with the same body and convertible environments are
+   convertible (S8). This check does not unfold the body. */
+static int env_same(Machine *m, uint32_t level, const Env *a, const Env *b) {
+  while (a != NULL && b != NULL) {
+    if (a->value != b->value && !conv_values(m, level, a->value, b->value))
+      return 0;
+    a = a->next;
+    b = b->next;
+  }
+  return a == NULL && b == NULL;
+}
+
+/* Eta: a function is equal to G when the two agree on a fresh variable.
+   Two closures with the same body and convertible environments are equal
+   with no unfold of the body (S8). */
 static int conv_fun(Machine *m, uint32_t level, const Value *a, const Value *b) {
-  const Value *x = val_var(m, level);
+  const Value *x;
+  if (a->kind == VAL_LAM && b->kind == VAL_LAM && a->body != NULL && a->body == b->body && env_same(m, level, a->env, b->env))
+    return 1;
+  x = val_var(m, level);
   return conv_values(m, level + 1u, apply_value(m, a, x), apply_value(m, b, x));
 }
 
@@ -3341,6 +3395,8 @@ static int conv_system_same(Machine *m, uint32_t level, const Value *a, const Va
 static int conv_loop(Machine *m, uint32_t level, const Value *a, const Value *b) {
   uint32_t i;
   while (a != NULL && b != NULL && spend(m, 1)) {
+    if (a == b)
+      return 1;
     if (a->kind == VAL_LAM || b->kind == VAL_LAM)
       return conv_fun(m, level, a, b);
     if (a->kind == VAL_PLAM || b->kind == VAL_PLAM)
@@ -3472,11 +3528,17 @@ static const Core *const *quote_ends(Machine *m, uint32_t level, const Value *v)
   return ends[0] != NULL && ends[1] != NULL ? ends : NULL;
 }
 
+/* The lazy readback (S8). In lazy mode, quote_binder quotes a Core closure
+   from its body and its env, with no apply. The result is not a normal
+   form, but eval of it gives the same value. */
+static int lazy_quote = 0;
+static const Core *lazy_sub(Machine *m, uint32_t level, const Env *env, uint32_t k, const Core *c);
+
 static const Core *quote_binder(Machine *m, uint32_t level, const Value *v, CoreKind kind) {
   int has_dom = kind == CORE_PI || kind == CORE_SIGMA;
   int interval = kind == CORE_PLAM || kind == CORE_PATHP;
   const Core *dom = has_dom ? quote_value(m, level, v->dom) : NULL;
-  const Core *body = quote_value(m, level + 1u, closure_apply(m, v, interval ? val_ivar(m, level) : val_var(m, level)));
+  const Core *body = lazy_quote && v->body != NULL && v->tag == CLOS_CORE ? lazy_sub(m, level, v->env, 1u, v->body) : quote_value(m, level + 1u, closure_apply(m, v, interval ? val_ivar(m, level) : val_var(m, level)));
   const Core *const *ends = kind == CORE_PATHP ? quote_ends(m, level, v) : NULL;
   Core *c;
   if (body == NULL || (dom == NULL && has_dom) || (ends == NULL && kind == CORE_PATHP))
@@ -3600,6 +3662,85 @@ const Core *quote_value(Machine *m, uint32_t level, const Value *v) {
     return NULL;
   c = quote_inner(m, level, v);
   m->depth--;
+  return c;
+}
+
+/* The env value of index J (J >= K), quoted at depth LEVEL + K. */
+static const Core *lazy_var(Machine *m, uint32_t level, const Env *env, uint32_t k, const Core *c) {
+  const Env *e = env;
+  uint32_t j;
+  if (c->index < k)
+    return c;
+  for (j = c->index - k; j > 0u && e != NULL; j--)
+    e = e->next;
+  if (e == NULL) {
+    internal(m, "a lazy readback index above its env");
+    return NULL;
+  }
+  return quote_value(m, level + k, e->value);
+}
+
+/* BIND is 1 when field b is under one binder (LAM, PI, SIGMA, PLAM, PATHP). */
+static const Core *lazy_node(Machine *m, uint32_t level, const Env *env, uint32_t k, const Core *c, uint32_t bind) {
+  Core *n = new_core(m, c->kind);
+  const Core **args = NULL;
+  uint32_t i;
+  if (n == NULL)
+    return NULL;
+  *n = *c;
+  if (c->args != NULL && c->argc > 0u) {
+    args = arena_alloc(m->arena, c->argc * sizeof *args);
+    if (args == NULL)
+      return NULL;
+    for (i = 0; i < c->argc; i++) {
+      args[i] = c->args[i] == NULL ? NULL : lazy_sub(m, level, env, k, c->args[i]);
+      if (c->args[i] != NULL && args[i] == NULL)
+        return NULL;
+    }
+    n->args = args;
+  }
+  n->a = c->a == NULL ? NULL : lazy_sub(m, level, env, k, c->a);
+  n->b = c->b == NULL ? NULL : lazy_sub(m, level, env, k + bind, c->b);
+  if ((c->a != NULL && n->a == NULL) || (c->b != NULL && n->b == NULL))
+    return NULL;
+  return n;
+}
+
+static const Core *lazy_sub(Machine *m, uint32_t level, const Env *env, uint32_t k, const Core *c) {
+  switch (c->kind) {
+  case CORE_VAR:
+    return lazy_var(m, level, env, k, c);
+  case CORE_GLOBAL:
+  case CORE_NAT:
+  case CORE_UNIV:
+  case CORE_IZERO:
+  case CORE_IONE:
+    return c;
+  case CORE_LAM:
+  case CORE_PI:
+  case CORE_SIGMA:
+  case CORE_PLAM:
+  case CORE_PATHP:
+    return lazy_node(m, level, env, k, c, 1u);
+  case CORE_APP:
+  case CORE_OP:
+  case CORE_PAPP:
+  case CORE_INEG:
+  case CORE_IMEET:
+  case CORE_IJOIN:
+    return lazy_node(m, level, env, k, c, 0u);
+  }
+  internal(m, "an unknown core term");
+  return NULL;
+}
+
+/* The readback of V in lazy mode (S8); see core.h. */
+const Core *quote_lazy(Machine *m, uint32_t level, const Value *v) {
+  int saved = lazy_quote;
+  const Core *c;
+  lazy_quote = 1;
+  c = quote_value(m, level, v);
+  lazy_quote = saved;
   return c;
 }
 

@@ -1,0 +1,17 @@
+-- The key order (S8 u4, Q-S8-5 (a)): the kernel adds keyLe : Key -> Key ->
+-- Flag after keyEq. An earlier key space is less than a later key space.
+-- In one key space, the fields are in lexicographic order.
+def Val : Type 0 := Size
+keyspace Bal : Size -> Key
+keyspace Cfg : Size -> Size -> Key
+def keyOrderLt : Path Flag (keyLe (Bal sz0) (Bal (szS sz0))) flagYes := refl
+def keyOrderGt : Path Flag (keyLe (Bal (szS sz0)) (Bal sz0)) flagNo := refl
+def keyOrderEq : Path Flag (keyLe (Bal (szS sz0)) (Bal (szS sz0))) flagYes := refl
+def keyOrderSpace : Path Flag (keyLe (Bal (szS (szS sz0))) (Cfg sz0 sz0)) flagYes := refl
+def keyOrderSpaceBack : Path Flag (keyLe (Cfg sz0 sz0) (Bal sz0)) flagNo := refl
+def keyOrderLex1 : Path Flag (keyLe (Cfg sz0 (szS sz0)) (Cfg (szS sz0) sz0)) flagYes := refl
+def keyOrderLex2 : Path Flag (keyLe (Cfg (szS sz0) sz0) (Cfg sz0 (szS sz0))) flagNo := refl
+def keyOrderLex3 : Path Flag (keyLe (Cfg sz0 (szS sz0)) (Cfg sz0 sz0)) flagNo := refl
+def keyOrderLex4 : Path Flag (keyLe (Cfg sz0 sz0) (Cfg sz0 (szS sz0))) flagYes := refl
+def demoFlip : (k : Key) -> (l : Key) -> Path Flag (keyEq k l) flagNo -> Path Flag (keyLe l k) (flagIf (keyLe k l) flagNo flagYes) := keyLeFlip
+def demoTrans : (k : Key) -> (l : Key) -> (m : Key) -> Path Flag (keyLe k l) flagYes -> Path Flag (keyLe l m) flagYes -> Path Flag (keyLe k m) flagYes := keyLeTrans

@@ -649,6 +649,8 @@ static int lower_canon(Low *l, Buf *b, const Value *v, Operand *out) {
     return closure(l);
   case OP_NONZERO:
     return give(l, out, 0);
+  case OP_AXIOM:
+    return refuse(l, "an O3 row (an assumption on the Merkle hash with no code)");
   case OP_FM_LEN:
     return refuse(l, "len (the op count of a FreeMon trace at run time)");
   case OP_VALUE_COUNT:
@@ -1242,6 +1244,8 @@ static int lower_stuck(Low *l, Buf *b, const Value *v, Operand *out) {
     return lower(l, b, v->args[0], out);
   case OP_NONZERO:
     return internal(l, "a stuck canonical value");
+  case OP_AXIOM:
+    return refuse(l, "an O3 row (an assumption on the Merkle hash with no code)");
   case OP_FM_LEN:
     return refuse(l, "len (the op count of a FreeMon trace at run time)");
   case OP_VALUE_COUNT:

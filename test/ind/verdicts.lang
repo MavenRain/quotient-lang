@@ -8,4 +8,4 @@ def gen : Size := sz0
 family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
 family Cast := mkcast (voter : Size) footprint b reads [Vote(b.voter)] writes [Vote(b.voter)]
 family Tally := mktally (n : Size) footprint b reads [Total(gen)] writes [Total(gen)]
-family Store := mkstore (k : Size) (j : Size) footprint b reads [Cfg(b.k, b.j)] writes [Cfg(b.k, b.j)]
+family Vault := mkstore (k : Size) (j : Size) footprint b reads [Cfg(b.k, b.j)] writes [Cfg(b.k, b.j)]

@@ -17,7 +17,9 @@ file gives the readings of that request, the route, the slices and the open
 items. The USER ruled Q-R1 to Q-R8 before S0 (section 14). So sections 2 to
 5 are RULED, not proposals.
 
-Status: S7 DONE (2026-11-07): `Ledger` (the Nerode set quotient at a
+Status: S8 DONE (2026-11-10): `FinMap`, `canon`, `root`, the inclusion
+proof, `UTxO`, `Valid`, `compose`, O1, O3 and L7. S7 (2026-11-07) gave
+`Ledger` (the Nerode set quotient at a
 start state), `apply`, `query`, `[[ ]]N`, `<=` (`prefix`), `Compatible`,
 the Foata decider (`bodyEq`, `foata`, `foataEq`, `traceLe`,
 `compatible`; its soundness proof is OPEN) and L6. S6 (2026-11-06) gave
@@ -33,7 +35,7 @@ L5 (section 6). S3 (2026-11-03) gave `Pfin`, `in`, `union`, the slot
 `Key`, `Footprint = Pfin Key`, REFUSE_BAG_NONCOMM at `Pfin` and L2. S2
 (2026-11-02) gave `Amount`, `Bag`, `Value`, `Balance`, `[[ ]]v`,
 `Delta`, `neg`, `Balanced`, REFUSE_OVERFLOW and REFUSE_BAG_NONCOMM at
-`Bag`, with L1 and L8, on the S1 kernel (section 8.1). Next: S8
+`Bag`, with L1 and L8, on the S1 kernel (section 8.1). Next: S9
 (section 12).
 
 ## 1. Rulings
@@ -122,14 +124,14 @@ name: a program that uses it gets a refusal (section 7).
 | X9 | `<=` (prefix), `Compatible` | sec 10 | Consensus ("agreement = path equality") | CORRECT: agreement is `Compatible` (a common extension); decidable on `Trace` through the Foata normal form. S7 DONE: the kernel defs `prefix` and `Compatible` (Q-S7-4 (a)), the sugar `t <= u` for `prefix t u` (Q-S7-6 (a)), and `traceAppendEps`, `prefixRefl` and `compatibleOfPrefix` (Q-S7-10 (a)). front.c generates the decider on `List Body`: `bodyEq` and `bodyEqSound` on the key-eq prelude, only when each field of each footprint family is a key argument form (Q-S7-7 (a), Q-S7-11 (a), Q-S7-12 (a)); `foataPeel`, `foata` and `foataEq`, with each Foata step compared as a bag (Q-S7-13 (a)); `traceResidual`, `traceLe` and `compatible` (Q-S7-14 (a)). The decider runs in eval and Wasm; its soundness proof is OPEN for a later slice (Q-S7-4 (a)); examples/prefix.lang, examples/body-eq.lang, examples/foata.lang, prefix-wrong-k.lang, body-eq-seal.lang, sugar-le-chain.lang | S7 |
 | X10 | (`GenConsensus`, `CanonicalChain`, run colimit) | sec 10 | Consensus (CanonicalChain) | DROP, refused: no finite value; `Forks` and `~cons` have no definition. SPEC text only. S6 DONE: `REFUSE_NOT_IN_DESIGN` (the S1 code; canonical-chain.lang) | S6 |
 | X11 | `Bag A` (comm, trunc), `Value = Bag Asset`, `Balance`, `[[ ]]v` | sec 2 | Consensus (List Output / perm) | KEEP: the free commutative monoid | S2 |
-| X12 | `UTxO = FinMap OutRef Output` | secs 2, 12 | Consensus (List Output / perm) | CORRECT: outputs have unique refs, so a finite map, not a bag | S8 |
+| X12 | `UTxO = FinMap OutRef Output` | secs 2, 12 | Consensus (List Output / perm) | CORRECT: outputs have unique refs, so a finite map, not a bag. S8 DONE: the front end splices the UTxO prelude after the program defs of `OutRef` and `Output` (Q-S8-6 (a)); the SIG_PROGRAM rows `outRefEq` and `outRefLe` (Q-S8-5 (a), Q-S8-6 (a)) and the lemma rows `outRefEqSound`, `outRefEqRefl`, `outRefLeFlip` and `outRefLeTrans` (Q-S8-10 (a)); `utxoLeaf`, and `utxoSpend` through `canon` with no new HIT generator (Q-S8-11 (a)); examples/utxo.lang | S8 |
 | X13 | `Delta M`, `neg`, `Balanced`, mint and burn policy | sec 3 | (none) | KEEP: subtraction is total | S2 |
 | X14 | `agg : Bag Sig -> Sig` (commutative `Sig`) | sec 5 | (none) | KEEP: a non-commutative scheme is refused at `Bag Sig`. S4 DONE: the slot `Sig` and its six program names; the agg prelude gives `agg` (`bagFold`) and `aggOp`; no `sigComm`, or a wrong one, gives `REFUSE_BAG_NONCOMM` (Q-S4-4 (a)) | S4 |
 | X15 | `QC b` (signer set outside, signatures inside the truncation) | sec 4 | (none) | KEEP, v1 (Q-R6 (a)). S4 DONE: the QC prelude; the program bit `quorum : Pfin Node -> bit` is in the `Sigma`, outside the truncation (Q-S4-5 (a)) | S4 |
 | X16 | `Pfin A`, `in`, `union`, `Mempool = Pfin AuthTx` | sec 6 | (none) | KEEP: gossip merge is union. S3 DONE: `Pfin A`, `in` and `union`. `Mempool` moves to S4, because it needs `AuthTx` (S4). S4 DONE: `Mempool = Pfin AuthTx` in the auth prelude | S3, S4 |
 | X17 | `reads`, `writes : Body -> Pfin Key`; frame law gives commute | sec 7 | (none) | KEEP: the core checker feature (section 5) | S5 |
-| X18 | `FinMap Key Val`, `canon`, `root`, inclusion proof, `Digest` | sec 12 | (none) | KEEP: binding is assumption O1; policy normal forms later (Q-R7 (a)) | S8 |
-| X19 | `Valid r r'`, `compose` | sec 13 | (none) | KEEP: the T2 circuit emits `Valid`; `compose` uses L4 and O1 once | S8, S17 |
+| X18 | `FinMap Key Val`, `canon`, `root`, inclusion proof, `Digest` | sec 12 | (none) | KEEP: binding is assumption O1; policy normal forms later (Q-R7 (a)). S8 DONE: the Store `FinMap` prelude HIT with the path generators `fmOver` and `fmComm`, and the lookup (Q-S8-1 (a)); the bridge `storeState` with the SIG_PROGRAM row `valZero` (Q-S8-2 (a)); `canon` on the generated `keyLe` (Q-S8-5 (a)), with `canonIsSorted`; `root` is a Merkle fold on a right spine over `canon` (Q-S8-3 (b), Q-S8-7 (a)), with `storeLeaf`, `nodeDigest` and `storeRoot`; the inclusion verifier `inclVerify` and the lemma `inclSound` (Q-S8-8 (b)); `nat_le_open` in eval.c (Q-S8-9 (a)); examples/finmap.lang, keyorder.lang, merkle.lang, incl-sound.lang | S8 |
+| X19 | `Valid r r'`, `compose` | sec 13 | (none) | KEEP: the T2 circuit emits `Valid`; `compose` uses L4 and O1 once. S8 DONE: the prelude defs `Valid r r'` (a `Trunc1` over two stores `s`, `s2` and a trace `t`, with `storeRoot s = r` and `storeRoot s2 = r'`) and `compose` (Q-S8-4 (a)); `langc check --json` of examples/valid.lang lists `rootInj` in `axioms`. The T2 circuit stays S17 | S8, S17 |
 | X20 | shards: `Trace (B1 + B2) ~ Trace B1 x Trace B2` | sec 11 | (none) | KEEP as a T3 report fact (cross-shard letter count), no type | S11 |
 | X21 | `D = (Body x Body) minus Ind`, the MEV surface | sec 14 | Summary | KEEP: T3 lists the `D` pairs. S6 DONE: front.c generates `D : Body -> Body -> Flag`, the negation of `ind` (Q-S6-7 (a)); T3 is S11 | S6, S11 |
 
@@ -344,15 +346,21 @@ Notes:
 | L4 | `[[t ++ u]] = [[t]] ; [[u]]`, and `[[ ]]` is the unique monoid map that extends `step` (D1 sec 8). | prelude. S6 DONE: `evalAppend` by a dependent `Trace` elim (Q-S6-27 (a)); examples/eval-append.lang |
 | L5 | No-malleability: equal bodies give equal `AuthTx`; txid reads `Body` only. | checker: a step or txid that reads a `Witness` is refused. S4 DONE for `txid` and the `Body` slot: `REFUSE_WITNESS_READ` (Q-S4-2 (a)), and the prelude lemma `authTxEq` (Q-S4-7 (a)); examples/authtx.lang. S5 DONE for `step`: a footprint family that mentions `Witness`, `Authorized` or `AuthTx` gives `REFUSE_WITNESS_READ` (step-reads-witness.lang, step-reads-witness-alias.lang). |
 | L6 | Nerode right congruence: `t ~N u` gives `t ++ k ~N u ++ k`. | prelude. S7 DONE: `nerodeRight` from `evalAppend` and bind (Q-S7-1 (a)), with `nerodeCat`, `nerodeRefl`, `nerodeSym` and `nerodeTrans`; examples/nerode.lang, nerode-end.lang |
-| L7 | `Valid` compose: `Valid r r'` and `Valid r' r''` give `Valid r r''`. Uses L4 and O1 once. | prelude; T2 emits it |
+| L7 | `Valid` compose: `Valid r r'` and `Valid r' r''` give `Valid r r''`. Uses L4 and O1 once. | prelude; T2 emits it. S8 DONE: the prelude def `compose`, with `evalAppend` (L4) and the O1 row `rootInj` (Q-S8-4 (a)); examples/valid.lang |
 | L8 | `Delta`: `a - a = 0`; `Balanced` is closed under `+`. | prelude, S2 DONE: `deltaSelf` (`a - a = 0`), `balancedAdd` (Q-S2-6 (a)) and `balancedNeg` (section 4); `examples/value.lang` |
 | L9 | `eval` factors through `Blockchain` (X6). | by construction. S6 DONE: `chainEval` of `chainOf t` is `traceEval t` by refl (Q-S6-4 (a)); examples/chain.lang |
 
 Assumptions (named, never proved in the language):
 
 - O1 Binding: `root` is injective on the quotient (D1 sec 12).
+  S8 DONE: the kernel assumption row `rootInj : (a : Store) -> (b :
+  Store) -> Path Digest (storeRoot a) (storeRoot b) -> Path Store a b`
+  (Q-S8-4 (a)). `langc check --json` lists `rootInj` in `axioms`.
 - O2 `Sig` is commutative: BLS12-381 aggregation (crypto ruling).
 - O3 Hash collision resistance of `Digest` (v1: SHA-256 in the C node).
+  S8 DONE: the kernel assumption rows `nodeDigestInj`, `storeLeafInj`
+  and `nodeNotEmpty` (Q-S8-8 (b)), for the proof of `inclSound`. A
+  program axiom keeps REFUSE_AXIOM (rule R2).
 
 `langc check --json` counts each discharged law and lists O1 to O3 as
 assumptions (A2).
@@ -462,9 +470,9 @@ One session for each slice: scope, gate, mutants, docs, close.
 | S3 | `Pfin`, `in`, `union`, `Key`, `Footprint`; L2. | DONE: serial gate EXIT 0 (33 examples, 16 parse refusals, 158 check refusals, 10 kit-only refusals, 98 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 35 valid Wasm modules, 2293 differential cases with 0 mismatches, 0 failures; review, domain and path regressions passed). 11 of 12 mutants KILLED; KEY-SPLICE-2 is equivalent (section 7, Q-S3-6 (a)). `Mempool` moves to S4 (X16) |
 | S4 | `Body`, `Witness`, `Authorized`, `AuthTx`, `Mempool = Pfin AuthTx`, `Digest` (abstract), `Sig`, `agg`, `QC`; `REFUSE_WITNESS_READ`, `REFUSE_BAG_NONCOMM` at `Bag Sig`; L5. | DONE: serial gate EXIT 0 (37 examples, 16 parse refusals, 171 check refusals, 10 kit-only refusals, 106 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 39 valid Wasm modules, 2293 differential cases with 0 mismatches, 0 failures; review, domain and path regressions passed). Mutants: 14 of 15 KILLED; AUTH-SPLICE-2 is EQUIVALENT (the S4 mutants table below). |
 | S5 | `State`, `Eff`, `step`, `reads`, `writes`, the frame-law checker, `Ind`, the `Ind` matrix; `REFUSE_FOOTPRINT_*`; L3. | DONE: serial gate EXIT 0 (56 examples, 18 parse refusals, 215 check refusals, 10 kit-only refusals, 134 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 58 valid Wasm modules, 2350 differential cases with 0 mismatches, 27 ind rows, 0 failures; review, domain and path regressions passed). L3 is by shape (Q-S5-5 (a)): the phase check of each `step` and the `Ind` matrix are the evidence; there is no kernel path term. Mutants: 8 of 8 KILLED (the S5 mutants table below). |
-| S6 | `Trace`, `swap`, `++`, `[t]`, `[[ ]]`, `Blockchain`, `D`; X4 and X10 refused; `REFUSE_EQ_UNDECIDABLE`; L4, L9. | |
-| S7 | `Ledger`, `apply`, `query`, `[[ ]]N`, `<=`, `Compatible`, Foata normal form; L6. | |
-| S8 | `FinMap`, `canon`, `root`, inclusion proof, `UTxO`, `Valid`, `compose`; O1, O3; L7. | |
+| S6 | `Trace`, `swap`, `++`, `[t]`, `[[ ]]`, `Blockchain`, `D`; X4 and X10 refused; `REFUSE_EQ_UNDECIDABLE`; L4, L9. | DONE: serial gate EXIT 0 (68 examples, 28 parse refusals, 244 check refusals, 10 kit-only refusals, 170 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 70 valid Wasm modules, 2361 differential cases with 0 mismatches, 27 ind rows, 0 failures; review, domain and path regressions passed). Mutants: 16 of 16 KILLED. |
+| S7 | `Ledger`, `apply`, `query`, `[[ ]]N`, `<=`, `Compatible`, Foata normal form; L6. | DONE: serial gate EXIT 0 (74 examples, 30 parse refusals, 249 check refusals, 10 kit-only refusals, 184 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 76 valid Wasm modules, 2375 differential cases with 0 mismatches, 27 ind rows, 0 failures; review, domain and path regressions passed). The soundness proof of the Foata decider is OPEN (Q-S7-4 (a)). Mutants: 5 of 5 KILLED. |
+| S8 | `FinMap`, `canon`, `root`, inclusion proof, `UTxO`, `Valid`, `compose`; O1, O3; L7. | DONE: serial gate EXIT 0 (81 examples, 30 parse refusals, 263 check refusals, 10 kit-only refusals, 204 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 83 valid Wasm modules, 3516 differential cases with 0 mismatches, 27 ind rows, 0 failures). The soundness proof of the Foata decider stays OPEN (Q-S7-4 (a)). Mutants: 26 of 26 KILLED. |
 | S9 | T1 part 1: the Wasm step modules with their footprints; the notrap rows. | |
 | S10 | T1 part 2: `quotientd`: the Wasm engine, SHA-256, BLS12-381, the mempool, the query answers, N6; the demo E1 to E6. | |
 | S11 | T3: the JSON law report, `docs/REPORT-JSON.md`, the shard letters (X20). | |
@@ -730,3 +738,45 @@ recommendation (a).
   L5, REFUSE_WITNESS_READ and `Mempool`; u3 `Digest` and `txid`; u4
   `Sig` and `agg`; u5 `QC`; u6 this plan, the docs and the mutants; u7
   the close.
+- Q-S8-1: the form of `FinMap`. RULED (a) by the USER, 2026-11-07 (S8
+  u2): a prelude HIT with its generators, with the path generators
+  `fmOver` and `fmComm`. DONE (S8 u3): the Store FinMap prelude and the
+  lookup.
+- Q-S8-2: `State` and the store. RULED (a) by the USER, 2026-11-07 (S8
+  u2): `State` stays `Key -> Val`. The bridge is `storeState`, with the
+  SIG_PROGRAM row `valZero : Val`. DONE (S8 u4).
+- Q-S8-3: `root` and the inclusion proof. RULED (b) by the USER,
+  2026-11-07 (S8 u2): a Merkle fold over `canon`. DONE (S8 u5):
+  examples/merkle.lang.
+- Q-S8-4: the form of O1. RULED (a) by the USER, 2026-11-07 (S8 u2): the
+  kernel assumption row `rootInj`. DONE (S8 u8): `langc check --json` of
+  examples/valid.lang lists `rootInj` in `axioms`.
+- Q-S8-5: the key order for `canon`. RULED (a) by the USER, 2026-11-07
+  (S8 u2): the key prelude generates `keyLe`; the SIG_PROGRAM row
+  `outRefLe` gives the order of `OutRef`. DONE (S8 u4, u7).
+- Q-S8-6: the place of the UTxO prelude and the equality of `OutRef`.
+  RULED (a) by the USER, 2026-11-07 (S8 u2): the front end splices the
+  UTxO prelude after the program defs of `OutRef` and `Output`; the
+  SIG_PROGRAM row `outRefEq`. DONE (S8 u7): examples/utxo.lang.
+- Q-S8-7: the Merkle shape. RULED (a) by the USER, 2026-11-07 (S8 u2): a
+  right spine over `canon`. DONE (S8 u5).
+- Q-S8-8: inclusion soundness. RULED (b) by the USER, 2026-11-07 (S8
+  u2): S8 proves inclusion soundness, and O3 becomes kernel assumption
+  rows. DONE (S8 u6).
+- Q-S8-9: `natLe` on open terms. RULED (a) by the USER, 2026-11-08 (S8
+  u4d): eval.c gets `nat_le_open`, because the core `natLe` did not
+  reduce on open terms. DONE (S8 u4d).
+- Q-S8-10: the `OutRef` lemmas. RULED (a) by the USER, 2026-11-09 (S8
+  u7): four SIG_PROGRAM rows `outRefEqSound`, `outRefEqRefl`,
+  `outRefLeFlip` and `outRefLeTrans`, with the types of the `Key`
+  lemmas. The program gives the proofs; check.c checks their types. DONE
+  (S8 u7).
+- Q-S8-11: the spend. RULED (a) by the USER, 2026-11-09 (S8 u7): the
+  spend goes through `canon`. A list function removes the entry at the
+  spent ref, and a fold makes the UTxO again. There is no new HIT
+  generator. DONE (S8 u7): `utxoSpend`.
+- Q-S8-12: the kernel cost of `storeRoot` at a neutral store. RULED (a)
+  by the USER, 2026-11-10 (S8 u8): a lazy unfold in the kernel. The
+  kernel does not unfold a def head at a neutral argument before
+  conversion needs it. DONE (S8 u8): three kernel fixes in eval.c and
+  check.c.

@@ -1,0 +1,5 @@
+-- storeLeaf must have the type Key -> Val -> Digest (USER ruling Q-S8-3 (b)).
+def Val : Type 0 := Nat
+keyspace Bal : Nat -> Key
+def Digest : Type 0 := Nat
+def storeLeaf : Val -> Digest := fun (v : Val) => natSucc v

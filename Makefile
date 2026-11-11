@@ -15,7 +15,7 @@ HEADERS = $(wildcard src/*.h src/front/*.h)
 
 .PHONY: build check check-clang clean
 
-build: build/langc build/fronttool build/pathtool build/notraptool
+build: build/langc build/fronttool build/pathtool build/notraptool build/reporttool
 
 build/domain.c: domain/domain.lang gen/embed.c
 	mkdir -p build
@@ -36,17 +36,22 @@ build/notraptool: $(NOTRAP_TOOL) $(HEADERS)
 	mkdir -p build
 	$(TCC) $(CFLAGS) -o build/notraptool $(NOTRAP_TOOL)
 
+build/reporttool: test/reporttool.c $(SRC) $(HEADERS) build/domain.c
+	$(TCC) $(CFLAGS) -o build/reporttool test/reporttool.c $(filter-out src/main.c,$(SRC)) build/domain.c
+
 check-clang: build/domain.c
 	$(CC) $(CLANG_FLAGS) $(SRC) build/domain.c
 	$(CC) $(CLANG_FLAGS) $(FRONT_TOOL)
 	$(CC) $(CLANG_FLAGS) $(PATH_TOOL)
 	$(CC) $(CLANG_FLAGS) $(NOTRAP_TOOL)
+	$(CC) $(CLANG_FLAGS) test/reporttool.c
 
-check: build/langc build/fronttool build/pathtool build/notraptool check-clang
+check: build/langc build/fronttool build/pathtool build/notraptool build/reporttool check-clang
 	sh test/gate.sh
 	sh test/review.sh
 	build/fronttool
 	build/pathtool
+	build/reporttool
 
 clean:
 	rm -rf build

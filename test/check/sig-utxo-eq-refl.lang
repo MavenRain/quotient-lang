@@ -1,0 +1,19 @@
+-- outRefEqRefl must have the type of its key lemma in kernel/key-eq.lang, with OutRef for Key (USER ruling Q-S8-10 (a)).
+def Val : Type 0 := Nat
+keyspace Bal : Nat -> Key
+def Digest : Type 0 := Nat
+def digestAdd : Nat -> Nat -> Nat := fun (x : Nat) (y : Nat) => option x (fun (s : Nat) => s) (natAdd x y)
+def storeLeaf : Key -> Val -> Digest := fun (k : Key) (v : Val) => digestAdd v 1
+def nodeDigest : Digest -> Digest -> Digest := fun (a : Digest) (b : Digest) => digestAdd (digestAdd a (digestAdd a a)) (digestAdd b 1)
+def emptyDigest : Digest := 0
+def demoStore : Store := fmPut (Bal 2) 7 (fmPut (Bal 1) 5 fmEmpty)
+def OutRef : Type 0 := Nat
+def Output : Type 0 := Nat
+def outRefEq : OutRef -> OutRef -> Flag := fun (a : OutRef) (b : OutRef) => natEq a b
+def demoUtxo : UTxO := utxoPut 2 9 (utxoPut 1 5 utxoEmpty)
+def outRefLe : OutRef -> OutRef -> Flag := fun (a : OutRef) (b : OutRef) => natLe a b
+def utxoLeaf : OutRef -> Output -> Digest := fun (k : OutRef) (v : Output) => digestAdd v 1
+def outRefEqSound : (a : OutRef) -> (b : OutRef) -> Path Flag (outRefEq a b) flagYes -> Path OutRef a b := natEqSound
+def outRefEqRefl : (a : OutRef) -> (b : OutRef) -> Path Flag (outRefEq a b) flagYes -> Path OutRef a b := natEqSound
+def outRefLeFlip : (a : OutRef) -> (b : OutRef) -> Path Flag (outRefEq a b) flagNo -> Path Flag (outRefLe b a) (flagIf (outRefLe a b) flagNo flagYes) := natLeFlip
+def outRefLeTrans : (a : OutRef) -> (b : OutRef) -> (c : OutRef) -> Path Flag (outRefLe a b) flagYes -> Path Flag (outRefLe b c) flagYes -> Path Flag (outRefLe a c) flagYes := natLeTrans

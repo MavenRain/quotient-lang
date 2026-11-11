@@ -1,0 +1,22 @@
+-- Inclusion soundness (quotient-lang S8 u6, USER ruling Q-S8-8 (b)). The
+-- kernel lemma inclSound m k v p: when inclVerify k v p is the root of the
+-- store m, the lookup of k in m is some v. The proof uses the O3 rows (the
+-- hash is collision resistant), thus `langc --kit check --json` lists them
+-- as assumptions. The defs below are the defs of merkle.lang.
+def Val : Type 0 := Nat
+keyspace Bal : Nat -> Key
+def Digest : Type 0 := Nat
+-- digestAdd x y is x + y, or x when the sum overflows. It has no elim and
+-- no natSucc, thus the Wasm host lowers it (USER ruling Q-S8-u5d-1 (a)).
+def digestAdd : Nat -> Nat -> Nat := fun (x : Nat) (y : Nat) => option x (fun (s : Nat) => s) (natAdd x y)
+def storeLeaf : Key -> Val -> Digest := fun (k : Key) (v : Val) => digestAdd v 1
+def nodeDigest : Digest -> Digest -> Digest := fun (a : Digest) (b : Digest) => digestAdd (digestAdd a (digestAdd a a)) (digestAdd b 1)
+def emptyDigest : Digest := 0
+def demoStore : Store := fmPut (Bal 2) 7 (fmPut (Bal 1) 5 fmEmpty)
+-- For each key, value and proof: a proof that verifies to the root of
+-- demoStore gives the lookup of the key.
+def demoIncl : (k : Key) -> (v : Val) -> (p : Prod (List Digest) Digest) -> Path Digest (inclVerify k v p) (storeRoot demoStore) -> Path (Maybe Val) (lookup demoStore k) (some v) :=
+  fun (k : Key) (v : Val) (p : Prod (List Digest) Digest) => inclSound demoStore k v p
+-- The proof of Bal 2 verifies (demoIncl2 of merkle.lang), thus the lookup
+-- of Bal 2 in demoStore is some 7.
+def demoInclAt : Path (Maybe Val) (lookup demoStore (Bal 2)) (some 7) := inclSound demoStore (Bal 2) 7 (inclProof (Bal 2) (canon demoStore)) refl

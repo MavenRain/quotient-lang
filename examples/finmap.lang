@@ -1,0 +1,30 @@
+-- The Store FinMap (S8 u3, Q-S8-1 (a)): the kernel adds the family Store
+-- (fmEmpty, fmPut, fmOver, fmComm) and lookup after Key and Val.
+-- fmOver: a new value at a key replaces the old value.
+-- fmComm: two puts at different keys commute; the cell takes the path
+-- keyEq k l = flagNo. lookup gives the value at a key, or none.
+def Val : Type 0 := Nat
+keyspace Bal : Nat -> Key
+def demoStore : Store := fmPut (Bal 1) 5 (fmPut (Bal 2) 7 fmEmpty)
+def demoOver : Path Store (fmPut (Bal 1) 9 (fmPut (Bal 1) 5 fmEmpty)) (fmPut (Bal 1) 9 fmEmpty) :=
+  fun (i : I) => fmOver (Bal 1) 9 5 fmEmpty i
+def demoSwap : Path Store (fmPut (Bal 1) 5 (fmPut (Bal 2) 7 fmEmpty)) (fmPut (Bal 2) 7 (fmPut (Bal 1) 5 fmEmpty)) :=
+  fun (i : I) => fmComm (Bal 1) (Bal 2) 5 7 fmEmpty refl i
+def demoLook : Nat -> Maybe Val := fun (n : Nat) => lookup demoStore (Bal n)
+def demoLookOver : Path (Maybe Val) (lookup (fmPut (Bal 1) 9 (fmPut (Bal 1) 5 fmEmpty)) (Bal 1)) (some 9) := refl
+def demoLookSwap : Path (Maybe Val) (lookup (fmPut (Bal 2) 7 (fmPut (Bal 1) 5 fmEmpty)) (Bal 1)) (lookup demoStore (Bal 1)) := refl
+-- storeState gives the value at a key, or valZero for a missing key
+-- (Q-S8-2 (a)). keyLe is the key order (Q-S8-5 (a)).
+def valZero : Val := 0
+def demoState : Nat -> Val := fun (n : Nat) => storeState demoStore (Bal n)
+def demoStateHit : Path Val (storeState demoStore (Bal 1)) 5 := refl
+def demoStateMiss : Path Val (storeState demoStore (Bal 3)) 0 := refl
+def demoLe : Nat -> Flag := fun (n : Nat) => keyLe (Bal n) (Bal 2)
+def demoCanonSet : isSet (List (Prod Key Val)) := canonIsSet
+-- canon gives the entries of a Store as a list in key order (S8 u4f4).
+-- Two puts in a different order give the same canon.
+def demoCanon2 : Flag := listEq (Prod Key Val) canonEntryEq (canon (fmPut (Bal 2) 7 (fmPut (Bal 1) 5 fmEmpty))) (canon (fmPut (Bal 1) 5 (fmPut (Bal 2) 7 fmEmpty)))
+def demoCanon1 : Flag := listEq (Prod Key Val) canonEntryEq (canon (fmPut (Bal 1) 7 (fmPut (Bal 1) 5 fmEmpty))) (canon (fmPut (Bal 1) 5 (fmPut (Bal 1) 7 fmEmpty)))
+def demoCanonHead2 : Val := elim (fun (z : List (Prod Key Val)) => Val) 0 (fun (h : Prod Key Val) (t : List (Prod Key Val)) (r : Val) => second h) (canon (fmPut (Bal 2) 7 (fmPut (Bal 1) 5 fmEmpty)))
+def demoCanonHead0 : Val := elim (fun (z : List (Prod Key Val)) => Val) 0 (fun (h : Prod Key Val) (t : List (Prod Key Val)) (r : Val) => second h) (canon (fmPut (Bal 0) 7 (fmPut (Bal 1) 5 fmEmpty)))
+def demoCanonSwap : Path (List (Prod Key Val)) (canon (fmPut (Bal 2) 7 (fmPut (Bal 1) 5 fmEmpty))) (canon demoStore) := refl
