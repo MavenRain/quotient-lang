@@ -5518,8 +5518,10 @@ static int step_arg_same(const PatArg *sa, const PatArg *fa) {
   return 0;
 }
 
-/* 1 if the step pattern KP is one of the N footprint patterns PATS. */
-static int step_pat_in(const KeyPat *kp, const KeyPat *pats, size_t n) {
+/* The index of the step pattern KP in the N footprint patterns PATS, or N
+   if no pattern is KP. The index is the slot of the pattern in the step
+   buffer (S9 u2). */
+static size_t step_pat_slot(const KeyPat *kp, const KeyPat *pats, size_t n) {
   size_t p;
   size_t a;
   for (p = 0; p < n; p++) {
@@ -5528,9 +5530,14 @@ static int step_pat_in(const KeyPat *kp, const KeyPat *pats, size_t n) {
     for (a = 0; a < kp->arg_count && step_arg_same(&kp->args[a], &pats[p].args[a]); a++)
       ;
     if (a == kp->arg_count)
-      return 1;
+      return p;
   }
-  return 0;
+  return n;
+}
+
+/* 1 if the step pattern KP is one of the N footprint patterns PATS. */
+static int step_pat_in(const KeyPat *kp, const KeyPat *pats, size_t n) {
+  return step_pat_slot(kp, pats, n) < n;
 }
 
 /* The type value of the global NAME for the step terms (S5 u4k): the
@@ -5633,6 +5640,9 @@ static int step_check(Checker *c, const Decl *d) {
   size_t pushed;
   const Value *val_ty;
   const Value *fam_ty;
+  const Core *core;
+  StepRecItem *recs;
+  Machine *m = c->m;
   for (at = 0; at < ds->count && &ds->items[at] != d; at++)
     ;
   if (at == ds->count || s == NULL || d->name == NULL || s->binder == NULL)
@@ -5649,6 +5659,9 @@ static int step_check(Checker *c, const Decl *d) {
     if (ds->items[i].kind == DECL_STEP && ds->items[i].name != NULL && strcmp(ds->items[i].name, d->name) == 0)
       return FAIL(c, "REFUSE_STEP", "the family %s has a second step; a family has one step (Q-S5-20 (a))", d->name);
   }
+  recs = arena_alloc(m->arena, (s->item_count + 1u) * sizeof *recs);
+  if (recs == NULL)
+    return FAIL(c, "OOM", "out of memory");
   val_ty = step_type(c, "Val", s);
   fam_ty = val_ty == NULL ? NULL : step_type(c, d->name, s);
   ok = fam_ty != NULL && push(c, s->binder, fam_ty);
@@ -5656,6 +5669,11 @@ static int step_check(Checker *c, const Decl *d) {
   for (i = 0; ok && i < s->item_count; i++) {
     const StepItem *it = &s->items[i];
     const Value *ty = NULL;
+    recs[i].kind = it->kind;
+    recs[i].name = it->name;
+    recs[i].slot = 0;
+    recs[i].term = NULL;
+    recs[i].aborts = 0;
     switch (it->kind) {
     case STEP_GET:
       ok = step_args_static(c, d, i, &it->pat);
@@ -5665,28 +5683,46 @@ static int step_check(Checker *c, const Decl *d) {
         ok = FAIL(c, "REFUSE_FOOTPRINT_READ", "the get pattern %s in the step of %s is not in the reads of its footprint (X17)", it->pat.space, d->name);
       ok = ok && push(c, it->name, val_ty);
       pushed += ok ? 1u : 0u;
+      recs[i].slot = (uint32_t)step_pat_slot(&it->pat, fam->footprint->reads, fam->footprint->read_count);
       break;
     case STEP_SET:
       ok = step_args_static(c, d, i, &it->pat);
       if (ok && !step_pat_in(&it->pat, fam->footprint->writes, fam->footprint->write_count))
         ok = FAIL(c, "REFUSE_FOOTPRINT_WRITE", "the set pattern %s in the step of %s is not in the writes of its footprint (X17)", it->pat.space, d->name);
-      ok = ok && check(c, it->term, val_ty) != NULL;
+      core = ok ? check(c, it->term, val_ty) : NULL;
+      ok = core != NULL;
+      recs[i].slot = (uint32_t)step_pat_slot(&it->pat, fam->footprint->writes, fam->footprint->write_count);
+      recs[i].term = core;
       phase_write = 1;
       break;
     case STEP_LET:
-      ok = infer(c, it->term, &ty) != NULL;
+      core = infer(c, it->term, &ty);
+      ok = core != NULL;
       if (ok && ty == NULL)
         ok = FAIL(c, "INTERNAL", "the let value of %s in the step of %s has no type", it->name, d->name);
       if (ok && phase_write && val_is(ty, OP_OPTION))
         ok = FAIL(c, "REFUSE_FOOTPRINT_PHASE", "the let of %s in the step of %s has a Maybe type and comes after a set; a let that can give none is not in the write phase (X17, Q-S5-4 (a))", it->name, d->name);
       ok = ok && push(c, it->name, val_is(ty, OP_OPTION) ? ty->args[0] : ty);
+      recs[i].term = core;
+      recs[i].aborts = (ok && val_is(ty, OP_OPTION)) ? 1 : 0;
       pushed += ok ? 1u : 0u;
       break;
     }
   }
   for (; pushed > 0u; pushed--)
     pop(c);
-  return ok;
+  if (!ok)
+    return 0;
+  if (m->step_count >= m->step_cap)
+    return FAIL(c, "OOM", "the step table is full");
+  m->steps[m->step_count].family = d->name;
+  m->steps[m->step_count].binder = s->binder;
+  m->steps[m->step_count].items = recs;
+  m->steps[m->step_count].item_count = (uint32_t)s->item_count;
+  m->steps[m->step_count].read_count = (uint32_t)fam->footprint->read_count;
+  m->steps[m->step_count].write_count = (uint32_t)fam->footprint->write_count;
+  m->step_count++;
+  return 1;
 }
 
 static int check_decl(Checker *c, const Decl *d) {
@@ -6034,12 +6070,14 @@ int check_program(Arena *arena, const DeclList *decls, Machine *m, Diag *diag, C
   m->families = arena_alloc(arena, (decls->count + extra + 1u) * sizeof *m->families);
   m->ctors = arena_alloc(arena, (ctors + 1u) * sizeof *m->ctors);
   m->spaces = arena_alloc(arena, (decls->count + 1u) * sizeof *m->spaces);
-  if (m->defs == NULL || m->families == NULL || m->ctors == NULL || m->spaces == NULL)
+  m->steps = arena_alloc(arena, (decls->count + 1u) * sizeof *m->steps);
+  if (m->defs == NULL || m->families == NULL || m->ctors == NULL || m->spaces == NULL || m->steps == NULL)
     return diag_fail(diag, "OOM", NULL, "out of memory");
   m->def_cap = (uint32_t)(decls->count + extra);
   m->family_cap = (uint32_t)(decls->count + extra);
   m->ctor_cap = (uint32_t)ctors;
   m->space_cap = (uint32_t)decls->count;
+  m->step_cap = (uint32_t)decls->count;
   memset(&c, 0, sizeof c);
   c.m = m;
   c.decls = decls;
@@ -6149,6 +6187,208 @@ static int print_result(Machine *m, const char *name, const Value *v, FILE *out,
   return 1;
 }
 
+/* The largest count of a Size argument of the step form (Q-S9-13 (a)). */
+#define STEP_SIZE_MAX 65535u
+
+static int step_scalar_type(const Value *t) {
+  return val_is(t, OP_NAT) || val_is(t, OP_AMOUNT) || val_is(t, OP_FLAG);
+}
+
+/* The type T is the prelude family Size (the test of key_arg_type). */
+static int step_size_type(const Machine *m, const Value *t) {
+  return val_is(t, OP_FAMILY) && t->argc == 0u && t->inst < m->family_count && m->families[t->inst].name != NULL && strcmp(m->families[t->inst].name, "Size") == 0;
+}
+
+/* The constructor NAME of the family Size T, or NO_DEF. */
+static uint32_t step_size_ctor(const Machine *m, const Value *t, const char *name) {
+  const FamilyInfo *f = &m->families[t->inst];
+  uint32_t i;
+  for (i = 0; i < f->ctor_count; i++)
+    if (m->ctors[f->first_ctor + i].name != NULL && strcmp(m->ctors[f->first_ctor + i].name, name) == 0)
+      return f->first_ctor + i;
+  return NO_DEF;
+}
+
+/* A step argument of the type T (Q-S9-13 (a)): a Nat or an Amount in
+   decimal, a Flag as 0 or 1, a Size as its count in decimal (the value is
+   szS COUNT times on sz0). */
+static const Value *step_arg(Machine *m, const char *text, const Value *t) {
+  uint64_t n = 0;
+  uint64_t i;
+  uint32_t zero;
+  uint32_t succ;
+  const Value *v;
+  const Value **cell;
+  if (!step_size_type(m, t))
+    return entry_arg(m, text, val_is(t, OP_FLAG) ? ARG_TYPE_FLAG : ARG_TYPE_NAT);
+  zero = step_size_ctor(m, t, "sz0");
+  succ = step_size_ctor(m, t, "szS");
+  if (!parse_u64(text, &n) || n > STEP_SIZE_MAX || zero == NO_DEF || succ == NO_DEF) {
+    diag_fail(m->diag, "EVAL_ARGS", m->def, "'%s' is not a Size (a count from 0 to %u)", text, (unsigned)STEP_SIZE_MAX);
+    return NULL;
+  }
+  cell = arena_alloc(m->arena, sizeof *cell);
+  v = cell != NULL ? val_ctor(m, zero, cell, 0) : NULL;
+  for (i = 0; i < n && v != NULL; i++) {
+    cell = arena_alloc(m->arena, sizeof *cell);
+    if (cell == NULL)
+      break;
+    cell[0] = v;
+    v = val_ctor(m, succ, cell, 1);
+  }
+  if (cell == NULL)
+    diag_fail(m->diag, "OOM", m->def, "out of memory");
+  return cell != NULL ? v : NULL;
+}
+
+/* The count of a closed Size value of the type T: szS COUNT times on sz0. */
+static int step_size_count(const Machine *m, const Value *t, const Value *v, uint64_t *out) {
+  uint32_t zero = step_size_ctor(m, t, "sz0");
+  uint32_t succ = step_size_ctor(m, t, "szS");
+  uint64_t n = 0;
+  while (v != NULL && val_is(v, OP_CTOR) && v->inst == succ && v->argc == 1u) {
+    v = v->args[0];
+    n++;
+  }
+  *out = n;
+  return v != NULL && val_is(v, OP_CTOR) && v->inst == zero;
+}
+
+/* The number of a write value of the step form: a Nat or an Amount, a Flag
+   as 0 or 1, a Size as its count (Q-S9-13 (a)). VT is the type Val. */
+static int step_number(const Machine *m, const Value *vt, const Value *v, uint64_t *out) {
+  if (v->kind == VAL_NAT) {
+    *out = v->nat;
+    return 1;
+  }
+  if (val_is(v, OP_FLAG_YES) || val_is(v, OP_FLAG_NO)) {
+    *out = (uint64_t)val_is(v, OP_FLAG_YES);
+    return 1;
+  }
+  return step_size_type(m, vt) && step_size_count(m, vt, v, out);
+}
+
+/* The exit status of a failure of the step form. When no diagnostic is
+   there, the diagnostic is EVAL_ENTRY with TEXT. EVAL_ARGS gives 2. */
+static int step_status(Machine *m, const char *name, const char *text) {
+  if (m->diag->code == NULL)
+    diag_fail(m->diag, "EVAL_ENTRY", name, "%s", text);
+  return strcmp(m->diag->code, "EVAL_ARGS") == 0 ? 2 : 1;
+}
+
+/* Push the value V on the step environment. 0 on a failure: V is NULL
+   after a diagnostic, or the arena is full. */
+static int step_push(Machine *m, const char *name, const Env **env, const Value *v) {
+  if (v == NULL)
+    return 0;
+  *env = env_push(m, *env, v);
+  if (*env == NULL)
+    diag_fail(m->diag, "OOM", name, "out of memory");
+  return *env != NULL;
+}
+
+/* The step record with the entry name NAME (`step_` and the family), or
+   NULL. */
+static const StepInfo *step_named(const Machine *m, const char *name) {
+  uint32_t i;
+  if (strncmp(name, "step_", 5u) != 0)
+    return NULL;
+  for (i = 0; i < m->step_count; i++)
+    if (strcmp(m->steps[i].family, name + 5) == 0)
+      return &m->steps[i];
+  return NULL;
+}
+
+/* The step form of eval (S9 u2, Q-S9-5 (a)): `step_<Family> FIELDS READS`.
+   The output is one line: the flag 1, then each write value in the order
+   of the writes, `-` for a write with no set (Q-S9-9 (a)). A step that
+   aborts prints `0`. The number of arguments must be fields + reads
+   (EVAL_ARGS, Q-S9-14 (a)). */
+static int eval_step(Machine *m, const StepInfo *s, const char *name, char *const *args, int arg_count, FILE *out) {
+  const FamilyInfo *fam = NULL;
+  const CtorInfo *c;
+  const Value *val;
+  const Value **fields;
+  const Value **reads;
+  const Value *t;
+  const Value *v = NULL;
+  const Env *env = NULL;
+  uint64_t *nums;
+  int *has;
+  uint32_t i = find_def(m, "Val");
+  val = i != NO_DEF ? def_value(m, i) : NULL;
+  m->def = name;
+  m->fuel = EVAL_FUEL_STEPS;
+  for (i = 0; i < m->family_count; i++)
+    if (m->families[i].name != NULL && strcmp(m->families[i].name, s->family) == 0)
+      fam = &m->families[i];
+  if (fam == NULL || fam->param_count != 0 || fam->ctor_count != 1 || m->ctors[fam->first_ctor].interval_count != 0 || val == NULL || (!step_scalar_type(val) && !step_size_type(m, val)))
+    return step_status(m, name, "the step form needs a family with no parameters and one constructor, and a type Val that is Nat, Amount, Flag or Size");
+  c = &m->ctors[fam->first_ctor];
+  if ((uint32_t)arg_count != c->field_count + s->read_count) {
+    diag_fail(m->diag, "EVAL_ARGS", name, "the step takes %u arguments (%u fields, then %u reads), found %d", c->field_count + s->read_count, c->field_count, s->read_count, arg_count);
+    return 2;
+  }
+  fields = arena_alloc(m->arena, ((size_t)c->field_count + 1u) * sizeof *fields);
+  reads = arena_alloc(m->arena, ((size_t)s->read_count + 1u) * sizeof *reads);
+  nums = arena_alloc(m->arena, ((size_t)s->write_count + 1u) * sizeof *nums);
+  has = arena_alloc(m->arena, ((size_t)s->write_count + 1u) * sizeof *has);
+  if (fields == NULL || reads == NULL || nums == NULL || has == NULL)
+    return diag_fail(m->diag, "OOM", name, "out of memory") + 1;
+  for (i = 0; i < s->write_count; i++)
+    has[i] = 0;
+  for (i = 0; i < c->field_count; i++) {
+    t = eval_core(m, env, c->fields[i].type);
+    if (t == NULL || (!step_scalar_type(t) && !step_size_type(m, t)))
+      return step_status(m, name, "a field of the family is not Nat, Amount, Flag or Size");
+    fields[i] = step_arg(m, args[i], t);
+    if (!step_push(m, name, &env, fields[i]))
+      return step_status(m, name, "the step did not compute a number");
+  }
+  for (i = 0; i < s->read_count; i++) {
+    reads[i] = step_arg(m, args[c->field_count + i], val);
+    if (reads[i] == NULL)
+      return step_status(m, name, "the step did not compute a number");
+  }
+  env = NULL;
+  if (!step_push(m, name, &env, val_ctor(m, fam->first_ctor, fields, c->field_count)))
+    return step_status(m, name, "the step did not compute a number");
+  for (i = 0; i < s->item_count; i++) {
+    const StepRecItem *it = &s->items[i];
+    switch (it->kind) {
+    case STEP_GET:
+      v = reads[it->slot];
+      break;
+    case STEP_LET:
+      v = eval_core(m, env, it->term);
+      if (it->aborts && v != NULL && val_is(v, OP_NONE)) {
+        fputs("0\n", out);
+        return 0;
+      }
+      if (it->aborts && v != NULL)
+        v = val_is(v, OP_SOME) ? v->args[0] : NULL;
+      break;
+    case STEP_SET:
+      v = eval_core(m, env, it->term);
+      if (v == NULL || !step_number(m, val, v, &nums[it->slot]))
+        return step_status(m, name, "the step did not compute a number");
+      has[it->slot] = 1;
+      continue;
+    }
+    if (!step_push(m, name, &env, v))
+      return step_status(m, name, "the step did not compute a number");
+  }
+  fputs("1", out);
+  for (i = 0; i < s->write_count; i++) {
+    if (has[i])
+      fprintf(out, " %llu", (unsigned long long)nums[i]);
+    else
+      fputs(" -", out);
+  }
+  fputc('\n', out);
+  return 0;
+}
+
 int eval_command(Machine *m, const char *name, char *const *args, int arg_count, FILE *out, FILE *err) {
   uint32_t d = find_def(m, name);
   Entry entry;
@@ -6156,6 +6396,8 @@ int eval_command(Machine *m, const char *name, char *const *args, int arg_count,
   char *buf;
   uint32_t i;
   m->def = name;
+  if (d == NO_DEF && step_named(m, name) != NULL)
+    return eval_step(m, step_named(m, name), name, args, arg_count, out);
   if (d == NO_DEF) {
     diag_fail(m->diag, "EVAL_ENTRY", name, "no definition has this name");
     return 1;

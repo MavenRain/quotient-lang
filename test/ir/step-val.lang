@@ -1,0 +1,8 @@
+-- The check accepts this program, but the type `Val` is `Maybe Nat`. A step
+-- entry reads and writes each `Val` as one word of the buffer. `langc ir`
+-- must refuse the step with REFUSE_LOWER: the Wasm host does not lower a
+-- step when the type Val is not Nat, Amount, Flag or Size.
+def Val : Type 0 := Maybe Nat
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from)] writes [Bal(b.to)]
+step Pay p := [get x := Bal(p.from), set Bal(p.to) := x]

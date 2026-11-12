@@ -1,0 +1,11 @@
+-- The check accepts this program, but it has a definition with the name
+-- `memory`. A module with a step entry exports memory 0 with the name
+-- `memory`, and 2 exports of a module cannot have the same name. `langc ir`
+-- must refuse the step with REFUSE_LOWER: a definition has the name of the
+-- memory export.
+def Val : Type 0 := Nat
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from), Bal(b.to)] writes [Bal(b.from), Bal(b.to)]
+def chk : Nat -> Maybe Nat := fun (n : Nat) => flagIf (natEq n 0) none (some n)
+step Pay p := [get x := Bal(p.from), get y := Bal(p.to), let z := chk x, let w := flagIf (natEq y 0) x y, set Bal(p.from) := w, set Bal(p.to) := z]
+def memory : Nat -> Nat := fun (n : Nat) => n

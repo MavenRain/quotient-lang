@@ -18,6 +18,7 @@ typedef enum {
   CMD_ABI,
   CMD_BUILD,
   CMD_IND,
+  CMD_FOOTPRINT,
 } Command;
 
 typedef struct {
@@ -42,6 +43,7 @@ static const struct {
   {"abi", CMD_ABI},
   {"build", CMD_BUILD},
   {"ind", CMD_IND},
+  {"footprint", CMD_FOOTPRINT},
 };
 
 static int usage(FILE *err) {
@@ -51,6 +53,7 @@ static int usage(FILE *err) {
         "       langc [--kit] abi PROG [--text]\n"
         "       langc [--kit] build PROG -o OUT [--runtime]\n"
         "       langc [--kit] ind PROG\n"
+        "       langc footprint MODULE.wasm\n"
         "--kit: the kit mode, the trusted test scope of the kit gate\n", err);
   return 2;
 }
@@ -88,6 +91,7 @@ static int parse_options(int argc, char **argv, Options *opt, Diag *diag) {
       /* u6b5: check --json also gives the O3 rows that the program uses. */
       opt->json = argc == 4 && strcmp(argv[3], "--json") == 0;
       return argc == 3 || opt->json ? 1 : diag_fail(diag, "USAGE", NULL, "check takes only --json after the program");
+    case CMD_FOOTPRINT:
     case CMD_IND:
     case CMD_IR:
       return argc == 3 ? 1 : diag_fail(diag, "USAGE", NULL, "too many arguments");
@@ -123,13 +127,14 @@ static int read_source(Arena *arena, const char *path, char **out, size_t *len, 
   return 1;
 }
 
-/* Lowers the entries, then runs the ir, abi or build command. */
-static int run_target(const Options *opt, Machine *machine, Diag *diag) {
+/* Lowers the entries and the footprint section (S9 u4), then runs the ir,
+   abi or build command. */
+static int run_target(const Options *opt, const DeclList *decls, Machine *machine, Diag *diag) {
   IrProgram prog;
   FILE *out;
   size_t i;
   int ok = 1;
-  if (!lower_program(machine, &prog)) return 1;
+  if (!lower_program(machine, &prog) || !lower_footprint(machine, decls, &prog)) return 1;
   switch (opt->command) {
     case CMD_IR:
       ir_print(&prog, stdout);
@@ -141,6 +146,7 @@ static int run_target(const Options *opt, Machine *machine, Diag *diag) {
     case CMD_EVAL:
     case CMD_BUILD:
     case CMD_IND:
+    case CMD_FOOTPRINT:
       break;
   }
   out = fopen(opt->out_path, "wb");
@@ -167,31 +173,6 @@ static void ind_operand_print(const IndOperand *opd, FILE *out) {
       }
       return;
   }
-}
-
-/* Returns 1 when the Ind operands X and Y are the same operand. */
-static int ind_operand_same(const IndOperand *x, const IndOperand *y) {
-  if (x->kind != y->kind) return 0;
-  if (x->name == NULL || y->name == NULL) return x->name == y->name && x->nat == y->nat;
-  return strcmp(x->name, y->name) == 0;
-}
-
-/* Returns 1 when the clauses X and Y have the same literals in the same order. */
-static int ind_clause_same(const IndClause *x, const IndClause *y) {
-  if (x->lit_count != y->lit_count) return 0;
-  for (uint32_t l = 0; l < x->lit_count; l++) {
-    if (!ind_operand_same(&x->lits[l].left, &y->lits[l].left)) return 0;
-    if (!ind_operand_same(&x->lits[l].right, &y->lits[l].right)) return 0;
-  }
-  return 1;
-}
-
-/* Returns 1 when clause C of ROW is equal to an earlier clause of ROW. */
-static int ind_clause_seen(const IndRow *row, uint32_t c) {
-  for (uint32_t e = 0; e < c; e++) {
-    if (ind_clause_same(&row->clauses[e], &row->clauses[c])) return 1;
-  }
-  return 0;
 }
 
 /* Prints the Ind matrix IND (S5 unit 5, Q-S5-32 (a)): one line for each row in
@@ -303,7 +284,240 @@ static int axioms_print(const Machine *m, FILE *out) {
   return ferror(out) ? 1 : 0;
 }
 
+/* Q-S9-26 (a): `langc footprint MODULE.wasm` reads the bytes of a module
+   (no source) and prints its `quotient.footprint` section (Q-S9-25 (a)):
+   one line for each family, then the Ind rows in the form of `langc ind`.
+   A module with no such section gives no output. Each read has a bounds
+   check; a first pass checks the whole section before the print pass. */
+typedef struct {
+  const unsigned char *buf;
+  size_t len;
+  size_t pos;
+  int ok;
+} FpIn;
+
+static unsigned fd_byte(FpIn *in) {
+  unsigned v = in->ok && in->pos < in->len ? in->buf[in->pos] : 0u;
+  in->ok = in->ok && in->pos < in->len;
+  in->pos += in->ok ? 1u : 0u;
+  return v;
+}
+
+static uint64_t fd_uleb(FpIn *in) {
+  uint64_t v = 0;
+  unsigned shift = 0;
+  unsigned b = 0x80u;
+  while (in->ok && (b & 0x80u) != 0) {
+    b = fd_byte(in);
+    in->ok = in->ok && shift < 64 && (shift != 63 || (b & 0xFEu) == 0);
+    v |= shift < 64 ? (uint64_t)(b & 0x7Fu) << shift : 0;
+    shift += 7;
+  }
+  return v;
+}
+
+/* A name: a uleb length, then the bytes; the copy ends with a NUL. */
+static char *fd_name(FpIn *in, Arena *arena) {
+  uint64_t n = fd_uleb(in);
+  char *s = NULL;
+  in->ok = in->ok && n <= in->len - in->pos;
+  s = in->ok ? arena_alloc(arena, (size_t)n + 1) : NULL;
+  in->ok = in->ok && s != NULL;
+  if (!in->ok) return NULL;
+  memcpy(s, in->buf + in->pos, (size_t)n);
+  s[n] = '\0';
+  in->pos += (size_t)n;
+  return s;
+}
+
+static void fd_put(const FpIn *in, FILE *out, const char *s) {
+  if (out != NULL && in->ok) fputs(s, out);
+}
+
+/* A pattern argument (Q-S9-31 (a)): 0 and a field name (printed
+   BINDER.field), 1 and a numeral, or 2 and a def name. */
+static void fd_pat_arg(FpIn *in, Arena *arena, const char *binder, FILE *out) {
+  unsigned kind = fd_byte(in);
+  char *name = kind == 1 ? NULL : fd_name(in, arena);
+  uint64_t nat = kind == 1 ? fd_uleb(in) : 0;
+  in->ok = in->ok && kind <= 2;
+  if (out == NULL || !in->ok) return;
+  if (kind == 0) fprintf(out, "%s.", binder);
+  if (kind == 1) fprintf(out, "%llu", (unsigned long long)nat);
+  else fputs(name, out);
+}
+
+/* A key pattern: the space name, arg_count, then each argument. */
+static void fd_pattern(FpIn *in, Arena *arena, const char *binder, FILE *out) {
+  char *space = fd_name(in, arena);
+  uint64_t n = fd_uleb(in);
+  uint64_t i;
+  fd_put(in, out, space);
+  fd_put(in, out, n == 0 ? "" : "(");
+  for (i = 0; i < n && in->ok; i++) {
+    fd_put(in, out, i == 0 ? "" : ", ");
+    fd_pat_arg(in, arena, binder, out);
+  }
+  fd_put(in, out, n == 0 ? "" : ")");
+}
+
+/* A pattern list: the count, then each pattern. */
+static void fd_list(FpIn *in, Arena *arena, const char *binder, const char *head, FILE *out) {
+  uint64_t n = fd_uleb(in);
+  uint64_t i;
+  fd_put(in, out, head);
+  for (i = 0; i < n && in->ok; i++) {
+    fd_put(in, out, i == 0 ? "" : ", ");
+    fd_pattern(in, arena, binder, out);
+  }
+  fd_put(in, out, "]");
+}
+
+/* A family record: its name, its binder name, the reads, the writes. */
+static char *fd_family(FpIn *in, Arena *arena, FILE *out) {
+  char *name = fd_name(in, arena);
+  char *binder = fd_name(in, arena);
+  if (out != NULL && in->ok) fprintf(out, "%s: footprint %s", name, binder);
+  fd_list(in, arena, binder, " reads [", out);
+  fd_list(in, arena, binder, " writes [", out);
+  fd_put(in, out, "\n");
+  return name;
+}
+
+/* An Ind operand (Q-S9-33 (a)): 0 a field of family a, 1 a Nat, 2 a closed
+   def, 3 a field of family b. */
+static void fd_operand(FpIn *in, Arena *arena, FILE *out) {
+  IndOperand x;
+  unsigned kind = fd_byte(in);
+  memset(&x, 0, sizeof x);
+  x.kind = kind == 0 ? IND_OPD_FIELD_A : kind == 3 ? IND_OPD_FIELD_B : IND_OPD_CONST;
+  x.name = kind == 1 ? NULL : fd_name(in, arena);
+  x.nat = kind == 1 ? fd_uleb(in) : 0;
+  in->ok = in->ok && kind <= 3;
+  if (out != NULL && in->ok) ind_operand_print(&x, out);
+}
+
+/* A row: the family indexes of a and b, the verdict byte (0 ind, 1 dep and
+   the space name, 2 ind-if and the clauses, Q-S9-34 (a)). */
+static void fd_row(FpIn *in, Arena *arena, char *const *names, uint64_t count, FILE *out) {
+  uint64_t a = fd_uleb(in);
+  uint64_t b = fd_uleb(in);
+  unsigned verdict;
+  uint64_t clauses;
+  uint64_t c;
+  in->ok = in->ok && a < count && b < count;
+  verdict = fd_byte(in);
+  in->ok = in->ok && verdict <= 2;
+  if (out != NULL && in->ok) fprintf(out, "%s %s: %s", names[a], names[b], verdict == 0 ? "ind" : verdict == 1 ? "dep" : "ind-if");
+  if (verdict == 1) (void)fd_name(in, arena);
+  clauses = verdict == 2 ? fd_uleb(in) : 0;
+  for (c = 0; c < clauses && in->ok; c++) {
+    uint64_t lits = fd_uleb(in);
+    uint64_t l;
+    fd_put(in, out, c == 0 ? " (" : " and (");
+    for (l = 0; l < lits && in->ok; l++) {
+      fd_put(in, out, l == 0 ? "" : " or ");
+      fd_operand(in, arena, out);
+      fd_put(in, out, " != ");
+      fd_operand(in, arena, out);
+    }
+    fd_put(in, out, ")");
+  }
+  fd_put(in, out, "\n");
+}
+
+/* The section payload: the version 1, family_count and each family, then
+   row_count and each row; no byte after the last row. */
+static int fd_section(FpIn *in, Arena *arena, FILE *out) {
+  uint64_t count;
+  uint64_t rows;
+  uint64_t i;
+  char **names;
+  in->ok = in->ok && fd_byte(in) == 1;
+  count = fd_uleb(in);
+  in->ok = in->ok && count <= in->len - in->pos;
+  names = in->ok ? arena_alloc(arena, (size_t)count * sizeof *names + 1) : NULL;
+  in->ok = in->ok && names != NULL;
+  for (i = 0; i < count && in->ok; i++)
+    names[i] = fd_family(in, arena, out);
+  rows = fd_uleb(in);
+  for (i = 0; i < rows && in->ok; i++)
+    fd_row(in, arena, names, count, out);
+  return in->ok && in->pos == in->len;
+}
+
+/* The name of a custom section at start (size bytes): 1 when the name is
+   `quotient.footprint` (*payload: the first byte after the name), 0 for an
+   other name, -1 when the name does not fit in the section. */
+static int fd_is_footprint(const unsigned char *buf, size_t start, size_t size, size_t *payload) {
+  static const char want[] = "quotient.footprint";
+  FpIn in = {buf, start + size, start, 1};
+  uint64_t n = fd_uleb(&in);
+  if (!in.ok || n > in.len - in.pos) return -1;
+  *payload = in.pos + (size_t)n;
+  return n == sizeof want - 1 && memcmp(buf + in.pos, want, sizeof want - 1) == 0;
+}
+
+/* The count of `quotient.footprint` sections in a module (*sec: the payload
+   of the last one), or -1 when the bytes are not a module. */
+static int fd_custom(const unsigned char *buf, size_t len, FpIn *sec) {
+  static const unsigned char head[8] = {0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00};
+  FpIn in = {buf, len, 8, 1};
+  int found = 0;
+  if (len < 8 || memcmp(buf, head, 8) != 0) return -1;
+  while (in.ok && in.pos < len) {
+    unsigned id = fd_byte(&in);
+    uint64_t size = fd_uleb(&in);
+    size_t start = in.pos;
+    size_t payload = 0;
+    int named;
+    if (!in.ok || size > len - start) return -1;
+    named = id == 0 ? fd_is_footprint(buf, start, (size_t)size, &payload) : 0;
+    if (named < 0) return -1;
+    found += named;
+    if (named == 1) {
+      sec->buf = buf;
+      sec->len = start + (size_t)size;
+      sec->pos = payload;
+      sec->ok = 1;
+    }
+    in.pos = start + (size_t)size;
+  }
+  return found;
+}
+
+/* The bytes of a file, in the arena. */
+static int read_bytes(Arena *arena, const char *path, unsigned char **buf, size_t *len, Diag *diag) {
+  FILE *f = fopen(path, "rb");
+  long size;
+  if (f == NULL) return diag_fail(diag, "IO", NULL, "cannot read '%s'", path);
+  size = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1;
+  *buf = size >= 0 && fseek(f, 0, SEEK_SET) == 0 ? arena_alloc(arena, (size_t)size + 1) : NULL;
+  *len = *buf != NULL ? fread(*buf, 1, (size_t)size, f) : 0;
+  fclose(f);
+  return *buf != NULL && *len == (size_t)size ? 1 : diag_fail(diag, "IO", NULL, "cannot read '%s'", path);
+}
+
+static int footprint_command(const char *path, Arena *arena, Diag *diag) {
+  unsigned char *buf = NULL;
+  size_t len = 0;
+  FpIn sec = {NULL, 0, 0, 0};
+  FpIn pass;
+  int found;
+  if (!read_bytes(arena, path, &buf, &len, diag)) return 2;
+  found = fd_custom(buf, len, &sec);
+  if (found < 0) return diag_fail(diag, "FOOTPRINT", NULL, "'%s' is not a Wasm module", path) + 1;
+  if (found > 1) return diag_fail(diag, "FOOTPRINT", NULL, "'%s' has more than one quotient.footprint section", path) + 1;
+  pass = sec;
+  if (found == 1 && !fd_section(&pass, arena, NULL))
+    return diag_fail(diag, "FOOTPRINT", NULL, "the quotient.footprint section of '%s' is not valid", path) + 1;
+  pass = sec;
+  if (found == 1) (void)fd_section(&pass, arena, stdout);
+  return ferror(stdout) ? 1 : 0;
+}
+
 static int run(const Options *opt, Arena *arena, Diag *diag) {
+  if (opt->command == CMD_FOOTPRINT) return footprint_command(opt->prog_path, arena, diag);
   char *text = NULL;
   size_t len = 0;
   if (!read_source(arena, opt->prog_path, &text, &len, diag)) return 2;
@@ -323,9 +537,10 @@ static int run(const Options *opt, Arena *arena, Diag *diag) {
     case CMD_IR:
     case CMD_ABI:
     case CMD_BUILD:
+    case CMD_FOOTPRINT:
       break;
   }
-  return run_target(opt, &machine, diag);
+  return run_target(opt, &decls, &machine, diag);
 }
 
 int main(int argc, char **argv) {

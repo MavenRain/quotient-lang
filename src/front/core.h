@@ -376,6 +376,27 @@ typedef struct {
   uint32_t built; /* 1 when the def ind made the matrix (Q-S6-11 (a)) */
 } IndMatrix;
 
+/* One item of a checked step (S9 u2). The term is in the context of the
+   step: the binder, then each get name and each let name in the item
+   order. */
+typedef struct {
+  StepItemKind kind;
+  const char *name; /* STEP_GET and STEP_LET: the bound name */
+  uint32_t slot;    /* STEP_GET: the index in the reads; STEP_SET: the index in the writes */
+  const Core *term; /* STEP_LET and STEP_SET: the checked term */
+  int aborts;       /* STEP_LET: 1 when the type is Maybe T; a none stops the step (N3) */
+} StepRecItem;
+
+/* The checked step of a footprint family (S9 u2). */
+typedef struct {
+  const char *family;
+  const char *binder;
+  const StepRecItem *items;
+  uint32_t item_count;
+  uint32_t read_count;  /* the reads of the footprint */
+  uint32_t write_count; /* the writes of the footprint */
+} StepInfo;
+
 /* The checked program and the evaluation state. No global state: every
    function gets this context. */
 typedef struct {
@@ -405,6 +426,10 @@ typedef struct {
   uint32_t space_cap;
   /* The Ind matrix of the footprint families (S5 unit 5). */
   IndMatrix ind;
+  /* The checked steps, in the order of their declarations (S9 u2). */
+  StepInfo *steps;
+  uint32_t step_count;
+  uint32_t step_cap;
 } Machine;
 
 /* One Glue that a true key reduced. OUT is the result, a fresh copy of the

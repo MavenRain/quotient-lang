@@ -1,0 +1,12 @@
+-- The step entry of S9: 2 gets, a let at a Maybe type, a plain let and 2
+-- sets. The gets read the buffer words 0 and 1. The let z aborts the step
+-- on none (x = 0): the entry returns 0 before a store. The sets store the
+-- buffer words 2 and 3, then the entry returns 1. The 2 fields are Size
+-- values: each one is one word that the host gives. The step does not use
+-- them. The gate compares the `langc --kit ir` text of this file with
+-- test/ir/step.ir.
+def Val : Type 0 := Nat
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [Bal(b.from), Bal(b.to)] writes [Bal(b.from), Bal(b.to)]
+def chk : Nat -> Maybe Nat := fun (n : Nat) => flagIf (natEq n 0) none (some n)
+step Pay p := [get x := Bal(p.from), get y := Bal(p.to), let z := chk x, let w := flagIf (natEq y 0) x y, set Bal(p.from) := w, set Bal(p.to) := z]

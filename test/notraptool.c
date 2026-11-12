@@ -5,8 +5,11 @@
  * 1. A usage error, or a file that the tool cannot read, gives exit 2.
  *
  * The tool reads the header (the magic and version 1), then each section by
- * its id and size. Memory section: each memory must have a maximum, and the
- * maximum must be equal to the minimum. Code section: the tool skips the
+ * its id and size. Import section: the module must have no import. Memory
+ * section: the module has at most one memory, the memory must have a
+ * maximum, and the maximum must be equal to the minimum. Custom section: the
+ * name must be `quotient.footprint`, and a module has at most one section
+ * with this name; the tool does not read the contents. Code section: the tool skips the
  * locals of each body, then decodes each instruction with the list of
  * src/wasmop.h. A body must not have `unreachable`, `memory.grow`, a byte
  * that is not in the list, or an i64.div_u or i64.rem_u that does not come
@@ -25,6 +28,8 @@ enum { WASM_OPS(NOTRAP_ENUM) };
 enum {
   MODULE_MAX = 1 << 20, /* the largest module: 1 MiB */
   GUARD_LEN = 5,        /* the instructions of the divisor guard */
+  SECTION_CUSTOM = 0,
+  SECTION_IMPORT = 2,
   SECTION_MEMORY = 5,
   SECTION_CODE = 10
 };
@@ -193,14 +198,38 @@ static int check_limits(Reader *r) {
 static int check_memory(Reader *r) {
   uint64_t n = 0;
   uint64_t i;
-  int ok = get_leb(r, 32, &n);
+  int ok = get_leb(r, 32, &n) && (n <= 1 || fail(r, "a second memory"));
   for (i = 0; i < n && ok; i++) ok = check_limits(r);
   return ok;
 }
 
+/* A custom section (id 0): the name must be `quotient.footprint` (the
+ * section of src/front/lower.c), and a module has at most one section with
+ * this name (Q-S9-28, Q-S9-32). The tool does not read the contents. */
+static int check_custom(Reader *r, int *footprints) {
+  static const char name[] = "quotient.footprint";
+  uint64_t len = 0;
+  int ok = get_leb(r, 32, &len) && (len <= r->end - r->pos || fail(r, "truncated"));
+  ok = ok && ((len == sizeof name - 1 && memcmp(r->bytes + r->pos, name, sizeof name - 1) == 0) ||
+              fail(r, "an unknown custom section"));
+  ok = ok && (*footprints == 0 || fail(r, "a second quotient.footprint section"));
+  *footprints = *footprints + ok;
+  r->pos = r->end;
+  return ok;
+}
+
+/* An import section (id 2): a module has no import (Q-S9-41). */
+static int check_import(Reader *r) {
+  uint64_t n = 0;
+  int ok = get_leb(r, 32, &n) && (n == 0 || fail(r, "an import"));
+  r->pos = r->end;
+  return ok;
+}
+
 /* One section: its id, its size, then its contents. The tool checks the
- * memory section and the code section, and skips the other sections. */
-static int check_section(Reader *r) {
+ * custom sections, the import section, the memory section and the code
+ * section, and skips the other sections. */
+static int check_section(Reader *r, int *footprints) {
   size_t outer = r->end;
   unsigned id = 0;
   uint64_t size = 0;
@@ -208,6 +237,12 @@ static int check_section(Reader *r) {
   if (!ok) return 0;
   r->end = r->pos + (size_t)size;
   switch (id) {
+    case SECTION_CUSTOM:
+      ok = check_custom(r, footprints);
+      break;
+    case SECTION_IMPORT:
+      ok = check_import(r);
+      break;
     case SECTION_MEMORY:
       ok = check_memory(r);
       break;
@@ -224,11 +259,12 @@ static int check_section(Reader *r) {
 }
 
 static int check_module(Reader *r) {
+  int footprints = 0;
   static const unsigned char header[8] = {0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00};
   int ok = (r->end >= sizeof header || fail(r, "truncated")) &&
            (memcmp(r->bytes, header, sizeof header) == 0 || fail(r, "no wasm magic and version 1"));
   r->pos = ok ? sizeof header : 0;
-  while (ok && r->pos < r->end) ok = check_section(r);
+  while (ok && r->pos < r->end) ok = check_section(r, &footprints);
   return ok;
 }
 

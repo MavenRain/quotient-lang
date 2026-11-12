@@ -4,11 +4,20 @@
    - Function 0 is the internal allocator `alloc (bytes : i32) -> i64`. It
      bumps the mutable i64 global 0 (the heap pointer) over memory 0, with no
      check. Memory 0 has a fixed size (minimum = maximum): the pages of the
-     largest heap bound of an entry (IrFunc heap_words), at least 1 page.
+     largest sum of the buffer words and the heap bound of an entry (IrFunc
+     buffer_words + heap_words), at least 1 page.
    - Function 1 + K is IR entry K, exported as its name. Each parameter and the
-     result is an i64. Each entry first resets the heap pointer to 0, and it
-     sets a Flag parameter to 1 when it is not 0.
+     result is an i64. Each entry first resets the heap pointer (a step entry:
+     to the end of its buffer; an other entry: to 0), and it sets a Flag
+     parameter to 1 when it is not 0.
    - A word is 8 bytes. Word K of the block at address A is at A + 8K.
+   - A step entry (IrFunc step_mark is 1) has its buffer at address 0 of
+     memory 0: buffer word K is at byte 8K, and its heap starts at byte
+     8 * buffer_words. A module with a step entry also exports memory 0 as
+     `memory`. A module with no step entry keeps its bytes.
+   - A program with a custom section (IrProgram custom_name is not NULL) gets
+     one custom section (the id 0) after the code section: the name, then
+     the bytes as they are. A program with no custom section keeps its bytes.
 
    Each entry has three i64 scratch locals after the IR locals: S and S + 1
    hold the operands of SUB and ADD_CARRY, and S + 2 holds the
@@ -18,7 +27,7 @@
 
    Each sized part (a section, a function body) is written in two passes: the
    first pass counts the bytes, the second pass writes them after the size.
-   So the back end needs no buffer. */
+   So the back end needs no output buffer (the step buffer is in memory 0). */
 #include <stdint.h>
 #include <string.h>
 
@@ -41,6 +50,7 @@ enum {
 #undef WASM_OP_ENUM
 
 enum {
+  SECTION_CUSTOM = 0,
   SECTION_TYPE = 1,
   SECTION_FUNCTION = 3,
   SECTION_MEMORY = 5,
@@ -171,6 +181,8 @@ static int emit_expr(Sink *s, const IrExpr *e, uint32_t t, unsigned depth) {
       return emit_expr(s, e->left, t, depth + 1u) && emit_expr(s, e->right, t, depth + 1u) && emit_op(s, e->op, t);
     case IR_EXPR_LOAD:
       return emit_expr(s, e->left, t, depth + 1u) && put_byte(s, OP_I32_WRAP_I64) && memarg(s, OP_I64_LOAD, e->field);
+    case IR_EXPR_BUFFER:
+      return i32_const(s, 0u) && memarg(s, OP_I64_LOAD, e->field);
   }
   return 0;
 }
@@ -241,6 +253,8 @@ static int emit_stmt(Sink *s, const IrStmt *st, uint32_t t, unsigned depth) {
       return emit_loop(s, st, 1, t, depth);
     case IR_STMT_RETURN:
       return emit_expr(s, st->expr, t, depth + 1u) && put_byte(s, OP_RETURN);
+    case IR_STMT_STORE:
+      return i32_const(s, 0u) && emit_expr(s, st->expr, t, depth + 1u) && memarg(s, OP_I64_STORE, st->word);
   }
   return 0;
 }
@@ -271,8 +285,11 @@ static int part_entry(Sink *s, const void *arg) {
   const IrFunc *fn = arg;
   uint32_t t = fn->local_count;
   size_t k;
+  /* The heap of a step entry starts after its buffer (an other entry has 0
+     buffer words). */
+  uint64_t heap_start = (uint64_t)(8u * (uint64_t)fn->buffer_words);
   int ok = put_uleb(s, 1) && put_uleb(s, (uint64_t)(fn->local_count - fn->param_count) + 3u) &&
-           put_byte(s, TYPE_I64) && i64_const(s, 0) && op2(s, OP_GLOBAL_SET, 0);
+           put_byte(s, TYPE_I64) && i64_const(s, heap_start) && op2(s, OP_GLOBAL_SET, 0);
   for (k = 0; k < fn->param_count && ok; k++) ok = flag_norm(s, fn, k);
   /* The body ends in RETURN (lower_entry), so no code follows it. */
   return ok && emit_block(s, &fn->body, t, 0) && put_byte(s, OP_END);
@@ -300,14 +317,17 @@ static int part_functions(Sink *s, const void *arg) {
   return ok;
 }
 
-/* One memory: minimum = maximum = the pages of the largest heap bound of an
-   entry, at least 1. */
+/* One memory: minimum = maximum = the pages of the largest sum of the buffer
+   words and the heap bound of an entry, at least 1. */
 static int part_memory(Sink *s, const void *arg) {
   const IrProgram *prog = arg;
   uint64_t words = 0;
   uint64_t pages;
   size_t i;
-  for (i = 0; i < prog->func_count; i++) words = prog->funcs[i].heap_words > words ? prog->funcs[i].heap_words : words;
+  for (i = 0; i < prog->func_count; i++) {
+    uint64_t sum = prog->funcs[i].heap_words + (uint64_t)prog->funcs[i].buffer_words;
+    words = sum > words ? sum : words;
+  }
   pages = (8u * words + WASM_PAGE_BYTES - 1u) / WASM_PAGE_BYTES;
   pages = pages == 0 ? 1u : pages;
   return put_uleb(s, 1) && put_byte(s, 1) && put_uleb(s, pages) && put_uleb(s, pages);
@@ -318,14 +338,25 @@ static int part_global(Sink *s, const void *arg) {
   return put_uleb(s, 1) && put_byte(s, TYPE_I64) && put_byte(s, 1) && i64_const(s, 0) && put_byte(s, OP_END);
 }
 
+/* 1 when an entry of the program is a step entry (it has the step mark). */
+static int has_step(const IrProgram *prog) {
+  size_t i;
+  int step = 0;
+  for (i = 0; i < prog->func_count; i++) step = step || prog->funcs[i].step_mark != 0;
+  return step;
+}
+
+/* The entries, then memory 0 as `memory` (the kind 2, the index 0) when the
+   program has a step entry. */
 static int part_exports(Sink *s, const void *arg) {
   const IrProgram *prog = arg;
+  int step = has_step(prog);
   size_t i;
-  int ok = put_uleb(s, prog->func_count);
+  int ok = put_uleb(s, (uint64_t)prog->func_count + (uint64_t)step);
   for (i = 0; i < prog->func_count && ok; i++) {
     ok = put_name(s, prog->funcs[i].name) && put_byte(s, 0) && put_uleb(s, 1u + i);
   }
-  return ok;
+  return ok && (!step || (put_name(s, "memory") && put_byte(s, 2) && put_uleb(s, 0)));
 }
 
 static int part_code(Sink *s, const void *arg) {
@@ -333,6 +364,15 @@ static int part_code(Sink *s, const void *arg) {
   size_t i;
   int ok = put_uleb(s, 1u + prog->func_count) && sized(s, part_alloc, NULL);
   for (i = 0; i < prog->func_count && ok; i++) ok = sized(s, part_entry, &prog->funcs[i]);
+  return ok;
+}
+
+/* The custom section of the program: the name, then the bytes as they are. */
+static int part_custom(Sink *s, const void *arg) {
+  const IrProgram *prog = arg;
+  size_t i;
+  int ok = put_name(s, prog->custom_name);
+  for (i = 0; i < prog->custom_size && ok; i++) ok = put_byte(s, prog->custom_bytes[i]);
   return ok;
 }
 
@@ -353,6 +393,7 @@ int target_write(const IrProgram *prog, TargetPart part, FILE *out, FILE *err) {
   ok = ok && section(&s, SECTION_TYPE, part_types, prog) && section(&s, SECTION_FUNCTION, part_functions, prog) &&
        section(&s, SECTION_MEMORY, part_memory, prog) && section(&s, SECTION_GLOBAL, part_global, NULL) &&
        section(&s, SECTION_EXPORT, part_exports, prog) && section(&s, SECTION_CODE, part_code, prog);
+  ok = ok && (prog->custom_name == NULL || section(&s, SECTION_CUSTOM, part_custom, prog));
   if (!ok && ferror(out)) fputs("langc: IO: -: cannot write the wasm module\n", err);
   return ok;
 }

@@ -1,0 +1,10 @@
+-- A step module with an empty footprint (S9 u3b, Q-S9-22 (a)): the family
+-- has no reads and no writes, and the step has no items. The step entry
+-- uses no buffer word and no heap word. The module must export memory 0
+-- with the name `memory`, as each module with a step entry does. The IR
+-- line of the step entry ends with `0 buffer words, 0 reads` (Q-S9-38 (a)).
+def Val : Type 0 := Nat
+keyspace Bal : Size -> Key
+family Pay := mk (from : Size) (to : Size) footprint b reads [] writes []
+def chk : Nat -> Maybe Nat := fun (n : Nat) => flagIf (natEq n 0) none (some n)
+step Pay p := []

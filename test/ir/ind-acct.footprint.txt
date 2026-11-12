@@ -1,0 +1,2 @@
+Pay: footprint b reads [Bal(b.from), Total(gen)] writes [Bal(b.to), Total(gen)]
+Pay Pay: dep

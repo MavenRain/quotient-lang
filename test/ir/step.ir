@@ -1,0 +1,26 @@
+func step_Pay (nat, nat) -> flag, 11 locals, 2 heap words, 4 buffer words, 2 reads
+  l2 := buffer(0)
+  l3 := buffer(1)
+  l5 := eq(l2, 0)
+  if l5 {
+    l6 := alloc [0]
+    l4 := l6
+  } else {
+    l7 := alloc [1, l2]
+    l4 := l7
+  }
+  switch load(l4, 0) {
+  arm 0:
+    return 0
+  arm 1:
+    l8 := load(l4, 1)
+  }
+  l10 := eq(l3, 0)
+  if l10 {
+    l9 := l2
+  } else {
+    l9 := l3
+  }
+  buffer(2) := l9
+  buffer(3) := l8
+  return 1

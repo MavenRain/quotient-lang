@@ -51,6 +51,7 @@ typedef struct {
   Operand *levels; /* the operand of each de Bruijn level */
   uint32_t level_count;
   uint32_t level_cap;
+  int size_word; /* 1 in a step entry: a Size value is one word that the code does not open (Q-S9-11 (a)) */
 } Low;
 
 static int oom(Low *l) {
@@ -106,6 +107,14 @@ static const IrExpr *ex_load(Low *l, const IrExpr *base, uint32_t word) {
     return NULL;
   e->left = base;
   e->field = word;
+  return e;
+}
+
+/* Word WORD of the step buffer (S9 u2). */
+static const IrExpr *ex_buffer(Low *l, uint32_t word) {
+  IrExpr *e = expr_alloc(l, IR_EXPR_BUFFER);
+  if (e != NULL)
+    e->field = word;
   return e;
 }
 
@@ -254,6 +263,14 @@ static IrStmt *stmt_expr(Low *l, IrStmtKind kind, const IrExpr *e) {
   IrStmt *s = e == NULL ? NULL : stmt_new(l, kind);
   if (s != NULL)
     s->expr = e;
+  return s;
+}
+
+/* Buffer word WORD := E (S9 u2). */
+static IrStmt *stmt_store(Low *l, uint32_t word, const IrExpr *e) {
+  IrStmt *s = stmt_expr(l, IR_STMT_STORE, e);
+  if (s != NULL)
+    s->word = word;
   return s;
 }
 
@@ -422,6 +439,9 @@ static void expr_print(const IrExpr *e, FILE *out, unsigned depth) {
     expr_print(e->left, out, depth + 1u);
     fprintf(out, ", %u)", (unsigned)e->field);
     return;
+  case IR_EXPR_BUFFER:
+    fprintf(out, "buffer(%u)", (unsigned)e->field);
+    return;
   }
 }
 
@@ -493,6 +513,11 @@ static void stmt_print(const IrStmt *s, FILE *out, unsigned depth) {
     expr_print(s->expr, out, 0);
     fputs("\n", out);
     return;
+  case IR_STMT_STORE:
+    fprintf(out, "buffer(%u) := ", (unsigned)s->word);
+    expr_print(s->expr, out, 0);
+    fputs("\n", out);
+    return;
   }
 }
 
@@ -524,8 +549,15 @@ void ir_print(const IrProgram *prog, FILE *out) {
     fprintf(out, "func %s (", fn->name);
     for (k = 0; k < fn->param_count; k++)
       fprintf(out, "%s%s", k == 0 ? "" : ", ", scalar_word(fn->params[k]));
-    fprintf(out, ") -> %s, %u locals, %u heap words\n", scalar_word(fn->result), (unsigned)fn->local_count,
+    fprintf(out, ") -> %s, %u locals, %u heap words", scalar_word(fn->result), (unsigned)fn->local_count,
             (unsigned)fn->heap_words);
+    /* A step entry shows its buffer words and its read count, also
+       when it has 0 words (Q-S9-29 (a), Q-S9-38 (a)): test/gate.sh and
+       test/grid.awk read this part. */
+    if (fn->step_mark != 0)
+      fprintf(out, ", %u buffer words, %u reads", (unsigned)fn->buffer_words,
+              (unsigned)fn->read_words);
+    fputs("\n", out);
     block_print(&fn->body, out, 1u);
   }
 }
@@ -579,6 +611,8 @@ static int ctor_full(Low *l, Buf *b, const Value *v, uint32_t skip, uint32_t n, 
 static int lower_ctor(Low *l, Buf *b, const Value *v, Operand *out) {
   const CtorInfo *c = &l->m->ctors[v->inst];
   const FamilyInfo *fam = &l->m->families[c->family];
+  if (l->size_word && fam->name != NULL && strcmp(fam->name, "Size") == 0)
+    return refuse(l, "a Size constructor in a step (a Size value of a step entry is one word of the host)");
   return ctor_full(l, b, v, fam->param_count, c->field_count, v->inst - fam->first_ctor, out);
 }
 
@@ -1335,6 +1369,7 @@ static int heap_stmt(const IrStmt *s, uint64_t *out) {
   switch (s->kind) {
     case IR_STMT_SET:
     case IR_STMT_RETURN:
+    case IR_STMT_STORE:
       return 1;
     case IR_STMT_ALLOC:
       *out = heap_add(0, s->field_count);
@@ -1401,20 +1436,171 @@ static int lower_entry(Machine *m, uint32_t index, const Entry *e, IrFunc *fn) {
   fn->result = e->result_flag ? IR_SCALAR_FLAG : IR_SCALAR_NAT;
   fn->local_count = l.local_count;
   fn->body = block_of(&body);
+  fn->buffer_words = 0;
+  fn->read_words = 0;
+  fn->step_mark = 0;
   fn->heap_words = 0;
   if (!heap_block(&fn->body, &fn->heap_words) || fn->heap_words > IR_HEAP_WORDS_MAX)
     return diag_fail(m->diag, "REFUSE_LOWER", m->def, "heap use has no static bound");
   return 1;
 }
 
+static int scalar_type(const Value *t) {
+  return val_is(t, OP_NAT) || val_is(t, OP_AMOUNT) || val_is(t, OP_FLAG);
+}
+
+/* 1 if T is the prelude family Size. In a step entry a Size value is one
+   word of the host: the code can copy it and cannot open it
+   (Q-S9-11 (a)). */
+static int size_type(Machine *m, const Value *t) {
+  return val_is(t, OP_FAMILY) && t->argc == 0u && t->inst < m->family_count && m->families[t->inst].name != NULL && strcmp(m->families[t->inst].name, "Size") == 0;
+}
+
+/* RETURN W. */
+static int st_return(Low *l, Buf *b, uint64_t w) {
+  return emit(l, b, stmt_expr(l, IR_STMT_RETURN, ex_const(l, w)));
+}
+
+/* One item of a step (S9 u2). ENV is the step context: a get or a let adds
+   its name. A get is a new local with the value of its read word. A let
+   has no code: its value is the term. A let that aborts returns 0 on none
+   and binds the payload. A set stores its value in the write word
+   READS + slot. */
+static int step_item(Low *l, Buf *b, const StepRecItem *it, uint32_t reads, const Env **env) {
+  Buf none = buf_under(b);
+  Buf some = buf_under(b);
+  const Value *v = NULL;
+  Operand x;
+  Operand p;
+  uint32_t t;
+  switch (it->kind) {
+  case STEP_GET:
+    t = local_new(l);
+    v = set(l, b, t, ex_buffer(l, it->slot)) ? fresh(l, operand(ex_local(l, t))) : NULL;
+    break;
+  case STEP_SET:
+    v = eval_core(l->m, *env, it->term);
+    return got(l, v) && lower(l, b, v, &x) && emit(l, b, stmt_store(l, reads + it->slot, x.w));
+  case STEP_LET:
+    v = eval_core(l->m, *env, it->term);
+    if (it->aborts) {
+      if (!got(l, v) || !lower(l, b, v, &x) || !st_return(l, &none, 0) || !field_at(l, &some, x.w, 0, &p) || !two_arms(l, b, x, &none, &some))
+        return 0;
+      v = fresh(l, p);
+    }
+    break;
+  }
+  if (!got(l, v))
+    return 0;
+  *env = env_push(l->m, *env, v);
+  return *env != NULL ? 1 : oom(l);
+}
+
+/* The step S (S9 u2): the entry step_<Family>. The parameters are the
+   fields of the family constructor and the result is the flag. Read slot I
+   is buffer word I; write slot J is buffer word R + J (Q-S9-8 (a)). A
+   family field or a Val that is not a scalar or Size has no entry
+   (Q-S9-10 (a)). A Size value is one word of the host: the step can copy
+   it, and a Size constructor or elim in the step is a refusal
+   (Q-S9-11 (a)). */
+static int lower_step(Machine *m, const StepInfo *s, IrFunc *fn) {
+  Low l;
+  Buf body = buf_under(NULL);
+  const FamilyInfo *fam = NULL;
+  const CtorInfo *c;
+  const Value *val = NULL;
+  const Value **args;
+  const Env *env = NULL;
+  const Value *t;
+  IrScalar *params;
+  char *name;
+  size_t len = strlen(s->family);
+  uint32_t i;
+  memset(&l, 0, sizeof l);
+  l.m = m;
+  l.size_word = 1;
+  name = arena_alloc(m->arena, len + 6u);
+  if (name == NULL)
+    return oom(&l);
+  memcpy(name, "step_", 5u);
+  memcpy(name + 5, s->family, len + 1u);
+  m->def = name;
+  m->fuel = EVAL_FUEL_STEPS;
+  for (i = 0; i < m->family_count; i++)
+    if (m->families[i].name != NULL && strcmp(m->families[i].name, s->family) == 0)
+      fam = &m->families[i];
+  for (i = 0; i < m->def_count; i++) {
+    if (m->defs[i].name != NULL && strcmp(m->defs[i].name, name) == 0)
+      return diag_fail(m->diag, "REFUSE_LOWER", m->def, "a definition has the name of the step entry");
+    /* A module with a step entry exports memory 0 with the name `memory` (Q-S9-21 (a)). */
+    if (m->defs[i].name != NULL && strcmp(m->defs[i].name, "memory") == 0)
+      return diag_fail(m->diag, "REFUSE_LOWER", m->def, "a definition has the name of the memory export");
+    if (m->defs[i].name != NULL && strcmp(m->defs[i].name, "Val") == 0)
+      val = def_value(m, i);
+  }
+  if (fam == NULL)
+    return internal(&l, "a step with no family");
+  if (fam->param_count != 0 || fam->ctor_count != 1 || m->ctors[fam->first_ctor].interval_count != 0)
+    return refuse(&l, "a step of a family with parameters or with more than one constructor");
+  if (val == NULL || (!scalar_type(val) && !size_type(m, val)))
+    return refuse(&l, "a step when the type Val is not Nat, Amount, Flag or Size");
+  c = &m->ctors[fam->first_ctor];
+  params = arena_alloc(m->arena, ((size_t)c->field_count + 1u) * sizeof *params);
+  args = arena_alloc(m->arena, ((size_t)c->field_count + 1u) * sizeof *args);
+  if (params == NULL || args == NULL)
+    return oom(&l);
+  l.local_count = c->field_count;
+  for (i = 0; i < c->field_count; i++) {
+    t = eval_core(m, env, c->fields[i].type);
+    if (!got(&l, t))
+      return 0;
+    if (!scalar_type(t) && !size_type(m, t))
+      return refuse(&l, "a step of a family with a field that is not Nat, Amount, Flag or Size");
+    params[i] = val_is(t, OP_FLAG) ? IR_SCALAR_FLAG : IR_SCALAR_NAT;
+    args[i] = fresh(&l, operand(ex_local(&l, i)));
+    if (!got(&l, args[i]))
+      return 0;
+    env = env_push(m, env, args[i]);
+    if (env == NULL)
+      return oom(&l);
+  }
+  t = val_ctor(m, fam->first_ctor, args, c->field_count);
+  if (!got(&l, t))
+    return 0;
+  env = env_push(m, NULL, t);
+  if (env == NULL)
+    return oom(&l);
+  for (i = 0; i < s->item_count; i++)
+    if (!step_item(&l, &body, &s->items[i], s->read_count, &env))
+      return 0;
+  if (!st_return(&l, &body, 1))
+    return 0;
+  fn->name = name;
+  fn->params = params;
+  fn->param_count = c->field_count;
+  fn->result = IR_SCALAR_FLAG;
+  fn->local_count = l.local_count;
+  fn->body = block_of(&body);
+  fn->heap_words = 0;
+  fn->buffer_words = s->read_count + s->write_count;
+  fn->read_words = s->read_count;
+  fn->step_mark = 1;
+  if (!heap_block(&fn->body, &fn->heap_words) || fn->heap_words > IR_HEAP_WORDS_MAX)
+    return diag_fail(m->diag, "REFUSE_LOWER", m->def, "heap use has no static bound");
+  return 1;
+}
+
 int lower_program(Machine *m, IrProgram *prog) {
-  IrFunc *funcs = arena_alloc(m->arena, ((size_t)m->def_count + 1u) * sizeof *funcs);
+  IrFunc *funcs = arena_alloc(m->arena, ((size_t)m->def_count + (size_t)m->step_count + 1u) * sizeof *funcs);
   Entry e;
   size_t n = 0;
   uint32_t i;
   int entry;
   prog->funcs = funcs;
   prog->func_count = 0;
+  prog->custom_name = NULL;
+  prog->custom_bytes = NULL;
+  prog->custom_size = 0;
   if (funcs == NULL)
     return diag_fail(m->diag, "OOM", m->def, "out of memory");
   for (i = 0; i < m->def_count; i++) {
@@ -1424,6 +1610,225 @@ int lower_program(Machine *m, IrProgram *prog) {
       return 0;
     n += entry ? 1u : 0u;
   }
+  for (i = 0; i < m->step_count; i++) {
+    if (!lower_step(m, &m->steps[i], &funcs[n]))
+      return 0;
+    n++;
+  }
   prog->func_count = n;
+  return 1;
+}
+
+/* Returns 1 when the Ind operands X and Y are the same operand. */
+static int ind_operand_same(const IndOperand *x, const IndOperand *y) {
+  if (x->kind != y->kind) return 0;
+  if (x->name == NULL || y->name == NULL) return x->name == y->name && x->nat == y->nat;
+  return strcmp(x->name, y->name) == 0;
+}
+
+/* Returns 1 when the clauses X and Y have the same literals in the same order. */
+static int ind_clause_same(const IndClause *x, const IndClause *y) {
+  if (x->lit_count != y->lit_count) return 0;
+  for (uint32_t l = 0; l < x->lit_count; l++) {
+    if (!ind_operand_same(&x->lits[l].left, &y->lits[l].left)) return 0;
+    if (!ind_operand_same(&x->lits[l].right, &y->lits[l].right)) return 0;
+  }
+  return 1;
+}
+
+/* Returns 1 when clause C of ROW is equal to an earlier clause of ROW. */
+int ind_clause_seen(const IndRow *row, uint32_t c) {
+  for (uint32_t e = 0; e < c; e++) {
+    if (ind_clause_same(&row->clauses[e], &row->clauses[c])) return 1;
+  }
+  return 0;
+}
+
+/* The section quotient.footprint (S9 u4; the layout: Q-S9-25 (a), the
+   operand kinds: Q-S9-31 (a) and Q-S9-33 (a), the clauses: Q-S9-34 (a)).
+   FpOut counts the bytes when buf is NULL, else it also writes them. */
+typedef struct {
+  unsigned char *buf;
+  size_t len;
+} FpOut;
+
+static void fp_byte(FpOut *o, unsigned v) {
+  if (o->buf != NULL)
+    o->buf[o->len] = (unsigned char)v;
+  o->len++;
+}
+
+static void fp_uleb(FpOut *o, uint64_t v) {
+  do {
+    unsigned b = (unsigned)(v & 0x7Fu);
+    v >>= 7;
+    fp_byte(o, v != 0 ? b | 0x80u : b);
+  } while (v != 0);
+}
+
+/* A name: the byte count, then the bytes. NULL is the empty name. */
+static void fp_name(FpOut *o, const char *name) {
+  size_t n = name == NULL ? 0 : strlen(name);
+  size_t i;
+  fp_uleb(o, (uint64_t)n);
+  for (i = 0; i < n; i++)
+    fp_byte(o, (unsigned char)name[i]);
+}
+
+/* 1 when the declaration is a footprint family (the rule of ind_family in
+   check.c). */
+static int fp_family(const Decl *d) {
+  return d->kind == DECL_FAMILY && d->origin == ORIGIN_PROGRAM && d->footprint != NULL;
+}
+
+static uint64_t fp_family_count(const DeclList *decls) {
+  size_t i;
+  uint64_t n = 0;
+  for (i = 0; i < decls->count; i++)
+    n += fp_family(&decls->items[i]) ? 1u : 0u;
+  return n;
+}
+
+/* The index of the family NAME in the footprint families (declaration
+   order); the family count when no footprint family has the name. */
+static uint64_t fp_family_index(const DeclList *decls, const char *name) {
+  size_t i;
+  uint64_t k = 0;
+  for (i = 0; i < decls->count; i++) {
+    const Decl *d = &decls->items[i];
+    if (!fp_family(d))
+      continue;
+    if (name != NULL && d->name != NULL && strcmp(d->name, name) == 0)
+      return k;
+    k++;
+  }
+  return k;
+}
+
+/* A key pattern: the space name, arg_count, then each operand: 0 and the
+   field name, 1 and the numeral, or 2 and the def name. */
+static void fp_pattern(FpOut *o, const KeyPat *k) {
+  size_t i;
+  fp_name(o, k->space);
+  fp_uleb(o, (uint64_t)k->arg_count);
+  for (i = 0; i < k->arg_count; i++) {
+    const PatArg *a = &k->args[i];
+    switch (a->kind) {
+    case PAT_ARG_FIELD:
+      fp_byte(o, 0);
+      fp_name(o, a->name);
+      break;
+    case PAT_ARG_NAT:
+      fp_byte(o, 1);
+      fp_uleb(o, a->nat);
+      break;
+    case PAT_ARG_NAME:
+      fp_byte(o, 2);
+      fp_name(o, a->name);
+      break;
+    }
+  }
+}
+
+/* A literal operand: 0 and the field name of family a, 1 and the numeral,
+   2 and the def name, or 3 and the field name of family b. */
+static void fp_operand(FpOut *o, const IndOperand *x) {
+  switch (x->kind) {
+  case IND_OPD_FIELD_A:
+    fp_byte(o, 0);
+    fp_name(o, x->name);
+    break;
+  case IND_OPD_FIELD_B:
+    fp_byte(o, 3);
+    fp_name(o, x->name);
+    break;
+  case IND_OPD_CONST:
+    fp_byte(o, x->name == NULL ? 1u : 2u);
+    if (x->name == NULL)
+      fp_uleb(o, x->nat);
+    else
+      fp_name(o, x->name);
+    break;
+  }
+}
+
+/* A row: the a index, the b index, then the verdict byte: 0 (ind), 1 and
+   the space name (dep), or 2 (ind-if), clause_count and each clause that
+   `langc ind` prints: lit_count, then the left and the right operand of
+   each literal. */
+static void fp_row(FpOut *o, const DeclList *decls, const IndRow *row) {
+  uint32_t c;
+  uint32_t l;
+  uint64_t shown = 0;
+  fp_uleb(o, fp_family_index(decls, row->a));
+  fp_uleb(o, fp_family_index(decls, row->b));
+  switch (row->verdict) {
+  case IND_ALWAYS:
+    fp_byte(o, 0);
+    break;
+  case IND_DEP:
+    fp_byte(o, 1);
+    fp_name(o, row->dep_space);
+    break;
+  case IND_IF:
+    fp_byte(o, 2);
+    for (c = 0; c < row->clause_count; c++)
+      shown += ind_clause_seen(row, c) ? 0u : 1u;
+    fp_uleb(o, shown);
+    for (c = 0; c < row->clause_count; c++) {
+      const IndClause *clause = &row->clauses[c];
+      if (ind_clause_seen(row, c))
+        continue;
+      fp_uleb(o, clause->lit_count);
+      for (l = 0; l < clause->lit_count; l++) {
+        fp_operand(o, &clause->lits[l].left);
+        fp_operand(o, &clause->lits[l].right);
+      }
+    }
+    break;
+  }
+}
+
+/* The section bytes: the version byte 1, family_count and each family (its
+   name, its binder name, read_count and the reads, write_count and the
+   writes), then row_count and each row of the Ind matrix. */
+static void fp_section(FpOut *o, const Machine *m, const DeclList *decls) {
+  size_t i;
+  size_t j;
+  uint32_t r;
+  fp_byte(o, 1);
+  fp_uleb(o, fp_family_count(decls));
+  for (i = 0; i < decls->count; i++) {
+    const Decl *d = &decls->items[i];
+    const FootprintDecl *f = d->footprint;
+    if (!fp_family(d))
+      continue;
+    fp_name(o, d->name);
+    fp_name(o, f->binder);
+    fp_uleb(o, (uint64_t)f->read_count);
+    for (j = 0; j < f->read_count; j++)
+      fp_pattern(o, &f->reads[j]);
+    fp_uleb(o, (uint64_t)f->write_count);
+    for (j = 0; j < f->write_count; j++)
+      fp_pattern(o, &f->writes[j]);
+  }
+  fp_uleb(o, m->ind.row_count);
+  for (r = 0; r < m->ind.row_count; r++)
+    fp_row(o, decls, &m->ind.rows[r]);
+}
+
+int lower_footprint(Machine *m, const DeclList *decls, IrProgram *prog) {
+  FpOut o = {NULL, 0};
+  if (fp_family_count(decls) == 0)
+    return 1;
+  fp_section(&o, m, decls);
+  o.buf = arena_alloc(m->arena, o.len);
+  if (o.buf == NULL)
+    return diag_fail(m->diag, "OOM", m->def, "out of memory");
+  o.len = 0;
+  fp_section(&o, m, decls);
+  prog->custom_name = "quotient.footprint";
+  prog->custom_bytes = o.buf;
+  prog->custom_size = o.len;
   return 1;
 }

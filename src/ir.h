@@ -37,7 +37,8 @@ typedef enum {
   IR_EXPR_CONST,  /* value */
   IR_EXPR_LOCAL,  /* local */
   IR_EXPR_BINARY, /* op left right */
-  IR_EXPR_LOAD    /* word number field of the block at address left */
+  IR_EXPR_LOAD,   /* word number field of the block at address left */
+  IR_EXPR_BUFFER  /* word number field of the step buffer */
 } IrExprKind;
 
 typedef struct IrExpr IrExpr;
@@ -66,13 +67,15 @@ typedef enum {
   IR_STMT_REPEAT, /* counter := expr, then run body counter times */
   IR_STMT_WHILE,  /* counter := expr; run body while counter > 0 and local != 0,
                      counter decreasing by 1 at each run; body sets local */
-  IR_STMT_RETURN  /* return expr */
+  IR_STMT_RETURN, /* return expr */
+  IR_STMT_STORE   /* word number word of the step buffer := expr */
 } IrStmtKind;
 
 struct IrStmt {
   IrStmtKind kind;
   uint32_t local;
   uint32_t counter;
+  uint32_t word;
   const IrExpr *expr;
   const IrExpr *const *fields;
   size_t field_count;
@@ -95,11 +98,20 @@ typedef struct {
   uint32_t local_count; /* includes the parameters */
   IrBlock body;
   uint64_t heap_words; /* the ALLOC words on the longest path (S3) */
+  uint32_t buffer_words; /* a step entry: the read words plus the write words of the buffer; else 0 */
+  uint32_t read_words; /* a step entry: the read words, the first words of the buffer (Q-S9-38 (a)); else 0 */
+  int step_mark; /* 1 for a step entry, 0 for a def entry: a module with a step entry exports memory 0 */
 } IrFunc;
 
+/* The entries of a program, then its custom section. A back end writes
+   the name and the bytes of the section as they are: it does not read the
+   bytes. custom_name is NULL when the program has no custom section. */
 typedef struct {
   const IrFunc *funcs;
   size_t func_count;
+  const char *custom_name;
+  const unsigned char *custom_bytes;
+  size_t custom_size;
 } IrProgram;
 
 #endif

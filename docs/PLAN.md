@@ -17,7 +17,15 @@ file gives the readings of that request, the route, the slices and the open
 items. The USER ruled Q-R1 to Q-R8 before S0 (section 14). So sections 2 to
 5 are RULED, not proposals.
 
-Status: S8 DONE (2026-11-10): `FinMap`, `canon`, `root`, the inclusion
+Status: S9 DONE (2026-11-12): T1 part 1. `langc eval` has a step form.
+Each step body family lowers to one Wasm export `step_<Family>` with a
+static buffer at address 0 of memory 0; a module with a step exports
+`memory`. A module of a program with footprint families has the custom
+section `quotient.footprint`, and the verb `langc footprint` prints it.
+The gate runs each step export on the grid cases and on a pair row, and
+compares each result with `langc eval`. `test/notraptool.c` checks the
+footprint section, the import section and the memory count.
+S8 DONE (2026-11-10): `FinMap`, `canon`, `root`, the inclusion
 proof, `UTxO`, `Valid`, `compose`, O1, O3 and L7. S7 (2026-11-07) gave
 `Ledger` (the Nerode set quotient at a
 start state), `apply`, `query`, `[[ ]]N`, `<=` (`prefix`), `Compatible`,
@@ -35,8 +43,9 @@ L5 (section 6). S3 (2026-11-03) gave `Pfin`, `in`, `union`, the slot
 `Key`, `Footprint = Pfin Key`, REFUSE_BAG_NONCOMM at `Pfin` and L2. S2
 (2026-11-02) gave `Amount`, `Bag`, `Value`, `Balance`, `[[ ]]v`,
 `Delta`, `neg`, `Balanced`, REFUSE_OVERFLOW and REFUSE_BAG_NONCOMM at
-`Bag`, with L1 and L8, on the S1 kernel (section 8.1). Next: S9
-(section 12).
+`Bag`, with L1 and L8, on the S1 kernel (section 8.1). Next: S10 (T1
+part 2: `quotientd`: the Wasm engine, SHA-256, BLS12-381, the mempool,
+the query answers, N6; the demo E1 to E6).
 
 ## 1. Rulings
 
@@ -74,7 +83,7 @@ the result type. An abort is a value, never a trap. The step type is
 | N2 | Amounts are u64 (Q-R3 (a)). `add`, `sub` and `mul` on `Amount` return `Maybe Amount`. Overflow and underflow give `nothing`. `Delta` subtraction is total: it has no underflow (X13). | S2 |
 | N3 | A step aborts only from the values that it read (the frame law, section 5). An aborted step leaves the state as it was: `step b s = nothing` and the run keeps `s`. | S5 |
 | N4 | Recursion is structural only: the eliminators of the base types. There is no general fixpoint. | kernel, `REFUSE_PARTIAL` |
-| N5 | The Wasm writer emits no `unreachable` and no trap form, and uses static memory only. `test/notraptool.c` checks each built module (relay-lang 5c386bb, permit-lang S3). | S1, S9 |
+| N5 | The Wasm writer emits no `unreachable` and no trap form, and uses static memory only. `test/notraptool.c` checks each built module (relay-lang 5c386bb, permit-lang S3). | S1, S9 DONE |
 | N6 | The C node never gives an error to a program. Bytes that it cannot decode, a bad witness and a bad signature are values: `rejected malformed`, `rejected badWitness`, `rejected badSig`. | S10 |
 | N7 | No equality test on `Eff` or on `Blockchain`. Equality of two effects over an infinite `State` is not decidable (X6). The checker refuses the test. S6 DONE: a two-argument test on `Eff` or on `Blockchain` gives `REFUSE_EQ_UNDECIDABLE`, also through an alias (Q-S6-6 (a)); eq-eff.lang, eq-eff-alias.lang, eq-chain.lang. | S6 |
 
@@ -420,6 +429,111 @@ signature of REFUSE_SIG with the section 4 names (Q-S1-3 (a)). S2 adds
   surface), each law discharged, the assumptions O1 to O3, the
   cross-shard letter count (X20). `docs/REPORT-JSON.md`. S11.
 
+The step ABI of T1 (S9 u3 and u3b; the rulings Q-S9-1, Q-S9-2, Q-S9-7 to
+Q-S9-11, Q-S9-16, Q-S9-17 and Q-S9-21 to Q-S9-23):
+
+- The module. One Wasm module for each program, with no import. Each body
+  family has one export `step_<Family>`. Each module with a step entry
+  exports memory 0 as `memory`, and a footprint with no slot does not change
+  this export. `langc build` refuses a step module that has a definition
+  with the name `memory` (REFUSE_LOWER).
+- The call. The parameters of `step_<Family>` are the fields of the body,
+  one i64 for each field. The result is one i64 flag, 1 or 0 (N3).
+- The buffer offsets. The buffer starts at address 0 of memory 0. A word is
+  8 bytes (little-endian), and buffer word K is at byte 8K. For R `reads`
+  slots and W `writes` slots, read slot I is word I and write slot J is
+  word R + J. The host writes the read words before the call. After a
+  result of 1, the host reads the write words.
+- The value encoding. A value of the type Nat, Amount, Flag or Size is one
+  64-bit word. A Size value is an opaque word. `langc build` refuses a
+  step with an other `Val` type (REFUSE_LOWER).
+- The flag. When the result is 0, the entry stores no write word. A write
+  slot that has no `set` gets no store.
+- The heap. The heap of a step entry starts at byte 8 * (R + W), after the
+  buffer. Memory 0 has a fixed size (minimum = maximum): the pages of the
+  largest sum of the buffer words and the heap bound of an entry, at least
+  1 page. A page is 65536 bytes. The module of test/ir/step-pages.lang needs
+  2 pages (8324 heap words and 4 buffer words), and the gate compares the
+  pages of each step module with the expected number.
+- The host side (S9 u5; the rulings Q-S9-4 and Q-S9-35 to Q-S9-39). The
+  gate runs each step export with test/run-wasm.mjs. A step case is the
+  line `@N step_X F1..Fk R1..Rr`: N is the count of the buffer words of
+  the entry, k is the parameter count of the export, and the R words after
+  the fields are the reads. Before the call, the host writes read word I
+  at byte 8I of `memory` and fills each of the N - R write words with the
+  poison word 0xA5A5A5A5A5A5A5A5. After the call, it prints the form of
+  `langc eval`: the flag, then for the flag 1 each write word (`-` for a
+  poison word). The flag 0 with a changed write word prints `0 dirty`.
+  The IR text gives N and R on the `func` line of a step entry (`N buffer
+  words, R reads`, Q-S9-38), because a body can leave a read slot unread.
+  test/grid.awk makes the step cases from this line: the values 0, 1 and
+  2 for each field and each read slot (0 and 1 for a Flag field), at most
+  243 cases for each entry (Q-S9-36). The pair row runs 2 Pay steps of
+  test/ir/step.lang on 4 different accounts in the 2 orders, and the 2 end
+  states must be equal (Q-S9-37). The dirty row runs
+  test/ir/step-dirty.wat: it writes a write word and gives the flag 0, and
+  the host must print `0 dirty` (Q-S9-39). A langc module stores no write
+  word on the flag 0, so no other row reaches this compare.
+- The IR header. src/ir.h is the IR header that the tcc kits share. S9
+  adds a kit delta to it (Q-S9-30): the 2 buffer word forms of Q-S9-6 (an
+  expression that reads buffer word K, a statement that writes it), the
+  field step_mark of IrFunc (Q-S9-22), and the fields custom_name,
+  custom_bytes and custom_size of IrProgram (the custom section of u4).
+
+The footprint section of T1 (S9 u4; the rulings Q-S9-3, Q-S9-25 to
+Q-S9-28 and Q-S9-31 to Q-S9-34). The custom section `quotient.footprint`
+holds the footprints of the program and the `Ind` matrix. The section is
+binary and structured, and a host reads it with no text parser. A uleb is
+an unsigned LEB128 number. The layout (Q-S9-25):
+
+```text
+id 0, size, name "quotient.footprint"
+version: byte 1
+family_count: uleb
+  family: name, binder name
+    read_count: uleb, key patterns
+    write_count: uleb, key patterns
+  key pattern: space name, arg_count, operands
+  operand: kind byte + name or uleb numeral
+row_count: uleb
+  row: a index, b index, verdict byte
+    0 ind | 1 dep + space name
+    2 ind-if + clauses (lit_count, left, right)
+```
+
+- The rule. Each module of a program with 1 or more footprint families
+  gets the section, after the code section. A module of a program with no
+  footprint family keeps its bytes (Q-S9-27, the Q-S9-7 form).
+- The operands. The kind byte of a key pattern operand is 0 for a field, 1
+  for a Nat and 2 for a closed definition (Q-S9-31). The kind byte of an
+  operand in a literal of an ind-if row is 0 for a field of family a, 1 for
+  a Nat, 2 for a closed definition and 3 for a field of family b (Q-S9-33).
+  A Nat operand is a uleb numeral, and the other operands are a name.
+- The rows. A row gives the index of family a, the index of family b and
+  the verdict byte. An ind-if row writes the clauses that `langc ind`
+  prints (Q-S9-34).
+- The verb. `langc footprint MODULE.wasm` reads a Wasm module (no --kit)
+  and prints the section (Q-S9-26): one line for each family
+  (`NAME: footprint ...`), then the matrix rows in the form of
+  `langc ind`. A module with no section prints nothing and gives exit 0.
+  A bad module gives FOOTPRINT and exit 1. A file that the verb cannot
+  read gives IO and exit 2.
+- notraptool. test/notraptool.c accepts one custom section with the name
+  `quotient.footprint`, at each place in the module (Q-S9-3, Q-S9-32). A
+  section with an other name gives `an unknown custom section`, and a
+  second `quotient.footprint` section gives
+  `a second quotient.footprint section`. The bad rows
+  test/notrap/bad/custom-other.wat and test/notrap/bad/custom-twice.wat
+  give these 2 messages (Q-S9-28), and the bad-row loop calls
+  `wat2wasm --enable-annotations` (wabt 1.0.39).
+- The gate rows. The Wasm loop of test/gate.sh runs `langc footprint` on
+  each module and `langc ind` on its source. The row lines of
+  `langc footprint` (not the family lines) must be equal to the
+  `langc ind` text. A module with footprint output and no `langc ind`
+  text fails, and notraptool checks each module with the section. The
+  count line `footprint modules: N checked` gives the number of modules
+  with the section.
+
 ## 9. Agent adoption (A1 to A6)
 
 | Item | Request words | Plan |
@@ -473,7 +587,7 @@ One session for each slice: scope, gate, mutants, docs, close.
 | S6 | `Trace`, `swap`, `++`, `[t]`, `[[ ]]`, `Blockchain`, `D`; X4 and X10 refused; `REFUSE_EQ_UNDECIDABLE`; L4, L9. | DONE: serial gate EXIT 0 (68 examples, 28 parse refusals, 244 check refusals, 10 kit-only refusals, 170 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 70 valid Wasm modules, 2361 differential cases with 0 mismatches, 27 ind rows, 0 failures; review, domain and path regressions passed). Mutants: 16 of 16 KILLED. |
 | S7 | `Ledger`, `apply`, `query`, `[[ ]]N`, `<=`, `Compatible`, Foata normal form; L6. | DONE: serial gate EXIT 0 (74 examples, 30 parse refusals, 249 check refusals, 10 kit-only refusals, 184 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 76 valid Wasm modules, 2375 differential cases with 0 mismatches, 27 ind rows, 0 failures; review, domain and path regressions passed). The soundness proof of the Foata decider is OPEN (Q-S7-4 (a)). Mutants: 5 of 5 KILLED. |
 | S8 | `FinMap`, `canon`, `root`, inclusion proof, `UTxO`, `Valid`, `compose`; O1, O3; L7. | DONE: serial gate EXIT 0 (81 examples, 30 parse refusals, 263 check refusals, 10 kit-only refusals, 204 evals, 4 notrap modules, 7 notrap bad rows, 10 spine evals, 83 valid Wasm modules, 3516 differential cases with 0 mismatches, 27 ind rows, 0 failures). The soundness proof of the Foata decider stays OPEN (Q-S7-4 (a)). Mutants: 26 of 26 KILLED. |
-| S9 | T1 part 1: the Wasm step modules with their footprints; the notrap rows. | |
+| S9 | T1 part 1: the Wasm step modules with their footprints; the notrap rows. | DONE: serial gate EXIT 0 (81 examples, 30 parse refusals, 263 check refusals, 10 kit-only refusals, 218 evals, 8 step evals, 4 notrap modules, 11 notrap bad rows, 6 footprint bad rows, 10 spine evals, 82 valid Wasm modules, 82 notrap Wasm modules, 4 Wasm refusals, 12 step exports, 30 footprint modules, 5307 differential cases with 0 mismatches, 1791 step runs, 27 ind rows, 0 failures). Mutants: 45 of 45 KILLED. |
 | S10 | T1 part 2: `quotientd`: the Wasm engine, SHA-256, BLS12-381, the mempool, the query answers, N6; the demo E1 to E6. | |
 | S11 | T3: the JSON law report, `docs/REPORT-JSON.md`, the shard letters (X20). | |
 | S12 | A1: canonical forms and `langc fmt`. | |
@@ -780,3 +894,143 @@ recommendation (a).
   kernel does not unfold a def head at a neutral argument before
   conversion needs it. DONE (S8 u8): three kernel fixes in eval.c and
   check.c.
+- Q-S9-0: the S9 base. RULED (a) by the USER, 2026-11-10 (S9): the base
+  of S9 is the USER commit 8b0f52a (the S8 commit).
+- Q-S9-1: the step values. RULED (a) by the USER, 2026-11-10 (S9): a
+  static buffer in memory 0 holds the `reads` and `writes` values. The
+  export gives the flag 1 or 0 (N3). The module has no import.
+- Q-S9-2: the module form. RULED (a) by the USER, 2026-11-10 (S9): one
+  module for each program, with one export `step_<Family>` for each body
+  family.
+- Q-S9-3: the footprint record. RULED (a) by the USER, 2026-11-10 (S9):
+  the custom section `quotient.footprint` holds the footprints and the
+  `Ind` matrix. notraptool accepts this name, and a verb prints the
+  section.
+- Q-S9-4: the run rows. RULED (a) by the USER, 2026-11-10 (S9):
+  test/run-wasm.mjs gets the step call. The expected values come from
+  `langc eval`.
+- Q-S9-5: the step form of eval. RULED (a) by the USER, 2026-11-10 (S9):
+  `langc eval FILE step_<Family> FIELDS READS` prints the flag and the
+  write values.
+- Q-S9-6: the buffer forms of the IR. RULED (a) by the USER, 2026-11-10
+  (S9): src/ir.h gets the expression `buffer word K` and the statement
+  `buffer word K := expr`, with a static word number K. src/wasm.c gets
+  2 cases (a kit delta of the shared header).
+- Q-S9-7: the place of the buffer. RULED (a) by the USER, 2026-11-10
+  (S9): the buffer starts at address 0 of memory 0. A step entry sets
+  the heap pointer to the end of the buffer; an old entry sets it to 0.
+- Q-S9-8: the slot order. RULED (a) by the USER, 2026-11-10 (S9): reads
+  first. Read slot I is word I, and write slot J is word R + J.
+- Q-S9-9: a write with no set. RULED (a) by the USER, 2026-11-10 (S9):
+  the module stores nothing for it, and eval prints `-`.
+- Q-S9-10: a step with no code. RULED (a) by the USER, 2026-11-10 (S9):
+  REFUSE_LOWER on the module.
+- Q-S9-11: a Size value in a step. RULED (a) by the USER, 2026-11-10
+  (S9): a Size value is one opaque u64 word. A Size constructor in a
+  step is REFUSE_LOWER.
+- Q-S9-12: a module that refuses. RULED (a) by the USER, 2026-11-10
+  (S9): the module leaves the Wasm rows of the gate.
+- Q-S9-13: a Size argument of eval. RULED (a) by the USER, 2026-11-11
+  (S9): a decimal count from 0 to 65535. A larger value gives EVAL_ARGS.
+- Q-S9-14: the argument count of eval. RULED (a) by the USER, 2026-11-11
+  (S9): a wrong number of arguments of the step form gives EVAL_ARGS
+  with exit 2.
+- Q-S9-15: the u2 stand-ins. RULED (a) by the USER, 2026-11-11 (S9): the
+  stand-in mutants m2 and m3b of the u2 run stay.
+- Q-S9-16: the heap reset. RULED (a) by the USER, 2026-11-11 (S9): the
+  heap reset of a step entry is u3 work.
+- Q-S9-17: the pages of memory 0. RULED (a) by the USER, 2026-11-11
+  (S9): the largest buffer_words + heap_words of an entry gives the
+  pages (at least 1 page; the minimum is the maximum).
+- Q-S9-18: the export row. RULED (a) by the USER, 2026-11-11 (S9): each
+  step module that builds in the Wasm loop gets the wasm-objdump row.
+- Q-S9-19: the u3 run. RULED (yes) by the USER, 2026-11-11 (S9): one u3
+  gate and one u3 mutant run in one chain.
+- Q-S9-20: the offset mutants. RULED (a) by the USER, 2026-11-11 (S9): a
+  golden disassembly (test/ir/step.wasm.txt) kills the wasm.c offset
+  mutants.
+- Q-S9-21: a def with the name `memory`. RULED (a) by the USER,
+  2026-11-11 (S9): REFUSE_LOWER on a step module that has this def.
+- Q-S9-22: the memory export. RULED (a) by the USER, 2026-11-11 (S9):
+  each step module exports `memory`. The step mark is in src/ir.h (a kit
+  delta of the shared header).
+- Q-S9-23: the pages row. RULED (a) by the USER, 2026-11-11 (S9): one
+  new test/ir step module needs 2 pages. The step export row compares
+  the pages of a module with the expected number.
+- Q-S9-24: the u4 mutants. RULED (a) by the USER, 2026-11-11 (S9): 3
+  more mutants (the kind of a function export, the memory limits,
+  has_step always 1) and one module with no step entry in the mini.
+- Q-S9-25: the footprint layout. RULED (a) by the USER, 2026-11-11 (S9):
+  the layout of `quotient.footprint` is binary and structured (section
+  8.2).
+- Q-S9-26: the footprint verb. RULED (a) by the USER, 2026-11-11 (S9):
+  `langc footprint MODULE.wasm` prints the section.
+- Q-S9-27: the modules with the section. RULED (a) by the USER,
+  2026-11-11 (S9): each module of a program with 1 or more footprint
+  families gets the section. A module with no family keeps its bytes.
+- Q-S9-28: the custom bad row. RULED (a) by the USER, 2026-11-11 (S9):
+  the bad row is test/notrap/bad/custom-other.wat (`wat2wasm
+  --enable-annotations`).
+- Q-S9-29: the buffer words in the IR text. RULED (a) by the USER,
+  2026-11-11 (S9): the `func` line of each step entry gives `N buffer
+  words`.
+- Q-S9-30: the IR header item. RULED (a) by the USER, 2026-11-11 (S9):
+  section 8.2 records the kit delta of src/ir.h.
+- Q-S9-31: the kind byte of a pattern operand. RULED (a) by the USER,
+  2026-11-11 (S9): 0 a field, 1 a Nat, 2 a closed def.
+- Q-S9-32: the count of footprint sections. RULED (a) by the USER,
+  2026-11-11 (S9): notraptool accepts at most one `quotient.footprint`
+  section, at each place.
+- Q-S9-33: the kind byte of an Ind operand. RULED (a) by the USER,
+  2026-11-11 (S9): 0 a field of a, 1 a Nat, 2 a closed def, 3 a field of
+  b.
+- Q-S9-34: an ind-if row. RULED (a) by the USER, 2026-11-11 (S9): the
+  row writes the clause count, then the clauses that `langc ind` prints.
+- Q-S9-35: the case line of a step run. RULED (a) by the USER,
+  2026-11-11 (S9): `@N step_X F1..Fk R1..Rr`. The host fills each write
+  word with the poison word 0xA5A5A5A5A5A5A5A5 and prints `-` for it. A
+  flag 0 with a changed write word prints `0 dirty`.
+- Q-S9-36: the grid step cases. RULED (a) by the USER, 2026-11-11 (S9):
+  grid.awk gives the values 0, 1 and 2 for each field and read slot,
+  with a cap for each entry.
+- Q-S9-37: the pair row. RULED (a) by the USER, 2026-11-11 (S9): one row
+  on test/ir/step.lang runs 2 Pay steps on 4 accounts in each order and
+  wants equal end states.
+- Q-S9-38: the read count. RULED (a) by the USER, 2026-11-11 (S9): the
+  IR printer adds `R reads` to the `func` line of a step entry, and
+  grid.awk takes R from it.
+- Q-S9-39: the dirty row. RULED (a) by the USER, 2026-11-11 (S9): a
+  hand-written module (test/ir/step-dirty.wat) and one gate row.
+  run-wasm.mjs must print `0 dirty` for it.
+- Q-S9-40: the notrap wasm row. RULED (a) by the USER, 2026-11-11 (S9):
+  notraptool checks each valid module of the Wasm loop (the count line
+  `notrap wasm modules: N checked`).
+- Q-S9-41: 2 notraptool checks. RULED (a) by the USER, 2026-11-11 (S9):
+  an import section gives `an import`, and a memory count above 1 gives
+  `a second memory`. Each check has a bad row and a mutant.
+- Q-S9-42: the footprint checks. RULED (a) by the USER, 2026-11-11 (S9):
+  each of the 5 bad-module checks of `langc footprint` gets a bad
+  module, a gate row and a mutant.
+- Q-S9-43: the footprint bad modules. RULED (a) by the USER, 2026-11-12
+  (S9): text rows in test/footprint/bad.txt. The gate writes each module
+  with printf and wants exit 1 and FOOTPRINT.
+- Q-S9-44: the u6 names. RULED (a) by the USER, 2026-11-12 (S9): the
+  count lines `notrap wasm modules: N checked` and `footprint bad rows:
+  5 checked`. u6 removes the footprint-only notraptool call of the Wasm
+  loop.
+- Q-S9-45: the u6 mutants. RULED (a) by the USER, 2026-11-12 (S9): 8
+  mutants (the 2 notraptool checks, the 5 footprint checks and the
+  notrap wasm row).
+- Q-S9-46: the kill of the notrap wasm row mutant. RULED (a) by the
+  USER, 2026-11-12 (S9): a row script runs the row on 2 bad modules and
+  must give 2 FAIL rows.
+- Q-S9-47: the u6 docs. RULED (a) by the USER, 2026-11-12 (S9): no u6
+  docs edit. The S9 row of section 12 records u6.
+- Q-S9-48: the close mutant run. RULED (a) by the USER, 2026-11-12 (S9):
+  the union of the mutant rows of the S9 units. Each old string comes
+  again from the current text with a count check of 1.
+- Q-S9-49: the S9 docs. RULED (a) by the USER, 2026-11-12 (S9): the S8
+  form (the Status, the S9 row of section 12, N5 and these rows). The
+  section 8.2 text stays.
+- Q-S9-50: the close chain. RULED (a) by the USER, 2026-11-12 (S9): one
+  close gate, then the close mutant run only on EXIT 0 and no FAIL row.

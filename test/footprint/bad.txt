@@ -1,0 +1,6 @@
+head \000asm\002\000\000\000 is not a Wasm module
+size \000asm\001\000\000\000\001\005\000 is not a Wasm module
+name \000asm\001\000\000\000\000\001\005 is not a Wasm module
+two \000asm\001\000\000\000\000\023\022quotient.footprint\000\023\022quotient.footprint has more than one quotient.footprint section
+payload \000asm\001\000\000\000\000\024\022quotient.footprint\377 is not valid
+overflow \000asm\001\000\000\000\000\037\022quotient.footprint\001\200\200\200\200\200\200\200\200\200\002\000 is not valid
